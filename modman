@@ -15,7 +15,7 @@
 set -euo pipefail
 shopt -s extglob
 
-MODMAN_VERSION="3.1.0"
+MODMAN_VERSION="3.2.0"
 SELF="$(readlink -f "${BASH_SOURCE[0]}")"
 PROG="$(basename "$0")"
 
@@ -220,6 +220,7 @@ load_config() {
     DATA_DIR="${HOME}/nexus-mods"
     DEPLOY_METHOD="auto"; DOWNLOAD_JOBS=4; PREFERRED_CDN=""
     VIEW_ADULT=false; AUTO_DEPLOY=false; FOMOD_MODE=auto
+    AUTOUPDATE_COLLECTIONS=true; AUTOUPDATE_INTERVAL=0
     GAME_FOLDER=""; STAGING_DIR=""          # legacy (v2) keys
 
     if [[ -f "$CONFIG_FILE" ]]; then
@@ -251,7 +252,8 @@ save_config() {
         local k
         printf '%s=%q\n' NEXUS_API_KEY "${CFG_API_KEY-$NEXUS_API_KEY}" DATA_DIR "${CFG_DATA_DIR-$DATA_DIR}"
         for k in NEXUS_USER IS_PREMIUM GAME_DOMAIN DEPLOY_METHOD \
-                 DOWNLOAD_JOBS PREFERRED_CDN VIEW_ADULT AUTO_DEPLOY FOMOD_MODE; do
+                 DOWNLOAD_JOBS PREFERRED_CDN VIEW_ADULT AUTO_DEPLOY FOMOD_MODE \
+                 AUTOUPDATE_COLLECTIONS AUTOUPDATE_INTERVAL; do
             printf '%s=%q\n' "$k" "${!k}"
         done
     } > "$tmp"
@@ -3952,6 +3954,8 @@ config_var() {
         adult)         echo VIEW_ADULT ;;
         auto-deploy)   echo AUTO_DEPLOY ;;
         fomod)         echo FOMOD_MODE ;;
+        autoupdate-collections) echo AUTOUPDATE_COLLECTIONS ;;
+        autoupdate-interval)    echo AUTOUPDATE_INTERVAL ;;
         *)             return 1 ;;
     esac
 }
@@ -3960,20 +3964,23 @@ cmd_config() {
     local key="${1:-}" val="${2-}" var
     if [[ -z "$key" ]]; then
         banner "Configuration"
-        printf "  %-14s %s\n" "data-dir" "$DATA_DIR" "deploy-method" "$DEPLOY_METHOD  (auto|hardlink|symlink|copy)" \
+        printf "  %-23s %s\n" "data-dir" "$DATA_DIR" "deploy-method" "$DEPLOY_METHOD  (auto|hardlink|symlink|copy)" \
             "jobs" "$DOWNLOAD_JOBS  (parallel downloads, Premium)" "cdn" "${PREFERRED_CDN:-auto}  (preferred download server)" \
             "adult" "$VIEW_ADULT  (show adult-only collections)" "auto-deploy" "$AUTO_DEPLOY  (deploy after every change)" \
-            "fomod" "$FOMOD_MODE  (auto|ask|default — installer behaviour for single mods)"
+            "fomod" "$FOMOD_MODE  (auto|ask|default — installer behaviour for single mods)" \
+            "autoupdate-collections" "$AUTOUPDATE_COLLECTIONS  (auto-update moves collections to their newest revision)" \
+            "autoupdate-interval" "$AUTOUPDATE_INTERVAL  (hours between extra auto-update checks; 0 = only after system/game updates)"
         echo ""
         echo -e "  ${DIM}Change with: ${PROG} config <key> <value>   ·   file: ${CONFIG_FILE}${RESET}"
         return 0
     fi
-    var=$(config_var "$key") || die "Unknown setting '${key}'. Keys: data-dir deploy-method jobs cdn adult auto-deploy fomod"
+    var=$(config_var "$key") || die "Unknown setting '${key}'. Keys: data-dir deploy-method jobs cdn adult auto-deploy fomod autoupdate-collections autoupdate-interval"
     if [[ $# -lt 2 ]]; then echo "${!var}"; return 0; fi
     case "$key" in
         deploy-method) [[ "$val" =~ ^(auto|hardlink|symlink|copy)$ ]] || die "deploy-method must be auto, hardlink, symlink or copy" ;;
         jobs)          [[ "$val" =~ ^[0-9]+$ ]] && (( val >= 1 && val <= 16 )) || die "jobs must be 1-16" ;;
-        adult|auto-deploy) [[ "$val" =~ ^(true|false)$ ]] || die "${key} must be true or false" ;;
+        adult|auto-deploy|autoupdate-collections) [[ "$val" =~ ^(true|false)$ ]] || die "${key} must be true or false" ;;
+        autoupdate-interval) [[ "$val" =~ ^[0-9]+$ ]] || die "autoupdate-interval must be a number of hours (0 = off)" ;;
         fomod)         [[ "$val" =~ ^(auto|ask|default)$ ]] || die "fomod must be auto, ask or default" ;;
         data-dir)
             val="${val/#\~/$HOME}"; val="${val%/}"
@@ -4317,6 +4324,8 @@ cmd_status() {
     fi
     local h="${RED}not registered${RESET} (${PROG} nxm register)"; nxm_handler_registered && h="${GREEN}registered${RESET}"
     echo -e "  nxm:// links  : ${h}"
+    local au; au=$(autoupdate_scheduler)
+    echo -e "  Auto-update   : $( [[ -n "$au" ]] && echo "${GREEN}enabled${RESET} (${au})" || echo "${DIM}off${RESET} (${PROG} autoupdate enable)")"
 
     echo ""
     echo -e "${BOLD}Games${RESET}"
@@ -4350,6 +4359,394 @@ cmd_status() {
         warn "A modman v2 deployment still exists — remove it with: ${PROG} purge"
     fi
     echo ""
+}
+
+# ══════════════════════════════════════════════════════════
+# Auto-update: after a system (OS) update or a Steam update of a
+# game, install mod updates and redeploy every deployed game.
+#
+# A small check runs at boot and hourly (systemd user timer; cron or
+# login autostart where systemd is unavailable). It only acts when a
+# fingerprint changed, so most runs exit after a few stat() calls:
+#   system — os-release build ids + package database timestamps
+#            (pacman, rpm, dpkg, apk, xbps, portage, nix, ostree, SteamOS)
+#   game   — Steam buildid from appmanifest_<appid>.acf
+# State per game: <data>/<game>/autoupdate.json
+# ══════════════════════════════════════════════════════════
+AU_UNIT="modman-autoupdate"
+AU_SETTLE=300        # wait until the package database has been quiet this long (s)
+AU_RETRY=10800       # after a failed run, try again at most every 3 h
+
+au_systemd_dir()   { printf '%s' "${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user"; }
+au_autostart_file() { printf '%s' "${XDG_CONFIG_HOME:-${HOME}/.config}/autostart/${AU_UNIT}.desktop"; }
+au_self()          { readlink -f -- "${BASH_SOURCE[0]}"; }
+au_has_systemd()   { have systemctl && systemctl --user show-environment >/dev/null 2>&1; }
+
+# Paths whose change means "the system was updated".
+au_system_paths() {
+    local p
+    for p in /etc/os-release /usr/lib/os-release \
+             /var/lib/pacman/local /var/lib/rpm /usr/lib/sysimage/rpm /var/lib/dpkg/status \
+             /lib/apk/db/installed /var/db/xbps /var/db/pkg /nix/var/nix/profiles/system \
+             /run/current-system /ostree/deploy/*/deploy /etc/steamos-release /usr/lib/steamos-release; do
+        [[ -e "$p" ]] && printf '%s\n' "$p"
+    done
+    return 0
+}
+
+# Newest change of a file, or of a folder's direct entries. Lock and shared-memory
+# files are ignored: they change on every read of the database.
+au_path_mtime() {
+    find -L "$1" -maxdepth 1 ! -name '*-shm' ! -name '*.lock' ! -name '*.lck' ! -name 'lock' ! -name 'lock-frontend' \
+        -printf '%T@\n' 2>/dev/null | sort -n | tail -1 | cut -d. -f1
+}
+
+# au_system_fp → prints "<fingerprint> <newest-change-epoch>"
+au_system_fp() {
+    local p ids="" stamps="" newest=0 mt
+    for p in /etc/os-release /usr/lib/os-release; do
+        [[ -f "$p" ]] && ids+=$(grep -E '^(ID|VERSION_ID|BUILD_ID|IMAGE_ID|IMAGE_VERSION|VARIANT_ID)=' "$p" 2>/dev/null | sort | tr '\n' ' ')
+    done
+    while IFS= read -r p; do
+        mt=$(au_path_mtime "$p"); [[ -n "$mt" ]] || continue
+        stamps+="${p}=${mt} "
+        (( mt > newest )) && newest=$mt
+    done < <(au_system_paths)
+    [[ -L /run/current-system ]] && stamps+="nixos=$(readlink /run/current-system) "
+    printf '%s %s\n' "$(printf '%s|%s|%s' "$ids" "$stamps" "$(uname -r)" | md5sum | cut -c1-16)" "$newest"
+}
+
+au_package_manager_busy() {
+    [[ -e /var/lib/pacman/db.lck ]] && return 0
+    pgrep -x 'pacman|dnf|dnf5|yum|apt|apt-get|dpkg|zypper|rpm-ostree|apk|xbps-install|emerge|steamos-atomupd-client|rauc' >/dev/null 2>&1
+}
+
+# Steam's view of the game: "<buildid> <StateFlags>" (empty if not a Steam game)
+au_steam_state() {
+    local appid="${G_APPID:-}" lib acf
+    [[ -n "$appid" ]] || return 0
+    while IFS= read -r lib; do
+        acf="${lib}/steamapps/appmanifest_${appid}.acf"
+        [[ -f "$acf" ]] || continue
+        printf '%s %s\n' "$(sed -n 's/^[[:space:]]*"buildid"[[:space:]]*"\([0-9]*\)".*/\1/p' "$acf" | head -1)" \
+                         "$(sed -n 's/^[[:space:]]*"StateFlags"[[:space:]]*"\([0-9]*\)".*/\1/p' "$acf" | head -1)"
+        return 0
+    done < <(steam_libraries)
+    return 0
+}
+
+# Is the game running? Proton/Steam processes carry AppId=<id> or the game path.
+au_game_running() {
+    # patterns are passed through a file so grep never matches its own command line
+    [[ -n "${G_APPID:-}" ]] && grep -qsaxzF -f <(printf 'AppId=%s\n' "$G_APPID") /proc/[0-9]*/cmdline && return 0
+    [[ -n "$G_FOLDER" ]] && grep -qsazF -f <(printf '%s/\n%s\\\n' "$G_FOLDER" "${G_FOLDER//\//\\}") /proc/[0-9]*/cmdline && return 0
+    return 1
+}
+
+au_state_get() { jq -r --arg k "$1" '.[$k] // empty' "${GDATA}/autoupdate.json" 2>/dev/null || true; }
+au_state_set() {   # au_state_set key value [key value...]
+    local f="${GDATA}/autoupdate.json"
+    [[ -s "$f" ]] || echo '{}' > "$f"
+    jq '. + ($ARGS.positional as $a | [range(0; $a | length; 2) | {($a[.]): $a[. + 1]}] | add)' "$f" --args "$@" \
+        > "${f}.tmp" && mv -f -- "${f}.tmp" "$f"
+}
+
+# autoupdate run [--force] [--dry-run] — the scheduled job
+autoupdate_run() {
+    local force=0 dry=0
+    while (( $# )); do
+        case "$1" in
+            --force|-f)   force=1 ;;
+            --dry-run|-n) dry=1 ;;
+            *)            die "Unknown option for autoupdate run: $1" ;;
+        esac
+        shift
+    done
+    exec 7>"${CONFIG_DIR}/autoupdate.lock"
+    flock -n 7 || { debug "auto-update already running"; return 0; }
+
+    local sys newest nowts
+    read -r sys newest < <(au_system_fp)
+    nowts=$(now)
+    if (( ! force )) && { au_package_manager_busy || (( nowts - newest < AU_SETTLE )); }; then
+        _log INFO "auto-update: system is being updated — checking again later"
+        return 0
+    fi
+
+    local d acted=0 failed=0 summary=()
+    while IFS= read -r d; do
+        [[ -n "$d" ]] || continue
+        local res
+        # each game in its own subshell: one failing game must not stop the others
+        local rc=0
+        res=$( (autoupdate_game "$d" "$sys" "$force" "$dry") ) || rc=$?
+        [[ -n "$res" || "$rc" == 0 ]] || res="${d}: auto-update failed — see: ${PROG} log"
+        case "$rc" in
+            0) ;;
+            10) acted=$(( acted + 1 )); summary+=("$res") ;;
+            *)  failed=$(( failed + 1 )); summary+=("$res") ;;
+        esac
+    done < <(list_game_domains)
+    if (( acted + failed == 0 )); then
+        (( force )) && info "Nothing to do."
+        return 0
+    fi
+    local msg; msg=$(printf '%s\n' "${summary[@]}")
+    echo ""
+    echo -e "${BOLD}Auto-update summary${RESET}"
+    printf '%s\n' "${summary[@]}" | sed 's/^/  /'
+    (( dry )) || notify "$msg"
+    (( failed == 0 ))
+}
+
+# Runs in a subshell. Last stdout line = summary. Exit: 0 nothing done, 10 updated, 1 failed.
+autoupdate_game() {
+    local d="$1" sys="$2" force="$3" dry="$4"
+    exec 3>&1 1>&2            # progress → stderr (journal); only the summary goes to stdout
+    FORCE_GAME="$d"; ASSUME_YES=1; AUTO_DEPLOY=false
+    load_game "$d"
+    deployment_active || return 0
+
+    local build="" flags="" reasons=() last_ok last_try interval
+    read -r build flags < <(au_steam_state) || true
+    last_ok=$(au_state_get ok_at); last_try=$(au_state_get tried_at)
+    [[ "$(au_state_get system)" != "$sys" ]] && reasons+=("system updated")
+    [[ -n "$build" && "$(au_state_get build)" != "$build" ]] && reasons+=("game updated (build ${build})")
+    interval="${AUTOUPDATE_INTERVAL:-0}"
+    if [[ "$interval" =~ ^[0-9]+$ ]] && (( interval > 0 )) && (( $(now) - ${last_ok:-0} >= interval * 3600 )); then
+        reasons+=("scheduled check")
+    fi
+    if [[ -z "$last_ok" && -z "$(au_state_get system)" ]] && (( ! force )); then
+        # first run after enabling: remember the current state instead of acting on it
+        (( dry )) || au_state_set system "$sys" build "$build" ok_at "$(now)"
+        return 0
+    fi
+    (( force )) && reasons+=("forced")
+    (( ${#reasons[@]} )) || return 0
+    if (( ! force )) && [[ -n "$last_try" ]] && (( $(now) - last_try < AU_RETRY )) && [[ "$(au_state_get failed)" == 1 ]]; then
+        return 0          # failed recently — wait before hammering again
+    fi
+
+    local why; why=$(IFS=,; echo "${reasons[*]}"); why="${why//,/, }"
+    if [[ -z "$G_FOLDER" || ! -d "$G_FOLDER" ]]; then
+        _log WARN "auto-update ${d}: game folder not available (${G_FOLDER:-unset}) — will retry"; return 0
+    fi
+    if [[ -n "$flags" && "$flags" != 4 ]]; then
+        _log INFO "auto-update ${d}: Steam is still updating the game (StateFlags ${flags}) — will retry"; return 0
+    fi
+    if au_game_running; then
+        _log INFO "auto-update ${d}: ${G_NAME} is running — will retry"; return 0
+    fi
+
+    banner "Auto-update — ${G_NAME}"
+    info "Reason: ${why}"
+    if (( dry )); then
+        info "Dry run: would install mod updates$( [[ "$AUTOUPDATE_COLLECTIONS" == true ]] && echo ", update collections") and redeploy."
+        echo "${G_NAME}: would update and redeploy (${why})" >&3
+        return 10
+    fi
+    (( force )) || au_state_set tried_at "$(now)"
+
+    local errs=() before after n_upd=0 cols=()
+    before=$(jq -c '[.mods[] | [.id, .fileId]]' "$DB_FILE")
+    if [[ -n "$NEXUS_API_KEY" ]]; then
+        [[ -n "$IS_PREMIUM" ]] || refresh_account >/dev/null 2>&1 || true
+        if [[ "$IS_PREMIUM" == true ]]; then
+            if [[ "$AUTOUPDATE_COLLECTIONS" == true ]]; then
+                mapfile -t cols < <(jq -r '.collections | keys[]' "$DB_FILE")
+                local slug
+                for slug in "${cols[@]}"; do
+                    ( collection_update "$slug" --optional none ) || errs+=("collection ${slug}")
+                done
+            fi
+            ( cmd_updates --install ) || errs+=("mod updates")
+        else
+            # free accounts cannot download without a click on the website
+            ( cmd_updates ) || true
+        fi
+    fi
+    after=$(jq -c '[.mods[] | [.id, .fileId]]' "$DB_FILE")
+    [[ "$before" != "$after" ]] && n_upd=$(jq -n --argjson a "$before" --argjson b "$after" '($b - $a) | length')
+
+    ( cmd_deploy ) || errs+=("deploy")
+
+    if (( ${#errs[@]} )); then
+        au_state_set failed 1
+        echo "${G_NAME}: auto-update had problems (${errs[*]}) — see: ${PROG} log" >&3
+        return 1
+    fi
+    au_state_set system "$sys" build "$build" ok_at "$(now)" failed 0
+    if (( n_upd )); then
+        echo "${G_NAME}: ${n_upd} mod(s) updated and redeployed (${why})" >&3
+    else
+        echo "${G_NAME}: mods redeployed (${why})" >&3
+    fi
+    return 10
+}
+
+autoupdate_enable() {
+    local self env_lines="" pathv sched=""
+    while (( $# )); do
+        case "$1" in
+            --scheduler) sched="${2:-}"; shift ;;
+            *)           die "Usage: ${PROG} autoupdate enable [--scheduler systemd|cron|autostart]" ;;
+        esac
+        shift
+    done
+    if [[ -z "$sched" ]]; then
+        if au_has_systemd; then sched=systemd; elif have crontab; then sched=cron; else sched=autostart; fi
+    fi
+    case "$sched" in
+        systemd)   au_has_systemd || die "systemd user services are not available here." ;;
+        cron)      have crontab || die "crontab is not installed." ;;
+        autostart) ;;
+        *)         die "--scheduler must be systemd, cron or autostart" ;;
+    esac
+    self=$(au_self)
+    pathv="${HOME}/.local/bin:${HOME}/bin:/usr/local/bin:/usr/bin:/bin"
+    [[ -d "${HOME}/.nix-profile/bin" ]] && pathv="${HOME}/.nix-profile/bin:${pathv}"
+    [[ -n "${MODMAN_CONFIG_DIR:-}" ]] && env_lines+="Environment=MODMAN_CONFIG_DIR=${MODMAN_CONFIG_DIR}"$'\n'
+    [[ -n "${MODMAN_DATA_DIR:-}" ]] && env_lines+="Environment=MODMAN_DATA_DIR=${MODMAN_DATA_DIR}"$'\n'
+    [[ "$self" == /tmp/* ]] && warn "modman runs from ${self} — move it somewhere permanent first, the job will call this path."
+
+    autoupdate_remove quiet
+    if [[ "$sched" == systemd ]]; then
+        local dir; dir=$(au_systemd_dir); mkdir -p "$dir"
+        cat > "${dir}/${AU_UNIT}.service" <<EOF
+[Unit]
+Description=modman: update and redeploy mods after system or game updates
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=PATH=${pathv}
+${env_lines}ExecStart="${self}" --no-color -y autoupdate run
+Nice=10
+IOSchedulingClass=idle
+EOF
+        cat > "${dir}/${AU_UNIT}.timer" <<EOF
+[Unit]
+Description=modman: check hourly for system or game updates
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=1h
+RandomizedDelaySec=2min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+        systemctl --user daemon-reload
+        systemctl --user enable --now "${AU_UNIT}.timer" >/dev/null 2>&1 || die "Could not enable ${AU_UNIT}.timer"
+        success "Auto-update enabled (systemd user timer: at boot and hourly)."
+        if have loginctl && [[ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null)" != yes ]]; then
+            echo -e "  ${DIM}Runs while you are logged in (always the case on a Steam Deck).${RESET}"
+        fi
+    elif [[ "$sched" == cron ]]; then
+        local envs="PATH=${pathv}"
+        [[ -n "${MODMAN_CONFIG_DIR:-}" ]] && envs+=" MODMAN_CONFIG_DIR=$(printf %q "$MODMAN_CONFIG_DIR")"
+        [[ -n "${MODMAN_DATA_DIR:-}" ]] && envs+=" MODMAN_DATA_DIR=$(printf %q "$MODMAN_DATA_DIR")"
+        local job="${envs} $(printf %q "$self") --no-color -y autoupdate run >/dev/null 2>&1"
+        { crontab -l 2>/dev/null | grep -v "# ${AU_UNIT}\$" || true
+          echo "@reboot sleep 180; ${job} # ${AU_UNIT}"
+          echo "$(( RANDOM % 60 )) * * * * ${job} # ${AU_UNIT}"; } | crontab -
+        success "Auto-update enabled (cron: at boot and hourly)."
+    else
+        local f; f=$(au_autostart_file); mkdir -p "${f%/*}"
+        local envs=""
+        [[ -n "${MODMAN_CONFIG_DIR:-}" ]] && envs+="MODMAN_CONFIG_DIR=$(printf %q "$MODMAN_CONFIG_DIR") "
+        [[ -n "${MODMAN_DATA_DIR:-}" ]] && envs+="MODMAN_DATA_DIR=$(printf %q "$MODMAN_DATA_DIR") "
+        cat > "$f" <<EOF
+[Desktop Entry]
+Type=Application
+Name=modman auto-update
+Comment=Update and redeploy mods after system or game updates
+Exec=sh -c 'sleep 120; ${envs}"${self}" --no-color -y autoupdate run'
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+        success "Auto-update enabled (runs at each desktop login)."
+    fi
+    # record the current state so the first run does not redeploy for no reason
+    ( autoupdate_run >/dev/null 2>&1 ) || true
+    info "Triggers: system updates, Steam game updates$( (( ${AUTOUPDATE_INTERVAL:-0} > 0 )) && echo ", every ${AUTOUPDATE_INTERVAL} h")."
+    info "Collections follow their newest revision: ${AUTOUPDATE_COLLECTIONS}  (${PROG} config autoupdate-collections true|false)"
+}
+
+autoupdate_remove() {   # autoupdate_remove [quiet]
+    local any=0 dir f
+    dir=$(au_systemd_dir)
+    if [[ -f "${dir}/${AU_UNIT}.timer" || -f "${dir}/${AU_UNIT}.service" ]]; then
+        if au_has_systemd; then systemctl --user disable --now "${AU_UNIT}.timer" >/dev/null 2>&1 || true; fi
+        rm -f -- "${dir}/${AU_UNIT}.timer" "${dir}/${AU_UNIT}.service"
+        au_has_systemd && systemctl --user daemon-reload 2>/dev/null || true
+        any=1
+    fi
+    if have crontab && crontab -l 2>/dev/null | grep -q "# ${AU_UNIT}\$"; then
+        local rest; rest=$(crontab -l 2>/dev/null | grep -v "# ${AU_UNIT}\$" || true)
+        if [[ -n "${rest//[[:space:]]/}" ]]; then printf '%s\n' "$rest" | crontab -; else crontab -r 2>/dev/null || true; fi
+        any=1
+    fi
+    f=$(au_autostart_file)
+    [[ -f "$f" ]] && { rm -f -- "$f"; any=1; }
+    [[ "${1:-}" == quiet ]] && return 0
+    if (( any )); then success "Auto-update disabled."; else info "Auto-update was not enabled."; fi
+}
+
+autoupdate_scheduler() {   # prints how the job is scheduled (empty = disabled)
+    [[ -f "$(au_systemd_dir)/${AU_UNIT}.timer" ]] && { echo systemd; return; }
+    have crontab && crontab -l 2>/dev/null | grep -q "# ${AU_UNIT}\$" && { echo cron; return; }
+    [[ -f "$(au_autostart_file)" ]] && { echo autostart; return; }
+    return 0
+}
+
+autoupdate_status() {
+    banner "Auto-update"
+    local sched; sched=$(autoupdate_scheduler)
+    case "$sched" in
+        systemd)
+            local next state
+            state=$(systemctl --user is-active "${AU_UNIT}.timer" 2>/dev/null || true)
+            next=$(systemctl --user show "${AU_UNIT}.timer" -p NextElapseUSecRealtime --value 2>/dev/null || true)
+            echo -e "  Scheduler : ${GREEN}systemd user timer${RESET} (${state:-unknown})${next:+, next check ${next}}" ;;
+        cron)      echo -e "  Scheduler : ${GREEN}cron${RESET} (at boot and hourly)" ;;
+        autostart) echo -e "  Scheduler : ${GREEN}login autostart${RESET} ($(au_autostart_file))" ;;
+        *)         echo -e "  Scheduler : ${YELLOW}disabled${RESET} — enable with: ${PROG} autoupdate enable" ;;
+    esac
+    echo -e "  Collections follow newest revision : ${AUTOUPDATE_COLLECTIONS}"
+    echo -e "  Extra check interval               : $( (( ${AUTOUPDATE_INTERVAL:-0} > 0 )) && echo "${AUTOUPDATE_INTERVAL} h" || echo "off (only after system/game updates)")"
+    local sys newest; read -r sys newest < <(au_system_fp)
+    echo -e "  Last system change                 : $(fmt_date "$newest")"
+    echo ""
+    local d any=0
+    while IFS= read -r d; do
+        [[ -n "$d" ]] || continue
+        ( load_game "$d"
+          deployment_active || exit 0
+          local build flags pending=()
+          read -r build flags < <(au_steam_state) || true
+          [[ "$(au_state_get system)" != "$sys" ]] && pending+=("system updated")
+          [[ -n "$build" && "$(au_state_get build)" != "$build" ]] && pending+=("game updated")
+          local ok; ok=$(au_state_get ok_at)
+          echo -e "  ${BOLD}${G_NAME}${RESET} ${DIM}(${d})${RESET}"
+          echo -e "      Last auto-update : $( [[ -n "$ok" ]] && fmt_date "$ok" || echo never)$( [[ "$(au_state_get failed)" == 1 ]] && echo "  ${RED}(last attempt failed)${RESET}")"
+          echo -e "      Steam build      : ${build:-—}"
+          if (( ${#pending[@]} )); then echo -e "      Pending          : ${YELLOW}$(IFS=,; echo "${pending[*]}")${RESET}"; fi
+        ) && any=1
+    done < <(list_game_domains)
+    echo -e "  ${DIM}Run it now: ${PROG} autoupdate run --force   ·   history: ${PROG} log${RESET}"
+}
+
+cmd_autoupdate() {
+    local sub="${1:-status}"; shift || true
+    case "$sub" in
+        enable|on)        autoupdate_enable "$@" ;;
+        disable|off)      autoupdate_remove ;;
+        status)           autoupdate_status ;;
+        run)              autoupdate_run "$@" ;;
+        *) die "Usage: ${PROG} autoupdate enable | disable | status | run [--force] [--dry-run]" ;;
+    esac
 }
 
 # ══════════════════════════════════════════════════════════
@@ -4408,6 +4805,9 @@ usage() {
         "status"                           "Account, games, deployment state" \
         "launch"                           "Start the game through Steam (offers to deploy first)" \
         "clean"                            "Delete unused downloads and temp files" \
+        "autoupdate enable | disable"      "Update mods + redeploy after system or Steam game updates" \
+        "   --scheduler <type>"            "systemd (default), cron or autostart — how the hourly check runs" \
+        "autoupdate status | run [--force]" "Show auto-update state / run it now" \
         "log [-f] [lines]"                 "Show the log"
     echo ""
     echo -e "${BOLD}Mod references${RESET}  #12 (position) · full id · exact name · Nexus mod id · unique part of the name"
@@ -4494,6 +4894,7 @@ main() {
         clean)                       cmd_clean "$@" ;;
         log|logs)                    cmd_log "$@" ;;
         nxm)                         cmd_nxm "$@" ;;
+        autoupdate|auto-update|au)   cmd_autoupdate "$@" ;;
         nxm://*)                     cmd_nxm "$cmd" ;;
         *)
             error "Unknown command: '${cmd}'"
