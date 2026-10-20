@@ -3486,11 +3486,12 @@ cmd_info() {
 # COMMAND: deps [mod] [--refresh] | deps ack|unack <name>
 # ══════════════════════════════════════════════════════════
 cmd_deps() {
-    local refresh="" ref="" sub=""
+    local refresh="" ref="" sub="" json=0
     case "${1:-}" in ack|unack) sub="$1"; shift ;; esac
     while (( $# )); do
         case "$1" in
             --refresh|-r) refresh=--refresh ;;
+            --json)       json=1 ;;
             -*)           die "Unknown option for deps: $1" ;;
             *)            ref="${ref:+$ref }$1" ;;
         esac
@@ -3537,6 +3538,15 @@ cmd_deps() {
         banner "Requirements — $(jq -r '.name' <<< "$rec")"
         deps_fetch ${refresh} "$modid"
         deps_report full "$(deps_scope_json "$id")" "Requirements"
+        return 0
+    fi
+    if (( json )); then
+        mapfile -t ids < <(jq -r '.mods[] | select(.enabled and .modId != null) | .modId' "$DB_FILE")
+        (( ${#ids[@]} )) && deps_fetch ${refresh} "${ids[@]}" >/dev/null 2>&1
+        local acks; acks=$(cat "$ack_f" 2>/dev/null || echo '[]')
+        deps_rows "$(deps_scope_json)" | jq -R -s -c --argjson acks "$acks" 'split("\n") | map(select(length > 0) | split("\u001f")
+            | {status: .[0], key: .[1], name: .[2], hint: .[3], urls: (.[4] | split(" ") | map(select(length > 0))),
+               by: (.[5] | split("; ") | map(select(length > 0))), detail: .[6], acked: (.[1] as $k | $acks | index($k) != null)})'
         return 0
     fi
     banner "Requirements — ${G_NAME}"
@@ -3803,6 +3813,8 @@ cmd_updates() {
 # COMMAND: search <text>
 # ══════════════════════════════════════════════════════════
 cmd_search() {
+    local json=0
+    [[ "${1:-}" == --json ]] && { json=1; shift; }
     local q="$*"
     [[ -n "$q" ]] || die "Usage: ${PROG} search <text>"
     need_game
@@ -3811,8 +3823,13 @@ cmd_search() {
     data=$(gql_query 'query($d: String!, $q: String!) {
         mods(filter: {gameDomainName: [{value: $d, op: EQUALS}], nameStemmed: [{value: $q, op: MATCHES}]},
              sort: [{relevance: {direction: DESC}}], count: 25) {
-          totalCount nodes { modId name author version summary downloads endorsements } } }' "$vars") \
+          totalCount nodes { modId name author version summary downloads endorsements thumbnailUrl category updatedAt } } }' "$vars") \
         || die "Search failed: $(api_error_msg "$data")"
+    if (( json )); then
+        jq -c --slurpfile db "$DB_FILE" '($db[0].mods | map(.modId // empty | tostring)) as $inst
+            | {total: .mods.totalCount, mods: [.mods.nodes[] | . + {installed: ((.modId | tostring) as $m | $inst | index($m) != null)}]}' <<< "$data"
+        return 0
+    fi
     banner "Search — \"${q}\" (${G_NAME})"
     local -A INST=()
     local m id name author ver summary dls ends
@@ -4752,6 +4769,124 @@ cmd_autoupdate() {
 }
 
 # ══════════════════════════════════════════════════════════
+# Web UI: `modman ui` serves web/dist through web/server.py (Python stdlib).
+# The UI runs modman commands; ui-state / ui-detect give it JSON.
+# ══════════════════════════════════════════════════════════
+ui_game_json() {   # one game's summary (call after load_game)
+    local stamp files=0 changed=false folder_ok=false au='{}'
+    stamp=$(cat "${GDATA}/deployed.stamp" 2>/dev/null || true)
+    [[ -s "$MANIFEST" ]] && files=$(grep -c . "$MANIFEST" || true)
+    [[ -n "$stamp" && "$DB_FILE" -nt "${GDATA}/deployed.stamp" ]] && changed=true
+    [[ -n "$G_FOLDER" && -d "$G_FOLDER" ]] && folder_ok=true
+    [[ -s "${GDATA}/autoupdate.json" ]] && au=$(cat "${GDATA}/autoupdate.json")
+    jq -c --arg domain "$G_DOMAIN" --arg name "$G_NAME" --arg folder "$G_FOLDER" --argjson folderOk "$folder_ok" \
+        --arg profile "$G_PROFILE" --arg appid "$G_APPID" --arg method "${G_METHOD:-}" --arg subdir "$G_SUBDIR" \
+        --arg plugins "${G_PLUGINS:-}" --arg stamp "$stamp" --argjson files "${files:-0}" --argjson changed "$changed" \
+        --argjson deployed "$(deployment_active && echo true || echo false)" --argjson au "$au" --arg data "$GDATA" '{
+            domain: $domain, name: $name, folder: $folder, folderExists: $folderOk, profile: $profile, appid: $appid,
+            method: $method, subdir: $subdir, pluginsFile: $plugins, dataDir: $data,
+            mods: (.mods | length), enabled: ([.mods[] | select(.enabled)] | length),
+            collections: (.collections | length), size: ([.mods[].size // 0] | add // 0),
+            deployed: $deployed, deployedAt: (if $stamp == "" then null else ($stamp | tonumber) end),
+            files: $files, changedSinceDeploy: $changed,
+            autoupdate: {lastOk: ($au.ok_at // null | if . then tonumber else null end),
+                         failed: (($au.failed // "0") == "1"), build: ($au.build // null)}}' "$DB_FILE"
+}
+
+cmd_ui_state() {
+    local sel="${FORCE_GAME:-$GAME_DOMAIN}" d games="[]" detail='{"mods": [], "collections": []}'
+    local -a list=()
+    mapfile -t list < <(list_game_domains)
+    if [[ -n "$sel" ]] && ! game_exists "$sel"; then sel=""; fi
+    [[ -z "$sel" && ${#list[@]} -gt 0 ]] && sel="${list[0]}"
+    for d in "${list[@]}"; do
+        [[ -n "$d" ]] || continue
+        games=$(jq -c --argjson g "$( (load_game "$d"; ui_game_json) )" '. + [$g]' <<< "$games")
+    done
+    if [[ -n "$sel" ]]; then
+        detail=$( (load_game "$sel"
+            jq -c --arg site "$SITE_URL" --arg dom "$sel" '. as $db | {
+                mods: [.mods | to_entries[] | .value + {position: (.key + 1)}],
+                collections: [.collections[] | . as $c | $c + {
+                    url: "\($site)/games/\($dom)/collections/\($c.slug)",
+                    installedMods: ([$db.mods[] | select((.collections // []) | index($c.slug))] | length),
+                    enabledMods: ([$db.mods[] | select(((.collections // []) | index($c.slug)) and .enabled)] | length)}]}' "$DB_FILE") )
+    fi
+    local nxm=false; nxm_handler_registered && nxm=true
+    jq -n --arg version "$MODMAN_VERSION" --arg user "$NEXUS_USER" --arg premium "$IS_PREMIUM" \
+        --argjson loggedIn "$( [[ -n "$NEXUS_API_KEY" ]] && echo true || echo false)" \
+        --arg active "$GAME_DOMAIN" --arg sel "$sel" --argjson games "$games" --argjson detail "$detail" \
+        --arg method "$DEPLOY_METHOD" --arg jobs "$DOWNLOAD_JOBS" --arg autoDeploy "$AUTO_DEPLOY" --arg fomod "$FOMOD_MODE" \
+        --arg auCol "$AUTOUPDATE_COLLECTIONS" --arg auInt "$AUTOUPDATE_INTERVAL" --arg adult "$VIEW_ADULT" \
+        --arg sched "$(autoupdate_scheduler)" --argjson nxm "$nxm" --arg dataDir "$DATA_DIR" --arg configDir "$CONFIG_DIR" \
+        --arg site "$SITE_URL" --arg profiles "$KNOWN_PROFILES" '{
+            version: $version, site: $site, dataDir: $dataDir, configDir: $configDir,
+            account: {loggedIn: $loggedIn, user: $user, premium: ($premium == "true")},
+            config: {deployMethod: $method, downloadJobs: ($jobs | tonumber? // 4), autoDeploy: ($autoDeploy == "true"),
+                     fomod: $fomod, autoupdateCollections: ($auCol == "true"), autoupdateInterval: ($auInt | tonumber? // 0),
+                     viewAdult: ($adult == "true")},
+            autoupdate: {scheduler: (if $sched == "" then null else $sched end)},
+            nxmRegistered: $nxm, profiles: ($profiles | split(" ")),
+            activeGame: $active, selectedGame: (if $sel == "" then null else $sel end),
+            games: $games} + $detail'
+}
+
+cmd_ui_detect() {   # supported games installed through Steam, as JSON
+    local d preset name appid dir out="[]"
+    for d in cyberpunk2077 skyrimspecialedition enderalspecialedition skyrim fallout4 starfield newvegas fallout3 \
+             oblivion morrowind stardewvalley mountandblade2bannerlord witcher3 valheim outward schedule1 palworld \
+             clairobscurexpedition33 oblivionremastered eldenring control hades2 warhammer40000spacemarine2 monsterhunterwilds; do
+        preset=$(game_preset "$d"); IFS='|' read -r name appid _ <<< "$preset"
+        dir=$(steam_app_dir "$appid" 2>/dev/null || true)
+        [[ -n "$dir" ]] || continue
+        out=$(jq -c --arg d "$d" --arg n "$name" --arg p "$dir" --argjson c "$(game_exists "$d" && echo true || echo false)" \
+            '. + [{domain: $d, name: $n, folder: $p, configured: $c}]' <<< "$out")
+    done
+    printf '%s\n' "$out"
+}
+
+cmd_ui_thumbs() {   # {modId: thumbnail URL} for installed Nexus mods (cached in cache/thumbs.json)
+    need_game
+    local cf="${CACHE_DIR}/thumbs.json" res i
+    [[ -s "$cf" ]] || echo '{}' > "$cf"
+    local -a missing=()
+    mapfile -t missing < <(jq -r --slurpfile c "$cf" '[.mods[].modId // empty | tostring] | unique[] | select($c[0][.] == null)' "$DB_FILE")
+    if (( ${#missing[@]} )) && [[ -n "$NEXUS_API_KEY" ]]; then
+        for (( i = 0; i < ${#missing[@]}; i += 40 )); do
+            res=$(gql_mod_batch 'thumbnailUrl pictureUrl' "${missing[@]:i:40}" 2>/dev/null) || continue
+            jq --argjson d "$res" '. + ($d | map_values(if . == null then "" else (.thumbnailUrl // .pictureUrl // "") end))' "$cf" \
+                > "${cf}.tmp" && mv -f -- "${cf}.tmp" "$cf"
+        done
+    fi
+    jq -c 'with_entries(select(.value != ""))' "$cf"
+}
+
+cmd_ui() {
+    local self dir
+    self=$(au_self); dir="${self%/*}/web"
+    if [[ "${1:-}" == desktop ]]; then
+        local f="${XDG_DATA_HOME:-${HOME}/.local/share}/applications/modman.desktop"
+        mkdir -p "${f%/*}"
+        cat > "$f" <<EOF
+[Desktop Entry]
+Type=Application
+Name=modman
+Comment=Nexus Mods manager
+Exec="${self}" ui
+Icon=applications-games
+Terminal=false
+Categories=Game;Utility;
+EOF
+        success "Added modman to the application menu (${f})."
+        info "Steam Deck: in Desktop Mode, add it to Steam with \"Add a Non-Steam Game\" to open it from Game Mode."
+        return 0
+    fi
+    [[ -f "${dir}/dist/index.html" && -f "${dir}/server.py" ]] \
+        || die "The web UI is not built. Build it once with: cd '${dir}' && npm install && npm run build"
+    exec python3 -I "${dir}/server.py" --modman "$self" --static "${dir}/dist" "$@"
+}
+
+# ══════════════════════════════════════════════════════════
 # Usage / Help
 # ══════════════════════════════════════════════════════════
 usage() {
@@ -4810,7 +4945,9 @@ usage() {
         "autoupdate enable | disable"      "Update mods + redeploy after system or Steam game updates" \
         "   --scheduler <type>"            "systemd (default), cron or autostart — how the hourly check runs" \
         "autoupdate status | run [--force]" "Show auto-update state / run it now" \
-        "log [-f] [lines]"                 "Show the log"
+        "log [-f] [lines]"                 "Show the log" \
+        "ui [--port N] [--no-open]"        "Open the web interface in your browser" \
+        "ui desktop"                       "Add modman to the application menu (Steam Deck: add as non-Steam game)"
     echo ""
     echo -e "${BOLD}Mod references${RESET}  #12 (position) · full id · exact name · Nexus mod id · unique part of the name"
     echo ""
@@ -4897,6 +5034,10 @@ main() {
         log|logs)                    cmd_log "$@" ;;
         nxm)                         cmd_nxm "$@" ;;
         autoupdate|auto-update|au)   cmd_autoupdate "$@" ;;
+        ui|gui|web)                  cmd_ui "$@" ;;
+        ui-state)                    cmd_ui_state ;;
+        ui-detect)                   cmd_ui_detect ;;
+        ui-thumbs)                   cmd_ui_thumbs ;;
         nxm://*)                     cmd_nxm "$cmd" ;;
         *)
             error "Unknown command: '${cmd}'"
