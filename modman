@@ -4418,7 +4418,9 @@ au_system_fp() {
 
 au_package_manager_busy() {
     [[ -e /var/lib/pacman/db.lck ]] && return 0
-    pgrep -x 'pacman|dnf|dnf5|yum|apt|apt-get|dpkg|zypper|rpm-ostree|apk|xbps-install|emerge|steamos-atomupd-client|rauc' >/dev/null 2>&1
+    # process names straight from /proc (pgrep is missing on minimal systems; names are cut at 15 chars)
+    grep -qsxE 'pacman|dnf|dnf5|yum|rpm|apt|apt-get|dpkg|zypper|rpm-ostree|apk|xbps-install|emerge|steamos-atomupd|rauc' \
+        /proc/[0-9]*/comm
 }
 
 # Steam's view of the game: "<buildid> <StateFlags>" (empty if not a Steam game)
