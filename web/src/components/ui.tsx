@@ -1,9 +1,11 @@
-import { memo, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
-import { AnimatePresence, motion, useMotionValue, useSpring } from 'framer-motion'
+import { memo, useEffect, useId, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import { cx } from '../lib/format'
 
 export const spring = { type: 'spring', stiffness: 100, damping: 20 } as const
 export const snappy = { type: 'spring', stiffness: 420, damping: 32 } as const
+/** Page and list entrances: short enough that switching tabs feels instant. */
+export const quick = { duration: 0.14, ease: [0.16, 1, 0.3, 1] } as const
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger'
 type Size = 'sm' | 'md' | 'lg'
@@ -42,37 +44,15 @@ export function Button({ variant = 'secondary', size = 'md', icon, className, ch
   )
 }
 
-/** Primary call-to-action that leans toward the pointer. Motion values never touch React state. */
-export function MagneticButton({ className, children, icon, disabled, ...rest }: BtnProps) {
-  const ref = useRef<HTMLButtonElement>(null)
-  const mx = useMotionValue(0)
-  const my = useMotionValue(0)
-  const x = useSpring(mx, { stiffness: 160, damping: 14, mass: 0.4 })
-  const y = useSpring(my, { stiffness: 160, damping: 14, mass: 0.4 })
+/** Large primary call-to-action. */
+export function CtaButton({ className, ...rest }: BtnProps) {
   return (
-    <motion.button
-      ref={ref}
-      style={{ x, y }}
-      disabled={disabled}
-      onPointerMove={(e) => {
-        if (disabled || e.pointerType !== 'mouse') return
-        const r = ref.current!.getBoundingClientRect()
-        mx.set((e.clientX - (r.left + r.width / 2)) * 0.22)
-        my.set((e.clientY - (r.top + r.height / 2)) * 0.32)
-      }}
-      onPointerLeave={() => { mx.set(0); my.set(0) }}
-      whileTap={{ scale: 0.97 }}
-      className={cx(
-        'relative inline-flex h-14 items-center justify-center gap-2.5 overflow-hidden rounded-2xl px-7 text-[15px] font-semibold',
-        'bg-accent-400 text-accent-950 transition-colors duration-200 hover:bg-accent-300 disabled:opacity-40',
-        'shadow-[inset_0_1px_0_rgb(255_255_255/0.4),0_18px_40px_-18px_var(--color-accent-500)]',
-        className,
-      )}
-      {...(rest as object)}
-    >
-      {icon}
-      {children}
-    </motion.button>
+    <Button
+      variant="primary"
+      size="lg"
+      className={cx('px-7 font-semibold shadow-[inset_0_1px_0_rgb(255_255_255/0.4),0_18px_40px_-18px_var(--color-accent-500)]', className)}
+      {...rest}
+    />
   )
 }
 

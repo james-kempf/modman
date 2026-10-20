@@ -6,11 +6,11 @@ import {
 import { api, type Requirement } from '../lib/api'
 import { useApp, useCurrentGame } from '../lib/store'
 import { ago, bytes, cx, plural } from '../lib/format'
-import { Button, Chip, ConfirmDialog, MagneticButton, Skeleton, spring, StatusDot, Thumb } from '../components/ui'
+import { Button, Chip, ConfirmDialog, CtaButton, Skeleton, quick, snappy, StatusDot, Thumb } from '../components/ui'
 
 const rise = {
-  hidden: { opacity: 0, y: 14 },
-  show: (i: number) => ({ opacity: 1, y: 0, transition: { ...spring, delay: i * 0.06 } }),
+  hidden: { opacity: 0, y: 4 },
+  show: (i: number) => ({ opacity: 1, y: 0, transition: { ...quick, delay: i * 0.015 } }),
 }
 
 export function Overview() {
@@ -86,14 +86,14 @@ export function Overview() {
             </p>
           </div>
           <div className="grid gap-3">
-            <MagneticButton
+            <CtaButton
               disabled={busy || !game.folderExists || game.enabled === 0}
               onClick={() => run(['deploy'], { label: `Deploy ${game.name}` })}
               icon={<RocketLaunchIcon size={19} weight="duotone" />}
               className="w-full"
             >
               {game.deployed ? 'Redeploy' : 'Deploy'} {plural(game.enabled, 'mod')}
-            </MagneticButton>
+            </CtaButton>
             <div className="grid grid-cols-3 gap-2">
               <Button disabled={busy || !game.deployed} onClick={() => run(['verify'], { label: 'Verify deployment' })} icon={<ShieldCheckIcon size={16} />}>Verify</Button>
               <Button disabled={busy || !game.deployed} variant="danger" onClick={() => setConfirmPurge(true)} icon={<BroomIcon size={16} />}>Purge</Button>
@@ -179,7 +179,7 @@ export function Overview() {
               className="h-full origin-left rounded-full bg-accent-400"
               initial={{ scaleX: 0 }}
               animate={{ scaleX: enabledPct / 100 }}
-              transition={{ ...spring, delay: 0.3 }}
+              transition={{ ...snappy, delay: 0.05 }}
             />
           </div>
           <p className="mt-4 text-[14px] text-zinc-400">

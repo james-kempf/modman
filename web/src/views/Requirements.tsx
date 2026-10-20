@@ -4,7 +4,7 @@ import { ArrowClockwiseIcon, ArrowSquareOutIcon, CheckCircleIcon, PuzzlePieceIco
 import { api, type DepStatus, type Requirement } from '../lib/api'
 import { useApp, useCurrentGame } from '../lib/store'
 import { cx } from '../lib/format'
-import { Button, Chip, EmptyState, ErrorNote, PageHeader, Skeleton, spring } from '../components/ui'
+import { Button, Chip, EmptyState, ErrorNote, PageHeader, Skeleton, quick } from '../components/ui'
 
 const GROUPS: { status: DepStatus[]; title: string; blurb: string }[] = [
   { status: ['missing'], title: 'Missing', blurb: 'The mods that need these will not work until they are installed.' },
@@ -73,9 +73,9 @@ export function Requirements() {
                 {g.items.map((d, i) => (
                   <motion.li
                     key={d.key}
-                    initial={{ opacity: 0, y: 10 }}
+                    initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ ...spring, delay: Math.min(i, 10) * 0.04 }}
+                    transition={{ ...quick, delay: Math.min(i, 10) * 0.015 }}
                   >
                     <RequirementCard dep={d} busy={busy} run={run} />
                   </motion.li>

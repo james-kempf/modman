@@ -4,7 +4,7 @@ import { CheckIcon, DownloadSimpleIcon, MagnifyingGlassIcon, ThumbsUpIcon } from
 import { api, type SearchResult } from '../lib/api'
 import { useApp, useCurrentGame } from '../lib/store'
 import { compact, cx } from '../lib/format'
-import { Button, EmptyState, ErrorNote, Field, PageHeader, Skeleton, spring, Thumb } from '../components/ui'
+import { Button, EmptyState, ErrorNote, Field, PageHeader, Skeleton, quick, Thumb } from '../components/ui'
 
 const REF_RE = /^(\d+|[a-z0-9]+:\d+|nxm:\/\/.+|https?:\/\/(www\.)?nexusmods\.com\/.+|\/.+|~\/.+)$/i
 
@@ -102,9 +102,9 @@ export function Install() {
             {results.map((m, i) => (
               <motion.li
                 key={m.modId}
-                initial={{ opacity: 0, y: 12 }}
+                initial={{ opacity: 0, y: 4 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ ...spring, delay: Math.min(i, 12) * 0.035 }}
+                transition={{ ...quick, delay: Math.min(i, 12) * 0.015 }}
                 className={cx('flex gap-4 rounded-3xl border border-white/[0.05] bg-ink-2 p-4', i % 5 === 0 && 'md:col-span-2')}
               >
                 <Thumb src={m.thumbnailUrl} name={m.name} className={cx('shrink-0 rounded-2xl', i % 5 === 0 ? 'h-28 w-44' : 'size-24')} />

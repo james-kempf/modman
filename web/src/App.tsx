@@ -1,9 +1,9 @@
-import { AnimatePresence, motion } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { PlugsIcon } from '@phosphor-icons/react'
 import { useApp } from './lib/store'
 import { Sidebar } from './components/Sidebar'
 import { JobIsland } from './components/JobIsland'
-import { Button, EmptyState, Skeleton, spring } from './components/ui'
+import { Button, EmptyState, Skeleton, quick } from './components/ui'
 import { Overview } from './views/Overview'
 import { Mods } from './views/Mods'
 import { Collections } from './views/Collections'
@@ -38,11 +38,9 @@ export default function App() {
           ) : noGames ? (
             <Onboarding />
           ) : (
-            <AnimatePresence mode="wait">
-              <motion.div key={`${view}-${state.selectedGame}`} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={spring}>
-                <View />
-              </motion.div>
-            </AnimatePresence>
+            <motion.div key={`${view}-${state.selectedGame}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={quick}>
+              <View />
+            </motion.div>
           )}
         </div>
       </main>

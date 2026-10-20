@@ -4,7 +4,7 @@ import { ArrowSquareOutIcon, ArrowsClockwiseIcon, BooksIcon, TrashIcon, WarningI
 import type { Collection } from '../lib/api'
 import { useApp, useCurrentGame } from '../lib/store'
 import { ago } from '../lib/format'
-import { Button, Chip, ConfirmDialog, EmptyState, Field, PageHeader, spring, Toggle } from '../components/ui'
+import { Button, Chip, ConfirmDialog, EmptyState, Field, PageHeader, quick, Toggle } from '../components/ui'
 
 const COLLECTION_RE = /collections\/[a-z0-9]+|^[a-z0-9]{6}$/i
 
@@ -69,9 +69,9 @@ export function Collections() {
           {state.collections.map((c, i) => (
             <motion.li
               key={c.slug}
-              initial={{ opacity: 0, y: 14 }}
+              initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ ...spring, delay: i * 0.06 }}
+              transition={{ ...quick, delay: Math.min(i, 8) * 0.015 }}
               className="grid gap-6 rounded-[2rem] border border-white/[0.06] bg-ink-2 p-6 md:grid-cols-[auto_1fr_auto] md:items-center md:p-8"
             >
               <Monogram name={c.name} />
