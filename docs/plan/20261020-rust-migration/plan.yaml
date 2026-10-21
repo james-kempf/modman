@@ -287,7 +287,7 @@ tasks:
     wave: 4
     depends_on: [T04, T05, T06]
     agent: gem-reviewer
-    status: pending
+    status: completed  # verdict blocking: 2 HIGH (deploy symlink escape, purge identical-content restore), findings T10-1..12 -> T10
     retries_used: 0
     acceptance_criteria:
       - "Findings list with severity, file:line and reproduction or reasoning, returned to orchestrator."
