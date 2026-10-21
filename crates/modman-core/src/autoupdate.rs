@@ -16,7 +16,7 @@ mod tests;
 mod units;
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
 use serde::Serialize;
@@ -54,6 +54,10 @@ pub enum AutoupdateError {
     },
     #[error("systemd user services are not available here")]
     SystemdUnavailable,
+    #[error(
+        "auto-update is not supported inside the Flatpak; use the AppImage or a distro package"
+    )]
+    Flatpak,
     #[error("systemctl --user {args} failed: {message}")]
     Systemctl { args: String, message: String },
     #[error(transparent)]
@@ -69,6 +73,24 @@ pub enum AutoupdateError {
 }
 
 type R<T> = Result<T, AutoupdateError>;
+
+/// Marker file of a Flatpak sandbox, relative to the filesystem root.
+pub const FLATPAK_INFO: &str = ".flatpak-info";
+
+/// Whether this runs inside a Flatpak sandbox (`<root>/.flatpak-info`).
+pub fn in_flatpak(root: &Path) -> bool {
+    root.join(FLATPAK_INFO).exists()
+}
+
+/// Refuses inside a Flatpak: the sandbox cannot install a host systemd
+/// user timer that would outlive it, so `enable`/`status`/`run` say so
+/// instead of failing with the generic systemd message.
+pub fn ensure_supported(root: &Path) -> R<()> {
+    if in_flatpak(root) {
+        return Err(AutoupdateError::Flatpak);
+    }
+    Ok(())
+}
 
 /// Nexus account tier (decides what a run may download).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

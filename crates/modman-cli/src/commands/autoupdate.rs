@@ -88,6 +88,7 @@ fn disable(ctx: &mut Ctx) -> Result<()> {
 }
 
 fn status(ctx: &mut Ctx) -> Result<()> {
+    actions::ensure_supported()?;
     let opts = options(ctx)?;
     let host = LiveHost::new(&ctx.paths.home);
     let s = autoupdate::status(
@@ -192,6 +193,7 @@ fn status(ctx: &mut Ctx) -> Result<()> {
 }
 
 fn run_now(ctx: &mut Ctx, a: &RunArgs) -> Result<()> {
+    actions::ensure_supported()?;
     let mut opts = options(ctx)?;
     opts.force = a.force;
     opts.dry_run = a.dry_run;

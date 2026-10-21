@@ -150,3 +150,30 @@ fn run_without_games_is_quiet() {
         .success()
         .stdout(contains("Nothing to do."));
 }
+
+/// Catches: inside the Flatpak (`/.flatpak-info`), enable/status/run
+/// failing with the generic systemd message or writing units the host
+/// systemd never sees.
+#[test]
+fn flatpak_sandbox_refuses_enable_status_and_run() {
+    let mut env = env();
+    let root = env.tmp.path().join("sandbox-root");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join(".flatpak-info"), "[Application]\n").unwrap();
+    env.extra_env.push((
+        "MODMAN_SANDBOX_ROOT".into(),
+        root.to_string_lossy().into_owned(),
+    ));
+    let msg =
+        "auto-update is not supported inside the Flatpak; use the AppImage or a distro package";
+    for args in [
+        &["autoupdate", "enable"][..],
+        &["autoupdate", "status"][..],
+        &["autoupdate"][..],
+        &["autoupdate", "run", "--force"][..],
+    ] {
+        env.run(args).failure().stderr(contains(msg));
+    }
+    assert!(!env.home().join(".config/systemd/user").exists());
+    assert!(env.calls("systemctl").is_empty());
+}

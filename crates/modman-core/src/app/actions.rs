@@ -40,6 +40,20 @@ impl Systemctl for Ctl {
     }
 }
 
+/// Test hook: the filesystem root searched for `/.flatpak-info`.
+pub const SANDBOX_ROOT_ENV: &str = "MODMAN_SANDBOX_ROOT";
+
+/// `/`, or the [`SANDBOX_ROOT_ENV`] stand-in.
+pub fn sandbox_root() -> PathBuf {
+    env_path(SANDBOX_ROOT_ENV).unwrap_or_else(|| PathBuf::from("/"))
+}
+
+/// Refuses auto-update inside a Flatpak sandbox (see
+/// [`autoupdate::ensure_supported`]).
+pub fn ensure_supported() -> R<()> {
+    Ok(autoupdate::ensure_supported(&sandbox_root())?)
+}
+
 pub fn systemctl() -> Ctl {
     Ctl(std::env::var_os(SYSTEMCTL_ENV)
         .filter(|v| !v.is_empty())
@@ -149,9 +163,11 @@ pub fn running_appimage(exe: &Path) -> Option<PathBuf> {
     )
 }
 
-/// The program the timer runs, which must be the CLI: `$APPIMAGE` only
-/// when `program` is this very process (the CLI) running from the
-/// AppImage, else `program` (the resolved CLI binary).
+/// The program the timer runs, which must reach the CLI: `$APPIMAGE` when
+/// this process really runs from the AppImage and `program` is either this
+/// process (the CLI) or the CLI bundled in the same mount (the GUI's
+/// sibling; AppRun dispatches `autoupdate run` to it), else `program`.
+/// Scheduling the image keeps the timer off the transient `/tmp/.mount_*`.
 pub fn timer_exec_for(
     program: &Path,
     exe: &Path,
@@ -159,9 +175,10 @@ pub fn timer_exec_for(
     appdir: Option<&Path>,
 ) -> PathBuf {
     let program = canonical(program);
-    let is_self = program == canonical(exe);
+    let bundled =
+        program == canonical(exe) || appdir.is_some_and(|d| program.starts_with(canonical(d)));
     match appimage_of(exe, appimage, appdir) {
-        Some(image) if is_self => image,
+        Some(image) if bundled => image,
         _ => program,
     }
 }
@@ -195,6 +212,12 @@ pub fn cli_binary(gui_exe: &Path) -> R<PathBuf> {
 /// Installs and starts the timer for `exec`, then records the current state
 /// so the first timer run does not redeploy for no reason (legacy L4705).
 pub fn enable(cx: &mut Cx<'_>, exec: PathBuf, systemctl: &dyn Systemctl) -> R<()> {
+    enable_at(cx, exec, systemctl, &sandbox_root())
+}
+
+/// [`enable`] with the sandbox root injected.
+pub fn enable_at(cx: &mut Cx<'_>, exec: PathBuf, systemctl: &dyn Systemctl, root: &Path) -> R<()> {
+    autoupdate::ensure_supported(root)?;
     let cfg = cx.config()?;
     let opts = RunOptions::new(&cfg, cx.paths);
     if exec.starts_with("/tmp") {
@@ -241,6 +264,12 @@ pub fn enable(cx: &mut Cx<'_>, exec: PathBuf, systemctl: &dyn Systemctl) -> R<()
 
 /// Timer state, per-game state and the newest `runs` log rows.
 pub fn status(cx: &Cx<'_>, systemctl: &dyn Systemctl, runs: usize) -> R<Status> {
+    status_at(cx, systemctl, runs, &sandbox_root())
+}
+
+/// [`status`] with the sandbox root injected.
+pub fn status_at(cx: &Cx<'_>, systemctl: &dyn Systemctl, runs: usize, root: &Path) -> R<Status> {
+    autoupdate::ensure_supported(root)?;
     let opts = options(cx)?;
     let host = LiveHost::new(&cx.paths.home);
     Ok(autoupdate::status(
@@ -266,8 +295,10 @@ mod tests {
         assert_eq!(found, cli);
     }
 
+    /// Catches: the GUI scheduling the CLI on the transient
+    /// `/tmp/.mount_*`, which vanishes when the app closes.
     #[test]
-    fn the_gui_in_an_appimage_schedules_the_cli_not_the_image() {
+    fn the_gui_in_an_appimage_schedules_the_image() {
         let mount = tempfile::tempdir().unwrap();
         let bin = mount.path().join("usr/bin");
         std::fs::create_dir_all(&bin).unwrap();
@@ -276,7 +307,85 @@ mod tests {
         std::fs::write(&cli, "").unwrap();
         let image = Path::new("/home/u/Apps/modman.AppImage");
         let exec = timer_exec_for(&cli, &gui, Some(image), Some(mount.path()));
+        assert_eq!(exec, image);
+    }
+
+    /// Catches: a GUI in the AppImage whose CLI resolved outside the mount
+    /// (e.g. on PATH) being replaced by the image.
+    #[test]
+    fn the_gui_in_an_appimage_keeps_a_cli_outside_the_mount() {
+        let (mount, elsewhere) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let gui = mount.path().join("modman-desktop");
+        let cli = elsewhere.path().join("modman");
+        std::fs::write(&gui, "").unwrap();
+        std::fs::write(&cli, "").unwrap();
+        let image = Path::new("/home/u/Apps/modman.AppImage");
+        let exec = timer_exec_for(&cli, &gui, Some(image), Some(mount.path()));
         assert_eq!(exec, cli.canonicalize().unwrap());
+    }
+
+    /// Catches: an inherited `$APPIMAGE`/`$APPDIR` (GUI not in the mount)
+    /// rewriting the schedule of a CLI that happens to sit under `$APPDIR`.
+    #[test]
+    fn an_inherited_appimage_variable_is_ignored_for_the_gui() {
+        let (mount, elsewhere) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let cli = mount.path().join("modman");
+        let gui = elsewhere.path().join("modman-desktop");
+        std::fs::write(&cli, "").unwrap();
+        std::fs::write(&gui, "").unwrap();
+        let image = Path::new("/home/u/Apps/modman.AppImage");
+        let exec = timer_exec_for(&cli, &gui, Some(image), Some(mount.path()));
+        assert_eq!(exec, cli.canonicalize().unwrap());
+    }
+
+    fn flatpak_root() -> tempfile::TempDir {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join(autoupdate::FLATPAK_INFO), "").unwrap();
+        root
+    }
+
+    /// Never-called systemctl: the Flatpak check must come first.
+    struct NoCtl;
+    impl Systemctl for NoCtl {
+        fn run(&self, args: &[&str]) -> Result<String, String> {
+            panic!("systemctl called inside the Flatpak: {args:?}")
+        }
+    }
+
+    /// Catches (GUI path): enable inside the Flatpak writing units or
+    /// failing with the generic systemd message.
+    #[test]
+    fn enable_inside_the_flatpak_refuses_before_systemd() {
+        let (home, root) = (tempfile::tempdir().unwrap(), flatpak_root());
+        let paths = crate::paths::Paths::for_home(home.path());
+        let mut store = Store::open_in_memory().unwrap();
+        let ui = crate::app::testing::Recorder::default();
+        let mut cx = Cx::new(&paths, &mut store, &ui);
+        let e = enable_at(&mut cx, "/usr/bin/modman".into(), &NoCtl, root.path()).unwrap_err();
+        assert!(
+            e.to_string().contains("not supported inside the Flatpak"),
+            "{e}"
+        );
+        assert!(!autoupdate::service_path(&paths).exists());
+    }
+
+    /// Catches (GUI path): status inside the Flatpak reporting a timer
+    /// state it can never have.
+    #[test]
+    fn status_inside_the_flatpak_refuses() {
+        let (home, root) = (tempfile::tempdir().unwrap(), flatpak_root());
+        let paths = crate::paths::Paths::for_home(home.path());
+        let mut store = Store::open_in_memory().unwrap();
+        let ui = crate::app::testing::Recorder::default();
+        let cx = Cx::new(&paths, &mut store, &ui);
+        let e = status_at(&cx, &NoCtl, 5, root.path()).unwrap_err();
+        assert!(
+            e.to_string()
+                .contains("use the AppImage or a distro package"),
+            "{e}"
+        );
+        let outside = tempfile::tempdir().unwrap();
+        assert!(autoupdate::ensure_supported(outside.path()).is_ok());
     }
 
     #[test]

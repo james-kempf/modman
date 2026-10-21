@@ -891,3 +891,19 @@ fn no_other_scheduler_code() {
         }
     }
 }
+
+// ── Flatpak sandbox ──────────────────────────────────────────
+
+/// Catches: the sandbox going undetected and falling through to the
+/// generic systemd error.
+#[test]
+fn flatpak_info_at_the_root_refuses_with_a_clear_message() {
+    let root = tempfile::tempdir().unwrap();
+    assert!(!in_flatpak(root.path()));
+    assert!(ensure_supported(root.path()).is_ok());
+    std::fs::write(root.path().join(FLATPAK_INFO), "[Application]\n").unwrap();
+    assert!(in_flatpak(root.path()));
+    let e = ensure_supported(root.path()).unwrap_err().to_string();
+    assert!(e.contains("not supported inside the Flatpak"), "{e}");
+    assert!(e.contains("AppImage or a distro package"), "{e}");
+}
