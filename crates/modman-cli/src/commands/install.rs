@@ -3,21 +3,25 @@
 //! `cmd_download` L3365-3392, `install_nexus_mod` L3239-3288,
 //! `install_local` L3290-3318, `cmd_reinstall` L3635-3665).
 
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Result};
 use clap::Args;
 use modman_core::config::Config;
 use modman_core::download::NxmLink;
+use modman_core::fomod::{
+    FomodError, FomodMode, FomodResolver, GroupPrompt, GroupType, ModuleConfig, ResolvedMode, Step,
+};
 use modman_core::games::{self, GameConfig};
-use modman_core::mods::{self, InstallMeta, InstallOutcome, ModRecord};
+use modman_core::mods::{self, InstallHooks, InstallMeta, InstallOutcome, ModRecord};
 use modman_core::nexus::{FileInfo, NxmKey};
 use modman_core::store::{DeployLock, StoreError};
 
 use super::{deploy, mods as modcmd, not_yet};
 use crate::context::{games_hint, Ctx};
 use crate::nexus::{self as nx, Nexus};
-use crate::output::human_size;
+use crate::output::{human_size, Printer};
 
 #[derive(Args, Debug)]
 pub struct InstallArgs {
@@ -26,7 +30,7 @@ pub struct InstallArgs {
     /// Install this file id of the mod.
     #[arg(short = 'f', long = "file", value_name = "ID")]
     pub file: Option<u64>,
-    /// FOMOD installer mode (milestone M5).
+    /// FOMOD installer: ask, default, none or reuse (default: config 'fomod').
     #[arg(long, value_name = "MODE", value_parser = ["ask", "default", "none", "reuse"])]
     pub fomod: Option<String>,
     /// Name to show for the mod.
@@ -62,10 +66,10 @@ pub struct DownloadArgs {
 pub struct ReinstallArgs {
     /// Mod to re-extract.
     pub reference: String,
-    /// FOMOD mode (milestone M5).
-    #[arg(long, value_name = "MODE")]
+    /// FOMOD installer: reuse (default), ask, default or none.
+    #[arg(long, value_name = "MODE", value_parser = ["ask", "default", "none", "reuse"])]
     pub fomod: Option<String>,
-    /// Re-run the FOMOD installer (milestone M5).
+    /// Ask the FOMOD and variant questions again.
     #[arg(long)]
     pub ask: bool,
 }
@@ -216,33 +220,184 @@ fn variant_prompt(choices: &[String]) -> Option<usize> {
         .map(|n| n - 1)
 }
 
+/// Parses a FOMOD answer: numbers and ranges (`1,3-4`), 1-based.
+fn parse_selection(text: &str, n: usize) -> Option<Vec<usize>> {
+    let mut sel = std::collections::BTreeSet::new();
+    for tok in text.split([',', ' ', '\t']).filter(|t| !t.is_empty()) {
+        let num = |s: &str| s.parse::<usize>().ok().filter(|&k| (1..=n).contains(&k));
+        match tok.split_once('-') {
+            Some((a, b)) => {
+                let (a, b) = (num(a)?, num(b)?);
+                sel.extend(a - 1..b);
+            }
+            None => {
+                sel.insert(num(tok)? - 1);
+            }
+        }
+    }
+    Some(sel.into_iter().collect())
+}
+
+/// FOMOD questions on stderr, answers from stdin (legacy `ask_group`,
+/// L1162-1211).
+struct PromptResolver {
+    out: Printer,
+    mod_name: String,
+}
+
+impl PromptResolver {
+    fn read(&self, prompt: &str) -> Result<String, FomodError> {
+        eprint!("{prompt}");
+        let mut s = String::new();
+        match std::io::stdin().lock().read_line(&mut s) {
+            Ok(0) | Err(_) => Err(FomodError::Cancelled),
+            Ok(_) => Ok(s.trim().to_string()),
+        }
+    }
+}
+
+impl FomodResolver for PromptResolver {
+    fn begin(&mut self, m: &ModuleConfig) {
+        let title = if m.module_name.is_empty() {
+            &self.mod_name
+        } else {
+            &m.module_name
+        };
+        eprintln!(
+            "\n{}",
+            self.out.bold(&format!("── FOMOD installer: {title} ──"))
+        );
+    }
+
+    fn step(&mut self, s: &Step) {
+        eprintln!("\n{}", self.out.bold(&format!("▸ {}", s.name)));
+    }
+
+    fn choose(&mut self, p: &GroupPrompt<'_>) -> Result<Vec<usize>, FomodError> {
+        let n = p.group.plugins.len();
+        if let Some(e) = p.error {
+            eprintln!("    {e}");
+        } else {
+            eprintln!(
+                "\n  {}  {}",
+                self.out.bold(&p.group.name),
+                self.out.dim(&format!("({})", p.group.kind.label()))
+            );
+            for (i, pl) in p.group.plugins.iter().enumerate() {
+                let mark = if p.defaults.contains(&i) { '*' } else { ' ' };
+                let mut line = format!("   {mark}{:>2}. {}", i + 1, pl.name);
+                if let Some(l) = p.types[i].label() {
+                    line.push_str(&format!("  [{l}]"));
+                }
+                let desc = pl
+                    .description
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if !desc.is_empty() {
+                    let short: String = desc.chars().take(90).collect();
+                    let more = if desc.chars().count() > 90 { "…" } else { "" };
+                    line.push_str(&self.out.dim(&format!(" — {short}{more}")));
+                }
+                eprintln!("{line}");
+            }
+        }
+        let dtext = if p.defaults.is_empty() {
+            "none".to_string()
+        } else {
+            p.defaults
+                .iter()
+                .map(|i| (i + 1).to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        let hint = match p.group.kind {
+            GroupType::SelectExactlyOne => "number",
+            GroupType::SelectAtMostOne => "number, 0 = none",
+            _ => "e.g. 1,3-4 · a = all · 0 = none",
+        };
+        loop {
+            let ans = self.read(&format!("  ? Choose ({hint}, ?N = details) [{dtext}]: "))?;
+            let lower = ans.to_lowercase();
+            if ans.is_empty() {
+                return Ok(p.defaults.to_vec());
+            } else if let Some(k) = ans.strip_prefix('?') {
+                match k.trim().parse::<usize>() {
+                    Ok(k) if (1..=n).contains(&k) => {
+                        let d = p.group.plugins[k - 1].description.trim();
+                        eprintln!("\n{}\n", if d.is_empty() { "(no description)" } else { d });
+                    }
+                    _ => eprintln!("    invalid selection"),
+                }
+            } else if matches!(lower.as_str(), "0" | "n" | "none") {
+                return Ok(Vec::new());
+            } else if matches!(lower.as_str(), "a" | "all") {
+                return Ok((0..n).collect());
+            } else if let Some(sel) = parse_selection(&ans, n) {
+                return Ok(sel);
+            } else {
+                eprintln!("    invalid selection");
+            }
+        }
+    }
+}
+
 /// Runs the core install pipeline with the CLI's prompts and messages.
+/// FOMOD questions are asked when the session is interactive, or, for an
+/// explicit `--fomod ask` / `reinstall --ask` (`ask_explicit`), whenever
+/// `-y` is not given: answers are then read from stdin even when it is not
+/// a terminal (scripted installs).
 pub fn install_archive(
     ctx: &mut Ctx,
     game: &GameConfig,
     archive: &Path,
     meta: &InstallMeta,
+    ask_explicit: bool,
 ) -> Result<InstallOutcome> {
     let cfg = Config::load(&ctx.store, &ctx.paths)?;
     let chooser: &dyn Fn(&[String]) -> Option<usize> = &variant_prompt;
     let interactive = ctx.is_interactive();
-    let o = mods::install_archive(
-        &mut ctx.store,
-        game,
-        &cfg.data_dir,
-        archive,
-        meta,
-        interactive.then_some(chooser),
-    )?;
+    let prompt_fomod = if ask_explicit { !ctx.yes } else { interactive };
+    let mut resolver = PromptResolver {
+        out: ctx.out,
+        mod_name: meta.name.clone().unwrap_or_default(),
+    };
+    let hooks = InstallHooks {
+        choose_variant: interactive.then_some(chooser),
+        fomod: prompt_fomod.then_some(&mut resolver as &mut dyn FomodResolver),
+    };
+    let o = mods::install_archive(&mut ctx.store, game, &cfg.data_dir, archive, meta, hooks)?;
+    if let Some(run) = &o.fomod {
+        match run.mode {
+            ResolvedMode::Ask => {}
+            ResolvedMode::Default => ctx.out.info("FOMOD installer: default choices"),
+            ResolvedMode::Choices => ctx.out.info("FOMOD installer: recorded choices"),
+        }
+        for m in &run.report.missing {
+            ctx.out
+                .warn(&format!("FOMOD: '{m}' not found in the archive; skipped"));
+        }
+        for r in &run.report.refused {
+            ctx.out
+                .warn(&format!("FOMOD: refusing unsafe destination '{r}'"));
+        }
+    }
     for w in &o.layout.warnings {
         ctx.out.warn(w);
     }
-    if o.fomod_found {
-        ctx.out.warn(
-            "This archive has a FOMOD installer; FOMOD support arrives with milestone M5, so its files were installed with the plain layout rules. Reinstall it once FOMOD support is available.",
-        );
-    }
     Ok(o)
+}
+
+/// `--fomod` value, else the `fomod` config key (legacy ambiguity A2: the
+/// key was never read; here it sets the default for `install`).
+fn install_mode(ctx: &Ctx, flag: Option<&str>) -> Result<FomodMode> {
+    match flag {
+        Some(m) => Ok(m.parse()?),
+        None => Ok(Config::load(&ctx.store, &ctx.paths)?
+            .fomod
+            .parse()
+            .unwrap_or_default()),
+    }
 }
 
 /// Legacy `choose_file`: MAIN, UPDATE, OPTIONAL, MISCELLANEOUS, newest first.
@@ -302,6 +457,32 @@ pub fn install_nexus(
     key: Option<NxmKey>,
     name_override: Option<&str>,
     row: Option<i64>,
+) -> Result<Option<InstallOutcome>> {
+    install_nexus_with(
+        ctx,
+        nexus,
+        game,
+        mod_id,
+        file_id,
+        key,
+        name_override,
+        row,
+        None,
+    )
+}
+
+/// [`install_nexus`] with an explicit `--fomod` mode.
+#[allow(clippy::too_many_arguments)]
+fn install_nexus_with(
+    ctx: &mut Ctx,
+    nexus: &Nexus,
+    game: &GameConfig,
+    mod_id: u64,
+    file_id: Option<u64>,
+    key: Option<NxmKey>,
+    name_override: Option<&str>,
+    row: Option<i64>,
+    fomod: Option<&str>,
 ) -> Result<Option<InstallOutcome>> {
     let out = ctx.out;
     let d = &game.domain;
@@ -378,6 +559,17 @@ pub fn install_nexus(
         None => mname.clone(),
     };
     out.info(&format!("Installing {name}..."));
+    // Replacing an older file reuses its FOMOD choices (legacy L3267-3271).
+    let (fomod_mode, fomod_choices) = match replaces {
+        Some(r) => (
+            match fomod {
+                Some(m) => m.parse()?,
+                None => FomodMode::Reuse,
+            },
+            mods::recorded_fomod_choices(ctx.store.conn(), r.id)?,
+        ),
+        None => (install_mode(ctx, fomod)?, None),
+    };
     let meta = InstallMeta {
         name: Some(name.clone()),
         version: file.version.clone(),
@@ -389,17 +581,25 @@ pub fn install_nexus(
         variant: replaces.and_then(|r| r.variant.clone()),
         replaces: replaces.map(|r| r.id),
         update_policy: replaces.and_then(|r| r.update_policy.clone()),
+        fomod_mode,
+        fomod_choices,
         ..Default::default()
     };
     let lock = staging_lock(ctx)?;
-    let o = install_archive(ctx, game, &archive, &meta)?;
+    let o = install_archive(ctx, game, &archive, &meta, fomod == Some("ask"))?;
     drop(lock);
     out.success(&format!("Installed {} → {}", out.bold(&name), o.uid));
     modcmd::requirements_after_install(ctx, game, o.mod_id);
     Ok(Some(o))
 }
 
-fn install_local(ctx: &mut Ctx, game: &GameConfig, path: &Path, name: Option<&str>) -> Result<()> {
+fn install_local(
+    ctx: &mut Ctx,
+    game: &GameConfig,
+    path: &Path,
+    name: Option<&str>,
+    fomod: Option<&str>,
+) -> Result<()> {
     let out = ctx.out;
     let path = path
         .canonicalize()
@@ -423,20 +623,18 @@ fn install_local(ctx: &mut Ctx, game: &GameConfig, path: &Path, name: Option<&st
     let meta = InstallMeta {
         name: name.map(str::to_string),
         source: Some("local".into()),
+        fomod_mode: install_mode(ctx, fomod)?,
         ..Default::default()
     };
     out.info(&format!("Installing from {base}..."));
     let lock = staging_lock(ctx)?;
-    let o = install_archive(ctx, game, &archive, &meta)?;
+    let o = install_archive(ctx, game, &archive, &meta, fomod == Some("ask"))?;
     drop(lock);
     out.success(&format!("Installed {} → {}", out.bold(&o.name), o.uid));
     Ok(())
 }
 
 pub fn install(ctx: &mut Ctx, args: InstallArgs) -> Result<()> {
-    if args.fomod.is_some() {
-        return not_yet("install --fomod", "M5");
-    }
     let target = parse_target(&args.target)?.ok_or_else(|| {
         anyhow!(
             "Don't know how to install '{}'. Give a mod id, a Nexus URL, an nxm:// link, an archive or a collection URL.",
@@ -446,7 +644,7 @@ pub fn install(ctx: &mut Ctx, args: InstallArgs) -> Result<()> {
     let game = match target {
         Target::Local(p) => {
             let game = ctx.need_game()?;
-            install_local(ctx, &game, &p, args.name.as_deref())?;
+            install_local(ctx, &game, &p, args.name.as_deref(), args.fomod.as_deref())?;
             game
         }
         Target::Collection(_) => return not_yet("collection install", "M5"),
@@ -459,7 +657,7 @@ pub fn install(ctx: &mut Ctx, args: InstallArgs) -> Result<()> {
             let nexus = nx::require(ctx)?;
             let game = game_for(ctx, game.as_deref())?;
             let file_id = args.file.or(file_id);
-            if install_nexus(
+            if install_nexus_with(
                 ctx,
                 &nexus,
                 &game,
@@ -468,6 +666,7 @@ pub fn install(ctx: &mut Ctx, args: InstallArgs) -> Result<()> {
                 key,
                 args.name.as_deref(),
                 None,
+                args.fomod.as_deref(),
             )?
             .is_none()
             {
@@ -522,9 +721,12 @@ pub fn download(ctx: &mut Ctx, args: DownloadArgs) -> Result<()> {
 }
 
 pub fn reinstall(ctx: &mut Ctx, args: ReinstallArgs) -> Result<()> {
-    if args.ask || args.fomod.is_some() {
-        return not_yet("reinstall --ask/--fomod", "M5");
-    }
+    // Legacy L3636-3641: --fomod X, else --ask = ask, else reuse.
+    let fomod_mode = match (args.fomod.as_deref(), args.ask) {
+        (Some(m), _) => m.parse()?,
+        (None, true) => FomodMode::Ask,
+        (None, false) => FomodMode::Reuse,
+    };
     let game = ctx.need_game()?;
     let rec = mods::resolve(ctx.store.conn(), &game.domain, &args.reference)?;
     let archive = match &rec.archive {
@@ -552,13 +754,16 @@ pub fn reinstall(ctx: &mut Ctx, args: ReinstallArgs) -> Result<()> {
         author: rec.author.clone(),
         category: rec.category.clone(),
         update_policy: rec.update_policy.clone(),
-        variant: rec.variant.clone(),
+        // --ask re-picks the variant too (legacy L3660).
+        variant: if args.ask { None } else { rec.variant.clone() },
         replaces: Some(rec.id),
         uid: Some(rec.uid.clone()),
+        fomod_mode,
+        fomod_choices: mods::recorded_fomod_choices(ctx.store.conn(), rec.id)?,
     };
     ctx.out.info(&format!("Reinstalling {}...", rec.uid));
     let lock = staging_lock(ctx)?;
-    install_archive(ctx, &game, &archive, &meta)?;
+    install_archive(ctx, &game, &archive, &meta, fomod_mode == FomodMode::Ask)?;
     drop(lock);
     ctx.out.success(&format!("Reinstalled {}", rec.uid));
     after_change(ctx, &game)
@@ -575,6 +780,16 @@ mod tests {
             file_id: f,
             key: None,
         })
+    }
+
+    #[test]
+    fn fomod_answers_parse_numbers_and_ranges() {
+        assert_eq!(parse_selection("1,3-4", 4), Some(vec![0, 2, 3]));
+        assert_eq!(parse_selection("2 1", 3), Some(vec![0, 1]));
+        assert_eq!(parse_selection("5", 4), None);
+        assert_eq!(parse_selection("0", 4), None);
+        assert_eq!(parse_selection("x", 4), None);
+        assert_eq!(parse_selection("2-9", 4), None);
     }
 
     #[test]

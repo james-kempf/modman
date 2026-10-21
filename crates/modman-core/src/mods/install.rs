@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Archive -> staging -> `mods` row (legacy `install_archive` L1359-1426,
-//! `JQ_UPSERT` L575-588). FOMOD archives are detected here; running the
-//! installer arrives with M5.
+//! `JQ_UPSERT` L575-588). An archive with `fomod/ModuleConfig.xml` runs the
+//! FOMOD installer (legacy L1383-1398) and its choices are recorded in
+//! `fomod_choices`.
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -11,6 +12,9 @@ use rusqlite::{params, OptionalExtension, Transaction};
 use super::{io_err, mark_changed, ModsError};
 use crate::archive;
 use crate::deploy::staging_root;
+use crate::fomod::{
+    self, FomodChoices, FomodMode, FomodResolver, FomodRun, ResolvedMode, Selection,
+};
 use crate::games::GameConfig;
 use crate::staging::{
     normalize_layout, sanitize_name, staged_files, LayoutOptions, LayoutOutcome, LayoutProfile,
@@ -38,6 +42,18 @@ pub struct InstallMeta {
     pub replaces: Option<i64>,
     /// Keep exactly this uid (reinstall).
     pub uid: Option<String>,
+    /// FOMOD installer mode (legacy meta `fomodMode`).
+    pub fomod_mode: FomodMode,
+    /// Recorded choices for `reuse` / `collection` (legacy meta `choices`).
+    pub fomod_choices: Option<FomodChoices>,
+}
+
+/// Interactive callbacks for [`install_archive`]. Leaving `fomod` unset
+/// means non-interactive: `ask`/`auto`/`reuse` fall back to defaults.
+#[derive(Default)]
+pub struct InstallHooks<'a> {
+    pub choose_variant: Option<VariantChooser<'a>>,
+    pub fomod: Option<&'a mut dyn FomodResolver>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,8 +64,10 @@ pub struct InstallOutcome {
     pub files: usize,
     pub size: u64,
     pub layout: LayoutOutcome,
-    /// The archive carries a FOMOD installer (not run before M5).
+    /// The archive carries a FOMOD installer.
     pub fomod_found: bool,
+    /// The FOMOD installer run, unless skipped (`none`) or absent.
+    pub fomod: Option<FomodRun>,
     /// uid of the mod that was replaced, if any.
     pub replaced: Option<String>,
 }
@@ -118,7 +136,7 @@ pub fn install_archive(
     data_dir: &Path,
     archive_path: &Path,
     meta: &InstallMeta,
-    choose_variant: Option<VariantChooser<'_>>,
+    hooks: InstallHooks<'_>,
 ) -> Result<InstallOutcome, ModsError> {
     let profile: LayoutProfile = game.profile.parse()?;
     let name = meta
@@ -139,13 +157,40 @@ pub fn install_archive(
     let ext = work.0.join("x");
     let out = work.0.join("out");
     archive::extract(archive_path, &ext)?;
-    let fomod_found = find_fomod(&ext).is_some();
+    let froot = find_fomod(&ext);
+    let fomod_found = froot.is_some();
+    let InstallHooks {
+        choose_variant,
+        fomod: resolver,
+    } = hooks;
+    let mut fomod_run = None;
+    let mut src = ext.clone();
+    let mode = fomod::resolve_mode(
+        meta.fomod_mode,
+        meta.fomod_choices.is_some(),
+        resolver.is_some(),
+    );
+    if let (Some(froot), Some(mode)) = (froot, mode) {
+        let how = match (mode, resolver, &meta.fomod_choices) {
+            (ResolvedMode::Ask, Some(r), _) => Selection::Ask(r),
+            (ResolvedMode::Choices, _, Some(c)) => Selection::Choices(c),
+            _ => Selection::Default,
+        };
+        let deploy_dir = game.folder.as_ref().map(|f| f.join(&game.subdir));
+        src = work.0.join("fomod");
+        fomod_run = Some(fomod::run(&froot, &src, how, deploy_dir.as_deref())?);
+    }
 
     let mut opts = LayoutOptions::new(profile, &name);
     opts.preset_variant = meta.variant.as_deref().filter(|v| !v.is_empty());
     opts.paks_dir = game.paks_dir.as_deref();
     opts.choose_variant = choose_variant;
-    let layout = normalize_layout(&ext, &out, &opts)?;
+    if fomod_run.is_some() {
+        // Legacy normalize_layout "$fomod_out" ... 0 0 (L1395).
+        opts.strip_wrappers = false;
+        opts.detect_variants = false;
+    }
+    let layout = normalize_layout(&src, &out, &opts)?;
     let files = staged_files(&out)?;
     if files.is_empty() {
         let shown = archive_path.file_name().map_or_else(
@@ -291,6 +336,7 @@ pub fn install_archive(
         }
     };
     write_files(&tx, mod_id, &files)?;
+    write_choices(&tx, mod_id, fomod_run.as_ref())?;
     tx.commit().map_err(StoreError::from)?;
     mark_changed(store, &game.domain)?;
     Ok(InstallOutcome {
@@ -301,8 +347,27 @@ pub fn install_archive(
         size,
         layout,
         fomod_found,
+        fomod: fomod_run,
         replaced: replaced.map(|r| r.1),
     })
+}
+
+/// Records the choices of a FOMOD run; no run clears them (legacy `.fomod = null`).
+fn write_choices(
+    tx: &Transaction<'_>,
+    mod_id: i64,
+    run: Option<&FomodRun>,
+) -> rusqlite::Result<()> {
+    match run {
+        Some(r) => tx.execute(
+            "INSERT INTO fomod_choices (mod_id, choices, mode, recorded_at) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT (mod_id) DO UPDATE SET choices = excluded.choices, mode = excluded.mode,
+                recorded_at = excluded.recorded_at",
+            params![mod_id, r.choices.to_json(), r.mode.as_str(), store::now()],
+        )?,
+        None => tx.execute("DELETE FROM fomod_choices WHERE mod_id = ?1", [mod_id])?,
+    };
+    Ok(())
 }
 
 fn write_files(tx: &Transaction<'_>, mod_id: i64, files: &[StagedFile]) -> rusqlite::Result<()> {
@@ -354,7 +419,14 @@ mod tests {
 
     fn install(t: &mut T, p: &Path, meta: InstallMeta) -> Result<InstallOutcome, ModsError> {
         let data = t.tmp.path().join("data");
-        install_archive(&mut t.store, &t.game, &data, p, &meta, None)
+        install_archive(
+            &mut t.store,
+            &t.game,
+            &data,
+            p,
+            &meta,
+            InstallHooks::default(),
+        )
     }
 
     #[test]
@@ -468,11 +540,248 @@ mod tests {
                 ("Wrapper/a.esp", "e"),
             ],
         );
-        assert!(
-            install(&mut t, &p, InstallMeta::default())
-                .unwrap()
-                .fomod_found
-        );
+        let meta = InstallMeta {
+            fomod_mode: FomodMode::None,
+            ..Default::default()
+        };
+        assert!(install(&mut t, &p, meta).unwrap().fomod_found);
         assert_eq!(find_fomod(&p).unwrap(), p.join("Wrapper"));
+    }
+
+    // ── FOMOD ───────────────────────────────────────────────
+
+    use crate::fomod::tests::{tree, Scripted};
+    use crate::fomod::{FomodError, GroupPrompt};
+
+    fn fomod_src(t: &T) -> PathBuf {
+        let d = t.tmp.path().join("src/fomodmod");
+        // A wrapper folder like real archives ("Mod-1.0/fomod/...").
+        tree(&d.join("Wrapper"));
+        std::fs::rename(d.join("Wrapper/root"), d.join("Mod-1.0")).unwrap();
+        std::fs::remove_dir(d.join("Wrapper")).unwrap();
+        d
+    }
+
+    fn staged(o: &InstallOutcome, t: &T) -> Vec<String> {
+        let st = t.tmp.path().join("data/g/staging").join(&o.uid);
+        let mut v: Vec<String> = walkdir::WalkDir::new(&st)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_file())
+            .map(|e| {
+                e.path()
+                    .strip_prefix(&st)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        v.sort();
+        v
+    }
+
+    fn row(t: &T, id: i64) -> Option<(String, String)> {
+        t.store
+            .conn()
+            .query_row(
+                "SELECT choices, mode FROM fomod_choices WHERE mod_id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .unwrap()
+    }
+
+    fn install_with(
+        t: &mut T,
+        p: &Path,
+        meta: InstallMeta,
+        r: Option<&mut dyn FomodResolver>,
+    ) -> Result<InstallOutcome, ModsError> {
+        let data = t.tmp.path().join("data");
+        let hooks = InstallHooks {
+            choose_variant: None,
+            fomod: r,
+        };
+        install_archive(&mut t.store, &t.game, &data, p, &meta, hooks)
+    }
+
+    /// Fails the test if consulted.
+    struct NoAsk;
+    impl FomodResolver for NoAsk {
+        fn choose(&mut self, p: &GroupPrompt<'_>) -> Result<Vec<usize>, FomodError> {
+            panic!("asked about {}", p.group.name)
+        }
+    }
+
+    #[test]
+    fn fomod_default_install_stages_plan_and_records_vortex_choices() {
+        let mut t = setup("generic");
+        let p = fomod_src(&t);
+        let o = install_with(&mut t, &p, InstallMeta::default(), None).unwrap();
+        let run = o.fomod.as_ref().unwrap();
+        assert_eq!(run.mode, ResolvedMode::Default);
+        assert_eq!(
+            staged(&o, &t),
+            [
+                "core.esp",
+                "docs/readme.txt",
+                "large.esp",
+                "meshes/body.nif",
+                "patches/patch_a.esp",
+                "plugins/alpha.esp",
+                "shared.txt",
+                "textures/a.dds",
+                "textures/sub/b.dds"
+            ]
+        );
+        let (json, mode) = row(&t, o.mod_id).unwrap();
+        assert_eq!(mode, "default");
+        assert!(
+            json.starts_with(r#"{"type":"fomod","options":[{"name":"Main""#),
+            "{json}"
+        );
+        assert_eq!(
+            crate::mods::recorded_fomod_choices(t.store.conn(), o.mod_id).unwrap(),
+            Some(run.choices.clone())
+        );
+    }
+
+    #[test]
+    fn fomod_ask_then_reuse_replays_stored_choices_on_reinstall() {
+        let mut t = setup("generic");
+        let p = fomod_src(&t);
+        // Body: Slim; Extras: Zeta; Patch: none; Readme: none.
+        let mut r = Scripted {
+            answers: vec![vec![0], vec![1], vec![], vec![]],
+            ..Default::default()
+        };
+        let o = install_with(&mut t, &p, InstallMeta::default(), Some(&mut r)).unwrap();
+        assert_eq!(o.fomod.as_ref().unwrap().mode, ResolvedMode::Ask);
+        let slim = staged(&o, &t);
+        assert!(slim.contains(&"zeta.esp".to_string()), "{slim:?}");
+        assert_eq!(row(&t, o.mod_id).unwrap().1, "ask");
+        let body = t
+            .tmp
+            .path()
+            .join("data/g/staging")
+            .join(&o.uid)
+            .join("meshes/body.nif");
+        assert_eq!(std::fs::read_to_string(&body).unwrap(), "body/slim.nif");
+
+        // Reinstall (legacy meta: fomodMode reuse + recorded choices).
+        let choices = crate::mods::recorded_fomod_choices(t.store.conn(), o.mod_id).unwrap();
+        let meta = InstallMeta {
+            uid: Some(o.uid.clone()),
+            replaces: Some(o.mod_id),
+            fomod_mode: FomodMode::Reuse,
+            fomod_choices: choices,
+            ..Default::default()
+        };
+        let again = install_with(&mut t, &p, meta, Some(&mut NoAsk)).unwrap();
+        assert_eq!(again.mod_id, o.mod_id);
+        assert_eq!(again.fomod.as_ref().unwrap().mode, ResolvedMode::Choices);
+        assert_eq!(staged(&again, &t), slim);
+        assert_eq!(row(&t, o.mod_id).unwrap().1, "choices");
+
+        // Reuse without recorded choices asks when interactive.
+        let mut r = Scripted {
+            answers: vec![vec![1], vec![], vec![], vec![0], vec![], vec![]],
+            ..Default::default()
+        };
+        let meta = InstallMeta {
+            uid: Some(o.uid.clone()),
+            replaces: Some(o.mod_id),
+            fomod_mode: FomodMode::Reuse,
+            ..Default::default()
+        };
+        let asked = install_with(&mut t, &p, meta, Some(&mut r)).unwrap();
+        assert_eq!(asked.fomod.as_ref().unwrap().mode, ResolvedMode::Ask);
+        assert_eq!(r.seen.len(), 5, "{:?}", r.seen);
+    }
+
+    #[test]
+    fn fomod_collection_mode_uses_given_choices_and_never_asks() {
+        let mut t = setup("generic");
+        let p = fomod_src(&t);
+        let choices = crate::fomod::FomodChoices::from_json(
+            r#"{"type":"fomod","options":[{"name":"Main","groups":[{"name":"Body","choices":[{"name":"Slim","idx":0}]}]}]}"#,
+        );
+        let meta = InstallMeta {
+            fomod_mode: FomodMode::Collection,
+            fomod_choices: choices,
+            ..Default::default()
+        };
+        let o = install_with(&mut t, &p, meta, Some(&mut NoAsk)).unwrap();
+        assert_eq!(o.fomod.as_ref().unwrap().mode, ResolvedMode::Choices);
+        assert!(!staged(&o, &t).contains(&"large.esp".to_string()));
+        // No recorded choices: defaults, still without asking.
+        let meta = InstallMeta {
+            fomod_mode: FomodMode::Collection,
+            ..Default::default()
+        };
+        let o = install_with(&mut t, &p, meta, Some(&mut NoAsk)).unwrap();
+        assert_eq!(o.fomod.as_ref().unwrap().mode, ResolvedMode::Default);
+    }
+
+    #[test]
+    fn fomod_ask_without_resolver_and_default_mode_use_defaults() {
+        let mut t = setup("generic");
+        let p = fomod_src(&t);
+        for mode in [FomodMode::Ask, FomodMode::Auto, FomodMode::Reuse] {
+            let meta = InstallMeta {
+                fomod_mode: mode,
+                ..Default::default()
+            };
+            let o = install_with(&mut t, &p, meta, None).unwrap();
+            assert_eq!(o.fomod.unwrap().mode, ResolvedMode::Default, "{mode:?}");
+        }
+        let meta = InstallMeta {
+            fomod_mode: FomodMode::Default,
+            ..Default::default()
+        };
+        let o = install_with(&mut t, &p, meta, Some(&mut NoAsk)).unwrap();
+        assert_eq!(o.fomod.unwrap().mode, ResolvedMode::Default);
+    }
+
+    #[test]
+    fn fomod_none_mode_skips_installer_and_clears_choices() {
+        let mut t = setup("generic");
+        let p = fomod_src(&t);
+        let o = install_with(&mut t, &p, InstallMeta::default(), None).unwrap();
+        assert!(row(&t, o.mod_id).is_some());
+        let meta = InstallMeta {
+            uid: Some(o.uid.clone()),
+            replaces: Some(o.mod_id),
+            fomod_mode: FomodMode::None,
+            ..Default::default()
+        };
+        let plain = install_with(&mut t, &p, meta, None).unwrap();
+        assert!(plain.fomod_found && plain.fomod.is_none());
+        assert!(row(&t, o.mod_id).is_none());
+        // Plain layout keeps the archive tree as is (generic profile).
+        assert!(staged(&plain, &t).contains(&"Mod-1.0/body/slim.nif".to_string()));
+    }
+
+    #[test]
+    fn fomod_failure_aborts_install_without_a_row() {
+        let mut t = setup("generic");
+        let p = src(
+            &t,
+            "bad",
+            &[
+                ("fomod/ModuleConfig.xml", "<config><oops></config>"),
+                ("a.esp", "a"),
+            ],
+        );
+        // find_fomod needs depth >= 2: wrap it.
+        let w = t.tmp.path().join("src/wrapbad");
+        std::fs::create_dir_all(&w).unwrap();
+        std::fs::rename(&p, w.join("bad")).unwrap();
+        assert!(matches!(
+            install_with(&mut t, &w, InstallMeta::default(), None),
+            Err(ModsError::Fomod(FomodError::Parse(_)))
+        ));
+        assert!(list_mods(t.store.conn(), "g").unwrap().is_empty());
     }
 }

@@ -16,7 +16,7 @@ use crate::archive::ArchiveError;
 use crate::staging::StagingError;
 use crate::store::{self, Store, StoreError};
 
-pub use install::{find_fomod, install_archive, InstallMeta, InstallOutcome};
+pub use install::{find_fomod, install_archive, InstallHooks, InstallMeta, InstallOutcome};
 pub use profiles::{
     delete_profile, list_profiles, load_profile, save_profile, valid_profile_name, ProfileLoad,
     ProfileSummary,
@@ -53,6 +53,8 @@ pub enum ModsError {
     Archive(#[from] ArchiveError),
     #[error(transparent)]
     Staging(#[from] StagingError),
+    #[error("FOMOD installer failed: {0}")]
+    Fomod(#[from] crate::fomod::FomodError),
     #[error(transparent)]
     Store(#[from] StoreError),
     #[error(transparent)]
@@ -476,6 +478,14 @@ pub fn fomod_choices(conn: &Connection, mod_id: i64) -> Result<Option<String>, M
             |r| r.get(0),
         )
         .optional()?)
+}
+
+/// [`fomod_choices`] parsed; `None` when nothing (usable) is recorded.
+pub fn recorded_fomod_choices(
+    conn: &Connection,
+    mod_id: i64,
+) -> Result<Option<crate::fomod::FomodChoices>, ModsError> {
+    Ok(fomod_choices(conn, mod_id)?.and_then(|s| crate::fomod::FomodChoices::from_json(&s)))
 }
 
 #[cfg(test)]

@@ -8,6 +8,7 @@ use anyhow::{bail, Result};
 use clap::{Args, Subcommand};
 use modman_core::config::Config;
 use modman_core::deploy;
+use modman_core::fomod::{FomodChoices, FomodMode};
 use modman_core::games::GameConfig;
 use modman_core::mods::{self, InstallMeta, ModRecord, OrderSpec};
 use modman_core::nexus::{latest_file, refresh_requirements};
@@ -306,8 +307,17 @@ pub fn info(ctx: &mut Ctx, args: InfoArgs) -> Result<()> {
     );
     println!("  Variant     : {}", d(m.variant.as_deref()));
     println!("  Installed   : {}", fmt_time(m.installed_at));
-    if let Some(ch) = mods::fomod_choices(ctx.store.conn(), m.id)? {
-        println!("  FOMOD       : {ch}");
+    // Legacy L3467: one line per installer step.
+    if let Some(raw) = mods::fomod_choices(ctx.store.conn(), m.id)? {
+        println!("  FOMOD       :");
+        match FomodChoices::from_json(&raw) {
+            Some(ch) => {
+                for (step, names) in ch.summary() {
+                    println!("      {step}: {}", names.join(", "));
+                }
+            }
+            None => println!("      {raw}"),
+        }
     }
     if m.enabled {
         let (mut wins, mut loses) = (0, 0);
@@ -878,9 +888,12 @@ pub fn updates(ctx: &mut Ctx, args: UpdatesArgs) -> Result<()> {
             variant: m.variant.clone(),
             replaces: Some(m.id),
             uid: None,
+            // Legacy L3800-3802: reuse the recorded FOMOD choices.
+            fomod_mode: FomodMode::Reuse,
+            fomod_choices: mods::recorded_fomod_choices(ctx.store.conn(), m.id)?,
         };
         let lock = staging_lock(ctx)?;
-        let r = install_archive(ctx, &game, &archive, &meta);
+        let r = install_archive(ctx, &game, &archive, &meta, false);
         drop(lock);
         match r {
             Ok(o) => {

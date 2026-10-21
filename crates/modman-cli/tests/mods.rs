@@ -94,19 +94,12 @@ fn install_aliases_name_flag_and_deploy_flag() {
 }
 
 #[test]
-fn install_rejects_unknown_targets_and_defers_fomod_and_collections() {
+fn install_rejects_unknown_targets_and_defers_collections() {
     let (env, _) = setup();
     env.run(&["install", "not a target"])
         .failure()
         .stderr(contains("Don't know how to install"));
     let z = env.zip("a.zip", &[("Data/a.esp", b"a")]);
-    for mode in ["ask", "default", "none", "reuse"] {
-        env.run(&["install", z.to_str().unwrap(), "--fomod", mode])
-            .failure()
-            .stderr(contains(
-                "install --fomod: not implemented yet (milestone M5)",
-            ));
-    }
     env.run(&["install", z.to_str().unwrap(), "--fomod", "bogus"])
         .failure();
     env.run(&[
@@ -576,7 +569,7 @@ fn launch_aliases_need_appid_and_start_steam() {
 // ── reinstall ───────────────────────────────────────────────
 
 #[test]
-fn reinstall_reextracts_and_defers_fomod_options() {
+fn reinstall_reextracts_and_keeps_state() {
     let (env, _) = setup();
     install(&env, "Alpha", &[("Data/alpha.esp", b"a")]);
     env.run(&["disable", "Alpha"]).success();
@@ -587,12 +580,155 @@ fn reinstall_reextracts_and_defers_fomod_options() {
         .stdout(contains("Reinstalled Alpha"));
     assert!(st.join("alpha.esp").is_file());
     assert_eq!(env.enabled(), [("Alpha".into(), false)]);
-    env.run(&["reinstall", "Alpha", "--ask"])
-        .failure()
-        .stderr(contains("not implemented yet (milestone M5)"));
+    // No FOMOD in the archive: the options are accepted and change nothing.
     env.run(&["reinstall", "Alpha", "--fomod", "default"])
+        .success();
+    env.run(&["reinstall", "Alpha", "--fomod", "bogus"])
+        .failure();
+}
+
+// ── FOMOD (M5) ──────────────────────────────────────────────
+
+const FOMOD_XML: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<config>
+  <moduleName>Fancy Fixture</moduleName>
+  <requiredInstallFiles>
+    <file source="core.esp" destination="core.esp"/>
+    <file source="..\Fancy.zip" destination="escape.zip"/>
+  </requiredInstallFiles>
+  <installSteps order="Explicit">
+    <installStep name="Main">
+      <optionalFileGroups>
+        <group name="Look" type="SelectExactlyOne">
+          <plugins order="Explicit">
+            <plugin name="Light">
+              <description>Bright textures</description>
+              <files><file source="opt\light.esp" destination="look.esp"/></files>
+              <typeDescriptor><type name="Recommended"/></typeDescriptor>
+            </plugin>
+            <plugin name="Dark">
+              <description>Dark textures</description>
+              <files><file source="opt/dark.esp" destination="look.esp"/></files>
+              <typeDescriptor><type name="Optional"/></typeDescriptor>
+            </plugin>
+          </plugins>
+        </group>
+      </optionalFileGroups>
+    </installStep>
+  </installSteps>
+</config>"#;
+
+fn fomod_zip(env: &Env) -> PathBuf {
+    env.zip(
+        "Fancy.zip",
+        &[
+            ("Fancy-1.0/fomod/ModuleConfig.xml", FOMOD_XML.as_bytes()),
+            ("Fancy-1.0/core.esp", b"core"),
+            ("Fancy-1.0/opt/light.esp", b"light"),
+            ("Fancy-1.0/opt/dark.esp", b"dark"),
+        ],
+    )
+}
+
+fn look(env: &Env) -> String {
+    let st = env.paths().data_dir.join(G).join("staging/Fancy");
+    assert!(st.join("core.esp").is_file());
+    assert!(!st.join("fomod").exists() && !st.join("opt").exists());
+    std::fs::read_to_string(st.join("look.esp")).unwrap()
+}
+
+#[test]
+fn install_fomod_default_installs_default_option_and_info_shows_choices() {
+    let (env, _) = setup();
+    let z = fomod_zip(&env);
+    env.run(&["install", z.to_str().unwrap(), "--fomod", "default"])
+        .success()
+        .stdout(contains("FOMOD installer: default choices").and(contains("Installed")))
+        .stderr(contains("FOMOD: '..\\Fancy.zip' not found in the archive"));
+    assert_eq!(look(&env), "light");
+    let st = env.paths().data_dir.join(G).join("staging/Fancy");
+    assert!(!st.join("escape.zip").exists());
+    env.run(&["info", "Fancy"])
+        .success()
+        .stdout(contains("FOMOD       :").and(contains("Main: Light")));
+}
+
+#[test]
+fn install_without_tty_uses_defaults_and_fomod_none_uses_plain_layout() {
+    let (env, _) = setup();
+    let z = fomod_zip(&env);
+    // auto (config default) without a terminal: defaults, no prompt.
+    env.run(&["install", z.to_str().unwrap()])
+        .success()
+        .stderr(contains("Choose").not());
+    assert_eq!(look(&env), "light");
+    env.run(&["reinstall", "Fancy", "--fomod", "none"])
+        .success();
+    env.run(&["info", "Fancy"])
+        .success()
+        .stdout(contains("FOMOD").not());
+}
+
+#[test]
+fn install_fomod_ask_reads_scripted_answers() {
+    let (env, _) = setup();
+    let z = fomod_zip(&env);
+    env.cmd()
+        .args(["install", z.to_str().unwrap(), "--fomod", "ask"])
+        .write_stdin("?2\n3\n2\n")
+        .assert()
+        .success()
+        .stderr(
+            contains("FOMOD installer: Fancy Fixture")
+                .and(contains("Look"))
+                .and(contains("Dark textures"))
+                .and(contains("invalid selection")),
+        );
+    assert_eq!(look(&env), "dark");
+    // Closed input cancels the install.
+    env.cmd()
+        .args(["reinstall", "Fancy", "--ask"])
+        .write_stdin("")
+        .assert()
         .failure()
-        .stderr(contains("not implemented yet (milestone M5)"));
+        .stderr(contains("cancelled"));
+    assert_eq!(look(&env), "dark");
+}
+
+#[test]
+fn reinstall_reuses_choices_and_ask_reprompts() {
+    let (env, _) = setup();
+    let z = fomod_zip(&env);
+    env.cmd()
+        .args(["install", z.to_str().unwrap(), "--fomod", "ask"])
+        .write_stdin("2\n")
+        .assert()
+        .success();
+    assert_eq!(look(&env), "dark");
+    // Default reinstall replays the recorded choices without asking.
+    env.cmd()
+        .args(["reinstall", "Fancy"])
+        .write_stdin("1\n")
+        .assert()
+        .success()
+        .stdout(contains("FOMOD installer: recorded choices"))
+        .stderr(contains("Choose").not());
+    assert_eq!(look(&env), "dark");
+    // --ask asks again.
+    env.cmd()
+        .args(["reinstall", "Fancy", "--ask"])
+        .write_stdin("1\n")
+        .assert()
+        .success()
+        .stderr(contains("Choose"));
+    assert_eq!(look(&env), "light");
+    env.run(&["info", "Fancy"])
+        .success()
+        .stdout(contains("Main: Light"));
+    // -y: no questions, defaults.
+    env.run(&["-y", "reinstall", "Fancy", "--fomod", "ask"])
+        .success()
+        .stdout(contains("FOMOD installer: default choices"));
 }
 
 #[test]
