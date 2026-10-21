@@ -532,7 +532,7 @@ tasks:
     wave: 10
     depends_on: [T14, T15]
     agent: gem-browser-tester
-    status: pending
+    status: failed  # 7c53fcf artifacts; fixable: F1-F5 frontend -> T16D debug + T16F fix, then T16 re-run
     retries_used: 0
     acceptance_criteria:
       - "Every view navigable end-to-end keyboard-only; no focus traps; focus ring visible (screenshots at 1280x800)."
