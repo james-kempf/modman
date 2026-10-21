@@ -428,7 +428,7 @@ tasks:
     depends_on: [T11, T12]
     agent: gem-implementer
     context_cluster: port-baseline
-    status: pending
+    status: completed  # 8fc70f1; core app layer + Ui trait
     retries_used: 0
     acceptance_criteria:
       - "cargo build and cargo clippy -D warnings pass for the desktop crate."
