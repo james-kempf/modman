@@ -199,7 +199,7 @@ tasks:
     depends_on: [T03]
     agent: gem-implementer
     context_cluster: port-baseline
-    status: pending
+    status: completed  # 8acc2c3
     retries_used: 0
     acceptance_criteria:
       - "Fixture test: snapshot temp game dir (path+sha256+mode), deploy N mods with overlapping files and overwritten originals, purge, snapshot equals original byte-for-byte."
