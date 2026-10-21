@@ -167,7 +167,7 @@ tasks:
     depends_on: [T03]
     agent: gem-implementer
     context_cluster: port-baseline
-    status: pending
+    status: completed  # f11bc64
     retries_used: 0
     acceptance_criteria:
       - "Extraction tests for zip, 7z and rar fixtures pass."
