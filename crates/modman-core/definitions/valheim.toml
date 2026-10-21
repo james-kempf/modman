@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Ported from legacy/modman game_preset (L269-300).
+domain = "valheim"
+name = "Valheim"
+steam_appid = 892970
+subdir = "."
+target = "game_dir"
+profile = "bepinex"
+support = "experimental"

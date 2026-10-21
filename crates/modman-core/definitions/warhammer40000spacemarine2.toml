@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Ported from legacy/modman game_preset (L269-300).
+domain = "warhammer40000spacemarine2"
+name = "Warhammer 40,000: Space Marine 2"
+steam_appid = 2183900
+subdir = "."
+target = "game_dir"
+profile = "generic"
+support = "experimental"

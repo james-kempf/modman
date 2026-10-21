@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Ported from legacy/modman game_preset (L269-300).
+domain = "fallout4"
+name = "Fallout 4"
+steam_appid = 377160
+subdir = "Data"
+target = "game_dir"
+profile = "bethesda"
+support = "experimental"
+
+[plugins]
+format = "star"
+appdata_folder = "Fallout4"

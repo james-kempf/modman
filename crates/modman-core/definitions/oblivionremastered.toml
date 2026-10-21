@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Ported from legacy/modman game_preset (L269-300).
+domain = "oblivionremastered"
+name = "Oblivion Remastered"
+steam_appid = 2623190
+subdir = "."
+target = "game_dir"
+profile = "ue"
+support = "experimental"
+paks_dir = "OblivionRemastered/Content/Paks/~mods"

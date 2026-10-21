@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Ported from legacy/modman game_preset (L269-300).
+domain = "morrowind"
+name = "Morrowind"
+steam_appid = 22320
+subdir = "Data Files"
+target = "game_dir"
+profile = "bethesda"
+support = "experimental"

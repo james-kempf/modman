@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Ported from legacy/modman game_preset (L269-300).
+domain = "witcher3"
+name = "The Witcher 3: Wild Hunt"
+steam_appid = 292030
+subdir = "."
+target = "game_dir"
+profile = "witcher3"
+support = "experimental"

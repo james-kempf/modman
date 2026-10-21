@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Ported from legacy/modman game_preset (L269-300).
+domain = "fallout3"
+name = "Fallout 3"
+steam_appid = 22370
+subdir = "Data"
+target = "game_dir"
+profile = "bethesda"
+support = "experimental"
+
+[plugins]
+format = "plain"
+appdata_folder = "Fallout3"
