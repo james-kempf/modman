@@ -5,6 +5,7 @@
 //! adapters over this crate. Milestones refer to `linux_mod_manager_tech_stack.md` §8.
 
 pub mod archive; // M3: zip / 7z / rar extraction
+pub mod autoupdate; // M7: systemd user timer, update + redeploy after system/game updates
 pub mod blocking; // sync adapter for async APIs (CLI)
 pub mod collections; // M5: Nexus collections
 pub mod config; // M1: global settings

@@ -15,45 +15,9 @@ pub mod nxm;
 pub mod plugins;
 
 use anyhow::{bail, Result};
-use clap::Args;
 
 use crate::cli::Commands;
 use crate::context::Ctx;
-
-/// Arguments of a command that is not implemented yet: accepts anything.
-#[derive(Args, Debug)]
-pub struct StubArgs {
-    #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
-    pub args: Vec<String>,
-}
-
-/// Typed "not yet" error for features of later milestones.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NotYet {
-    pub what: String,
-    pub milestone: &'static str,
-}
-
-impl std::fmt::Display for NotYet {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}: not implemented yet (milestone {})",
-            self.what, self.milestone
-        )
-    }
-}
-
-impl std::error::Error for NotYet {}
-
-/// Fails with [`NotYet`].
-pub fn not_yet(what: &str, milestone: &'static str) -> Result<()> {
-    Err(NotYet {
-        what: what.to_string(),
-        milestone,
-    }
-    .into())
-}
 
 /// Runs a parsed command.
 pub fn dispatch(ctx: &mut Ctx, command: Commands) -> Result<()> {

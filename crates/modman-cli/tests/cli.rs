@@ -192,9 +192,10 @@ fn later_milestone_commands_report_not_yet_implemented() {
     env.run(&["collection", "list"])
         .failure()
         .stderr(contains("No game selected").and(contains("not implemented").not()));
+    // Auto-update arrived with M7.
     env.run(&["au", "status"])
-        .failure()
-        .stderr(contains("autoupdate: not implemented yet (milestone M7)"));
+        .success()
+        .stdout(contains("Scheduler").and(contains("not implemented").not()));
     // A bare nxm:// link is routed to the nxm handler (legacy L5041), which
     // rejects malformed links.
     env.cmd()
