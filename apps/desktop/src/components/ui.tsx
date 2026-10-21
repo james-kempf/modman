@@ -29,8 +29,11 @@ export function Button({
     <button
       type="button"
       {...rest}
-      disabled={rest.disabled || busy}
+      // Busy stays focusable: native `disabled` would drop focus to <body>.
+      // preventDefault also cancels a submit button's form submission.
+      aria-disabled={busy || undefined}
       aria-busy={busy || undefined}
+      onClick={busy ? (e) => e.preventDefault() : rest.onClick}
       className={cx(
         "inline-flex min-h-12 min-w-12 items-center justify-center gap-2 rounded-xl px-5 text-base transition-colors",
         TONES[tone],

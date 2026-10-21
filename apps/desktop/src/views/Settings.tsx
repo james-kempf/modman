@@ -112,6 +112,7 @@ export function ApiKeyEntry({ onDone }: { onDone?: () => void }) {
         spellCheck={false}
         value={key}
         onChange={(e) => setKey(e.target.value)}
+        data-osk-submit="Sign in"
         className="input font-mono"
         placeholder="Paste or type your personal API key"
       />
@@ -265,12 +266,21 @@ function AppInfoCard() {
   if (!i) return null;
   return (
     <Card title="About">
-      <dl className="grid gap-2 font-mono text-sm text-zinc-400">
-        <div>modman {i.version}</div>
-        <div>config: {i.config_dir}</div>
-        <div>data: {i.data_dir}</div>
-        <div>log: {i.log_path}</div>
-        <div>database: {i.db_path}</div>
+      <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-2 font-mono text-sm text-zinc-400">
+        {(
+          [
+            ["modman", i.version],
+            ["config", i.config_dir],
+            ["data", i.data_dir],
+            ["log", i.log_path],
+            ["database", i.db_path],
+          ] as const
+        ).map(([k, v]) => (
+          <div key={k} className="contents">
+            <dt>{k}</dt>
+            <dd className="break-all">{v}</dd>
+          </div>
+        ))}
       </dl>
     </Card>
   );

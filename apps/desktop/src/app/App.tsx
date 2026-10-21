@@ -8,6 +8,7 @@ import { PromptHost } from "../components/PromptDialog";
 import { Button, SupportBadge, cx } from "../components/ui";
 import { installKeyboardNav, performNav } from "../nav/actions";
 import { startGamepadLoop } from "../nav/gamepad";
+import { installFocusRecovery } from "../nav/spatial";
 import { Activity } from "../views/Activity";
 import { Collections } from "../views/Collections";
 import { Install } from "../views/Install";
@@ -29,6 +30,12 @@ const VIEW: Record<ViewId, () => JSX.Element> = {
   settings: Settings,
 };
 
+/**
+ * Bottom padding + scroll-padding for the fixed notice stack (~82px per
+ * notice + 24px offset), so a control scrolled into view is not under it.
+ */
+const NOTICE_ROOM = ["pb-24", "pb-28 scroll-pb-28", "pb-48 scroll-pb-48", "pb-72 scroll-pb-72"];
+
 export function App() {
   const view = useUi((s) => s.view);
   const modal = useUi((s) => s.prompts.length > 0 || s.osk !== null);
@@ -36,14 +43,17 @@ export function App() {
   useEffect(() => {
     const stopKeys = installKeyboardNav();
     const stopPad = startGamepadLoop((a) => performNav(a));
+    const stopRecovery = installFocusRecovery();
     // Start on the tab rail so arrows/D-pad work right away.
     document.querySelector<HTMLElement>("[data-tab][aria-current='page']")?.focus();
     return () => {
       stopKeys();
       stopPad();
+      stopRecovery();
     };
   }, []);
 
+  const noticeCount = useUi((s) => s.notices.length);
   const View = VIEW[view];
   return (
     <>
@@ -51,7 +61,7 @@ export function App() {
         <TabRail />
         <div className="flex min-w-0 flex-1 flex-col">
           <GameHeader />
-          <main className="min-h-0 flex-1 overflow-y-auto px-8 pt-6 pb-24">
+          <main className={cx("min-h-0 flex-1 overflow-y-auto px-8 pt-6", NOTICE_ROOM[noticeCount] ?? NOTICE_ROOM[3])}>
             <View />
           </main>
         </div>
@@ -69,7 +79,7 @@ function TabRail() {
   const running = useUi((s) => Object.values(s.jobs).filter((j) => j.state === "started").length);
   const prompts = useUi((s) => s.prompts.length);
   return (
-    <nav aria-label="Views" className="flex w-56 shrink-0 flex-col gap-1 border-r border-white/[0.06] bg-ink-2 p-3">
+    <nav aria-label="Views" data-nav-rail className="flex w-56 shrink-0 flex-col gap-1 border-r border-white/[0.06] bg-ink-2 p-3">
       <div className="px-3 pt-2 pb-4 text-xl font-semibold tracking-tight text-zinc-50">modman</div>
       {VIEWS.map((v) => (
         <button

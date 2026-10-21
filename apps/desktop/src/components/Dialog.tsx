@@ -2,9 +2,9 @@
 // Modal dialog: a spatial-navigation scope that takes focus on open, traps
 // Tab, closes on "back" (Escape / gamepad B) and restores focus on close.
 
-import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { BACK_EVENT } from "../nav/actions";
-import { focusables } from "../nav/spatial";
+import { focusables, navScope, recoverFocus } from "../nav/spatial";
 import { cx } from "./ui";
 
 export function Dialog({
@@ -13,30 +13,45 @@ export function Dialog({
   onBack,
   children,
   wide,
+  returnFocus,
 }: {
   title: ReactNode;
   subtitle?: ReactNode;
   onBack: () => void;
   children: ReactNode;
   wide?: boolean;
+  /** Where focus goes on close (default: what had focus when the dialog opened). */
+  returnFocus?: HTMLElement | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const back = useRef(onBack);
   back.current = onBack;
   const titleId = useId();
+  // Captured during the first render, before this dialog takes focus (an
+  // effect would see the dialog's own element on StrictMode's re-run).
+  const [opener] = useState(() => (document.activeElement instanceof HTMLElement ? document.activeElement : null));
+  const ret = useRef(returnFocus);
+  ret.current = returnFocus;
 
   useEffect(() => {
     const el = ref.current!;
-    const prev = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const first = el.querySelector<HTMLElement>("[data-autofocus]") ?? focusables(el)[0];
     first?.focus();
     const onBackEv = () => back.current();
     el.addEventListener(BACK_EVENT, onBackEv);
     return () => {
       el.removeEventListener(BACK_EVENT, onBackEv);
-      if (prev?.isConnected) prev.focus();
+      const target = ret.current ?? opener;
+      // Next frame: after the commit that removes the dialog and lifts the
+      // app root's `inert` (focusing an inert element is a no-op).
+      requestAnimationFrame(() => {
+        const a = document.activeElement;
+        if (a && a !== document.body && a.isConnected) return; // focus already placed (StrictMode re-run, another dialog)
+        if (target?.isConnected && focusables(navScope()).includes(target)) target.focus();
+        else recoverFocus();
+      });
     };
-  }, []);
+  }, [opener]);
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key !== "Tab") return;

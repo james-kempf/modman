@@ -3,6 +3,7 @@
 // does not appear. Types into the target input on "Done".
 
 import { useState } from "react";
+import { flushSync } from "react-dom";
 import { useUi } from "../app/store";
 import { Dialog } from "./Dialog";
 import { Button, cx } from "./ui";
@@ -42,11 +43,14 @@ function Osk() {
   const [show, setShow] = useState(!secret);
 
   const type = (ch: string) => setValue((v) => v + (shift ? ch.toUpperCase() : ch));
-  const done = () => {
+  // Inputs marked `data-osk-submit="<action>"` get a button that also submits their form.
+  const submitLabel = target.input.dataset.oskSubmit;
+  const done = (submit = false) => {
     const input = target.input;
-    setNativeValue(input, value);
-    close();
-    input.focus();
+    // Commit the owner's state now so its onSubmit sees the new value.
+    flushSync(() => setNativeValue(input, value));
+    close(); // the Dialog returns focus to the input once the app root is no longer inert
+    if (submit) input.form?.requestSubmit();
   };
   const paste = async () => {
     const t = await readClipboard();
@@ -55,7 +59,7 @@ function Osk() {
   };
 
   return (
-    <Dialog title={`Keyboard: ${target.label}`} onBack={close} wide>
+    <Dialog title={`Keyboard: ${target.label}`} onBack={close} wide returnFocus={target.input}>
       <output
         aria-label="Typed text"
         className="mb-4 block min-h-12 rounded-xl border border-white/10 bg-ink px-4 py-3 font-mono text-lg break-all text-zinc-100"
@@ -100,9 +104,14 @@ function Osk() {
         <Button onClick={paste}>Paste</Button>
         {secret && <Button onClick={() => setShow((s) => !s)}>{show ? "Hide" : "Show"}</Button>}
         <Button onClick={close}>Cancel</Button>
-        <Button tone="primary" onClick={done}>
+        <Button tone={submitLabel ? "default" : "primary"} onClick={() => done()}>
           Done
         </Button>
+        {submitLabel && (
+          <Button tone="primary" disabled={!value.trim()} onClick={() => done(true)}>
+            {submitLabel}
+          </Button>
+        )}
       </div>
     </Dialog>
   );

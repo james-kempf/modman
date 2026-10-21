@@ -63,7 +63,9 @@ export interface OskTarget {
 }
 
 const MAX_ACTIVITY = 500;
-const MAX_NOTICES = 4;
+const MAX_NOTICES = 3;
+/** Auto-dismiss after (ms); null = stays until dismissed. "Deploy now" notices always stay. */
+const NOTICE_TTL: Record<NoticeTone, number | null> = { info: 6000, success: 6000, warn: 10000, error: null };
 
 export interface UiState {
   view: ViewId;
@@ -189,8 +191,17 @@ export const useUi = create<UiState>()((set, get) => ({
 
   setStartupCheck: (c) => set({ startupCheck: c }),
 
-  notify: (tone, text, deploy) =>
-    set((s) => ({ notices: [...s.notices, { id: ++seq, tone, text, deploy }].slice(-MAX_NOTICES) })),
+  notify: (tone, text, deploy) => {
+    const id = ++seq;
+    set((s) => ({
+      // The same notice again replaces the old one (moved to the end, fresh timeout) instead of stacking.
+      notices: [...s.notices.filter((n) => !(n.tone === tone && n.text === text)), { id, tone, text, deploy }].slice(
+        -MAX_NOTICES,
+      ),
+    }));
+    const ttl = NOTICE_TTL[tone];
+    if (ttl && !deploy) setTimeout(() => get().dismiss(id), ttl);
+  },
   dismiss: (id) => set((s) => ({ notices: s.notices.filter((n) => n.id !== id) })),
 
   setNeedsDeploy: (v) => set({ needsDeploy: v }),

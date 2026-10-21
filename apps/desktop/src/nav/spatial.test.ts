@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { afterEach, describe, expect, it } from "vitest";
-import { findNext, moveFocus, navScope } from "./spatial";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { findNext, installFocusRecovery, moveFocus, navScope } from "./spatial";
 
 /** Button with a fixed layout box (jsdom has no layout). */
-function btn(id: string, x: number, y: number, w = 100, h = 50, parent: HTMLElement = document.body) {
-  const b = document.createElement("button");
+function btn(id: string, x: number, y: number, w = 100, h = 50, parent: HTMLElement = document.body, tag = "button") {
+  const b = document.createElement(tag) as HTMLButtonElement;
   b.id = id;
   b.textContent = id;
   b.getBoundingClientRect = () => ({ left: x, top: y, right: x + w, bottom: y + h, width: w, height: h, x, y, toJSON() {} }) as DOMRect;
@@ -80,5 +80,69 @@ describe("spatial navigation", () => {
     expect(findNext(p, "down")).toBe(q);
     expect(findNext(q, "up")).toBe(p);
     expect(findNext(q, "right")).toBeNull();
+  });
+});
+
+/** Settings at 1280x800 (signed out, no key typed) as measured by T16; `dy` = main scroll. */
+function settings(dy = 0) {
+  const nav = document.createElement("nav");
+  nav.setAttribute("data-nav-rail", "");
+  const main = document.createElement("main");
+  document.body.append(nav, main);
+  const tabs = ["overview", "mods", "install", "collections", "requirements", "activity", "settings"].map((t, i) =>
+    btn(t, 12, 68 + 52 * i, 199, 48, nav),
+  );
+  return {
+    tabs,
+    input: btn("key", 281, 313 - dy, 942, 48, main, "input"),
+    paste: btn("Paste", 281, 373 - dy, 83, 48, main),
+    keyboard: btn("Keyboard", 376, 373 - dy, 114, 48, main),
+    toggle: btn("Auto-update off", 1022, 495 - dy, 201, 48, main),
+    config: btn("config", 281, 919 - dy, 853, 48, main, "input"),
+  };
+}
+
+describe("spatial scoring on the Settings layout (T16 F2a/F3)", () => {
+  it("Right from Keyboard reaches the toggle, not the overlapping wide field above", () => {
+    const s = settings();
+    expect(findNext(s.keyboard, "right")).toBe(s.toggle);
+  });
+  it("Up from a scrolled config field reaches the toggle, not the tab rail", () => {
+    const s = settings(511);
+    expect(findNext(s.config, "up")).toBe(s.toggle);
+  });
+  it("Down from Keyboard/Paste stays in content instead of jumping to the rail", () => {
+    const s = settings();
+    expect(findNext(s.keyboard, "down")).toBe(s.config);
+    expect(findNext(s.paste, "down")).toBe(s.config);
+  });
+  it("Down still moves along the rail and the rail is left horizontally", () => {
+    const s = settings();
+    expect(findNext(s.tabs[5], "down")).toBe(s.tabs[6]);
+    expect(findNext(s.tabs[6], "right")).toBe(s.paste);
+  });
+});
+
+describe("focus recovery (T16 F1)", () => {
+  it("puts focus back near where it was lost when the focused element goes away", async () => {
+    const a = btn("a", 0, 0);
+    const b = btn("b", 0, 100);
+    btn("far", 900, 900);
+    // jsdom reports no document focus once nothing is focused; a browser window still has it.
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const stop = installFocusRecovery();
+    try {
+      a.focus();
+      // A browser drops focus to <body> (focusout, no relatedTarget) when the
+      // focused element is disabled or unmounted; jsdom does not, so blur first.
+      a.blur();
+      a.remove();
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+      expect(document.activeElement).toBe(b);
+    } finally {
+      stop();
+      vi.restoreAllMocks();
+    }
   });
 });

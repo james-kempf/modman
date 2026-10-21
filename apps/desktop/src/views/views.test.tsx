@@ -76,6 +76,20 @@ describe("Install", () => {
     expect(await screen.findByText(/Installed SkyUI \(5 files\)/)).toBeInTheDocument();
   });
 
+  // T16 F2b: fails when the on-screen keyboard can only fill the field and the gamepad user must find Install.
+  it("on-screen keyboard Install button fills the target and submits it", async () => {
+    const { t } = await open("install", {
+      install: () => ({ game: null, installed: null, collection: null, after: { deployed: null, needs_deploy: false } }),
+    });
+    const target = (await screen.findByLabelText(/Mod id, Nexus URL/)) as HTMLInputElement;
+    act(() => useUi.getState().openOsk({ input: target, label: "target" }));
+    const dlg = await screen.findByRole("dialog");
+    act(() => within(dlg).getByRole("button", { name: "7" }).click());
+    act(() => within(dlg).getByRole("button", { name: "Install" }).click());
+    await waitFor(() => expect(t.callsOf("install")).toHaveLength(1));
+    expect(t.callsOf("install")[0]).toMatchObject({ target: "7" });
+  });
+
   it("nxm paste box submits the link", async () => {
     const { t, user } = await open("install", {
       nxm_submit: () => ({ row: 3, link: "nxm://skyrimspecialedition/mods/1/files/2", kind: "mod" }),

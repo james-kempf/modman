@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useUi } from "../app/store";
@@ -57,7 +57,8 @@ describe("API key entry", () => {
     pad.press(BUTTON.A);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(field).toHaveValue("12");
-    expect(document.activeElement).toBe(field);
+    // Restored after the dialog is gone and the app root is no longer inert.
+    await waitFor(() => expect(document.activeElement).toBe(field));
     pad.downUntil((el) => el?.textContent === "Sign in");
     pad.press(BUTTON.A);
     await waitFor(() => expect(t.callsOf("login")).toEqual([{ api_key: "12" }]));
@@ -112,6 +113,77 @@ describe("API key entry", () => {
     await user.click(screen.getByRole("button", { name: "Paste" }));
     await screen.findByText(/Clipboard not readable/);
     expect(document.activeElement).toBe(field);
+  });
+});
+
+describe("on-screen keyboard (T16 F1/F2b)", () => {
+  // Fails when Done focuses the input while the App root is still inert (focus lands on <body>).
+  it("Done never focuses the input while the app root is still inert", async () => {
+    const { renderApp } = await setup();
+    renderApp();
+    act(() => useUi.getState().setView("settings"));
+    const field = (await screen.findByLabelText("Nexus API key")) as HTMLInputElement;
+    act(() => useUi.getState().openOsk({ input: field, label: "Nexus API key" }));
+    await screen.findByRole("dialog");
+    const calls: boolean[] = [];
+    const orig = field.focus.bind(field);
+    vi.spyOn(field, "focus").mockImplementation((o) => {
+      calls.push(!!field.closest("[inert]"));
+      orig(o);
+    });
+    act(() => screen.getByRole("button", { name: "Done" }).click());
+    await waitFor(() => expect(document.activeElement).toBe(field));
+    expect(calls).not.toContain(true);
+  });
+
+  // Fails when the keyboard can only fill the field: the gamepad user then has to find Sign in.
+  it("the keyboard's Sign in button fills the key and submits the form", async () => {
+    const { renderApp, t } = await setup({ login });
+    renderApp();
+    act(() => useUi.getState().setView("settings"));
+    const field = (await screen.findByLabelText("Nexus API key")) as HTMLInputElement;
+    const pad = gamepad();
+    act(() => field.focus());
+    pad.press(BUTTON.A);
+    await screen.findByRole("dialog", { name: /Keyboard: Nexus API key/ });
+    pad.press(BUTTON.A); // "1"
+    pad.press(BUTTON.RIGHT);
+    pad.press(BUTTON.A); // "2"
+    const dlg = screen.getByRole("dialog");
+    act(() => within(dlg).getByRole("button", { name: "Sign in" }).click());
+    await waitFor(() => expect(t.callsOf("login")).toEqual([{ api_key: "12" }]));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("nothing typed: Sign in is disabled and Done does not submit", async () => {
+    const { renderApp, t } = await setup({ login });
+    renderApp();
+    act(() => useUi.getState().setView("settings"));
+    const field = (await screen.findByLabelText("Nexus API key")) as HTMLInputElement;
+    act(() => useUi.getState().openOsk({ input: field, label: "Nexus API key" }));
+    const dlg = await screen.findByRole("dialog");
+    expect(within(dlg).getByRole("button", { name: "Sign in" })).toBeDisabled();
+    act(() => screen.getByRole("button", { name: "Done" }).click());
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(t.callsOf("login")).toEqual([]);
+  });
+});
+
+describe("About card (T16 F4)", () => {
+  // Fails when the <dl> holds bare <div>s (axe definition-list violation).
+  it("uses dt/dd pairs inside its <dl>", async () => {
+    const { renderApp } = await setup();
+    renderApp();
+    act(() => useUi.getState().setView("settings"));
+    const dt = await screen.findByText("database");
+    const dl = dt.closest("dl")!;
+    expect(dt.tagName).toBe("DT");
+    const groups = dl.querySelectorAll(":scope > div");
+    expect(groups).toHaveLength(5);
+    for (const g of groups) {
+      expect(g.querySelectorAll(":scope > dt")).toHaveLength(1);
+      expect(g.querySelectorAll(":scope > dd")).toHaveLength(1);
+    }
   });
 });
 

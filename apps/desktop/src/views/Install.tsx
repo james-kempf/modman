@@ -74,6 +74,7 @@ function InstallCard() {
           label="Mod id, Nexus URL, collection URL or archive path"
           value={target}
           onChange={(e) => setTarget(e.target.value)}
+          data-osk-submit="Install"
           placeholder="e.g. 266 or https://www.nexusmods.com/skyrimspecialedition/mods/266"
         />
         <Segmented label="FOMOD" value={fomod} options={FOMOD} onChange={setFomod} />
