@@ -1,0 +1,553 @@
+plan_id: 20261020-rust-migration
+status: in_progress
+tldr: |
+  Rust rewrite of modman (M1-M7) in 11 waves; max 2 concurrent agents (orchestrator throttles waves with 3 tasks).
+  W1 research (legacy audit + dependency spikes) -> GATE (libloot buildable?) -> W2 core foundation (deps, all migrations, errors, CLI skeleton)
+  -> W3 archive/layout + deploy engine + Nexus client -> W4 CLI mod management + security/irreversibility review
+  -> W5 FOMOD + review remediation -> W6 collections -> W7 LOOT/plugins.txt + autoupdate
+  -> W8 Tauri backend -> W9 React frontend + packaging/CI + security review of nxm/login/Tauri surface
+  -> W10 GUI E2E test -> W11 parity and quality gate (sole checklist editor).
+created_at: "2026-10-20"
+created_by: gem-planner
+revision: 2
+replan_count: 0
+planner_revision_used: true
+
+decisions:
+  - "Two gem-researcher tasks in W1 (legacy code-read vs external dependency spikes): disjoint sources, run in parallel, both feed the port-baseline cluster."
+  - "ORCHESTRATOR GATE after W1: if spikes.md says libloot is unbuildable on this machine by every path (Rust dep, C++ FFI), stop and escalate to the user before dispatching W2. No CLI/skip fallback is planned."
+  - "T03 runs alone in W2 and pre-allocates every core dependency T02 pins (workspace + core Cargo.toml, incl. dev-deps), all SQLite migrations and #[from] error stubs, so the three W3 tasks never touch shared files."
+  - "T04/T05/T06 run in W3 on disjoint files (archive.rs+staging.rs / deploy.rs / nexus.rs+download.rs) with module-local error enums; missing deps or tables -> stop and report, never edit shared files."
+  - "Per-library staging location lives in deploy.rs (T05); staging.rs (T04) owns layout normalization only."
+  - "Nexus core (T06) does not touch CLI; all mod-management CLI wiring is coalesced into T07."
+  - "Independent gem-reviewer audit (T08) of archive/staging/deploy/auth before more features build on them; remediation is its own task (T10) so retry blast radius stays narrow."
+  - "FOMOD (T09a, W5, parallel with T10) split from collections (T09b, W6) because collections consume FOMOD choices and the remediated Nexus client."
+  - "CLI split into crates/modman-cli/src/commands/<group>.rs in T03 so parallel tasks edit disjoint files."
+  - "OAuth2/SSO not implemented: checklist marks it 'later' and acceptance criteria require API key only; T06 delivers the AuthProvider trait so SSO can plug in."
+  - "GUI split into Tauri backend (T13) and React frontend (T14): frontend consumes T13's typed command contract. T13 owns tauri.conf.json; T15 depends on T13 and edits only its bundle section."
+  - "nxm forwarding path (how `modman nxm <url>` reaches a running GUI) and the single nxm .desktop Exec target are decided once in T02; T07/T13/T15 implement that decision."
+  - "Second read-only review T13R (W9) covers the user-facing attack surface: nxm .desktop registration, login key input, Tauri deep-link/capabilities/CSP; findings feed T17."
+  - "Packaging (T15, gem-devops) also owns CI workflow, deny.toml, runtime-dep bundling and packaging README (Deck shortcut, Steam Input keyboard layout fallback); no separate docs task."
+  - "Only T17 edits feature_parity_checklist.md, from proving test names reported in each implementer handoff (avoids parallel edit conflicts)."
+  - "Paired tester only for the GUI (T16); core/CLI verification is TDD inside each implementer task plus the final gate (T17), which runs last in its own wave after T16."
+  - "Only the bethesda profile (Skyrim SE) gets end-to-end coverage in v1; other presets get unit tests for layout/definitions and ship labelled experimental."
+  - "Drop rows (v2->v3 migration, ui server, ui-state/detect/thumbs, token server security, cron/autostart, --scheduler) are excluded everywhere; T17 checks by grep."
+
+assumptions:
+  - "System packages installed: webkit2gtk4.1-devel 2.54, javascriptcoregtk4.1-devel, libsoup3-devel, libappindicator-gtk3-devel, librsvg2-devel, sqlite-devel, libarchive-devel, unrar, cmake, boost-devel, 7zip, gcc-c++. GUI tasks are scheduled by dependency only."
+  - "libloot is not packaged; cmake + boost + gcc-c++ make a from-source C++ build feasible if a Rust path is not."
+  - "Rust 1.99.1 at ~/.cargo/bin (export PATH=$HOME/.cargo/bin:$PATH); node 24 via nvm."
+  - "No real Nexus API key or Steam Deck: network tested with mocked HTTP; Deck behaviour verified only via 1280x800 viewport + keyboard/gamepad emulation. Real-library and SD-card deploys remain unverified (recorded as residual risk by T17)."
+  - "Local Skyrim SE under ~/.steam may be used for read-only detection checks only; all deploy/purge tests use temp dirs."
+
+shared_context:
+  port-baseline:
+    - "Behavioural reference: legacy/modman (bash, 5050 lines). Read the relevant functions before porting any feature."
+    - "legacy/modman function map: game_preset 272 (presets 269-300), game_defaults 303, load_game 339, steam_roots/libraries/app_dir/prefix 388-433, detect_plugins_file 434, api_request 443, gql_query 494, ratelimit_summary 505, refresh_account 511, resolve_mod 555, archive_kind 593, extract_archive 612, layout_* 703-865, normalize_layout 866, fomod_py 941-1335, find_fomod/run_fomod 1336-1353, install_archive 1359, download/nxm 1431-1573, resolve_method 1574, build_plan 1586, link_one 1653, undeploy 1666, cmd_deploy 1738, cmd_purge 1899, cmd_verify 1949, cmd_conflicts 1994, plugins_update 2053, plugins_remove_managed 2103, collection_* 2125-2808 (collection_install 2328, collection_order_py 2249), deps_* 2915-3238, cmd_install..cmd_status 3323-4396, cmd_game 4080, cmd_login 4176, nxm_register 4230, nxm_handle 4276, autoupdate_* 4397-4774, usage 4892, main dispatch 4978."
+    - "T01 findings: docs/plan/20261020-rust-migration/legacy_spec.md; T02 findings: docs/plan/20261020-rust-migration/spikes.md. Orchestrator copies summaries here before first consumer dispatch."
+    - "T01 summary (c4a46a5): legacy never blocks deploy/purge while game runs (only autoupdate checks); config key fomod is dead; game set has 9 keys (folder, subdir, profile, appid, method, prefix, plugins-file, paks-dir, name); config has 9 keys with defaults in legacy_spec §3; auto deploy method = hardlink probe else copy (never symlink); manifest is \\x1f-separated 7 fields; purge order in legacy_spec §9; FOMOD choices stored Vortex-style; collections ordered by Kahn topo sort; deps cache 7-day TTL + 13 external tools; rate limit back-off 15/30/45s on 429. 12 ambiguities A1-A12 in legacy_spec §16."
+    - "T02 summary (b75a089): libloot =0.29.7 pure Rust on crates.io (use Game::with_local_path), no runtime libs. RAR via compress-tools =0.16.1 + system libarchive (unrar crate rejected, licence). Keyring: keyring-core =1.0.1 + zbus-secret-service-keyring-store =1.0.1, file fallback, 3 s probe timeout. VDF: keyvalues-parser =0.2.4. reqwest =0.13.5 rustls-no-provider + rustls ring (no aws-lc). thiserror -> 2. Hand-rolled schema_migrations runner. nxm: Exec=modman nxm %u; CLI calls GUI over D-Bus (tauri-plugin-single-instance 2.5.4, org.modman.app.SingleInstance, ExecuteCallback) via zbus =5.19.0 with 5 s timeout, fallback = enqueue downloads row and process inline. No tauri-plugin-deep-link on Linux. Exact pinned versions per crate group in spikes.md §7; deny.toml bans unrar_sys, aws-lc-sys, openssl-sys, native-tls."
+    - "Workspace: Cargo.toml default-members = core + cli; apps/desktop/src-tauri is a member outside default-members. Existing workspace deps: anyhow, thiserror 1, tracing, tracing-subscriber, clap 4 derive, serde, serde_json."
+    - "Core module placeholders: crates/modman-core/src/{archive,deploy,download,error,fomod,games,loadorder,nexus,staging,store}.rs. Core never prints; progress via channel; thiserror in core, anyhow in binaries."
+    - "Spec docs: linux_mod_manager_tech_stack.md (§4.1 deploy, §4.2 Nexus, §4.3 FOMOD/LOOT, §4.4 controller, §4.5 packaging, §5 schema, §9.1 game defs, §9.2 autoupdate), feature_parity_checklist.md (rows with MS column)."
+    - "GLOBAL RULES: (1) commit once per completed task on branch rust-rewrite, no attribution trailers, no push; (2) stage only your own files with explicit `git add <paths>`, never `git add -A` or `git add .`; (3) report proving test names per checklist row in the task handoff; only T17 edits feature_parity_checklist.md; (4) SPDX 'GPL-3.0-or-later' header on new source files; (5) never modify a real game install or ~/.steam; (6) after W2, Cargo.toml, error.rs and migrations are frozen for W3 tasks: if something is missing, stop and report."
+
+tasks:
+  - id: T01
+    title: Legacy behaviour audit (checklist §9 code-reads)
+    description: |
+      Read legacy/modman and produce a porting spec. Covers checklist §9 items 1-6 plus everything
+      consumers need: full command/alias/flag inventory (usage + dispatch), game preset table and
+      per-game config keys (cmd_game), config keys and defaults, layout profile rules, deploy/backup/
+      manifest/undeploy algorithm, FOMOD modes (collection/reuse/ask/default) and choice storage,
+      collection install/order rules, deps data sources, external tool list and ack/unack semantics,
+      rate-limit and adult handling, game-running checks, autoupdate state machine (incl. last-run
+      log), plugins.txt formats, nxm register/handle flow. Rung: reuse (reading only).
+    wave: 1
+    depends_on: []
+    agent: gem-researcher
+    exploration_mode: audit
+    status: completed  # c4a46a5 legacy_spec.md
+    retries_used: 0
+    acceptance_criteria:
+      - "docs/plan/20261020-rust-migration/legacy_spec.md exists with one section per checklist §9 item (1-6), each citing legacy/modman line ranges."
+      - "Command inventory table lists every subcommand, alias and flag found in usage() and main dispatch, with line references."
+      - "Game preset table reproduces all presets from lines 269-300 (domain, appid, subdir, profile, extras) suitable for direct TOML conversion."
+      - "Deploy section documents method resolution, backup handling, manifest format and purge restore order; FOMOD section documents each mode and where choices persist."
+      - "deps section documents requirement data source, external-tool list and ack/unack persistence and effect on reports."
+      - "Lists unlisted behaviours (rate limit, adult, notifications, lock) and whether legacy blocks deploy while the game runs."
+    handoff:
+      constraints:
+        - "Read-only; do not modify legacy/."
+        - "Facts with line refs only; no design proposals beyond flagging ambiguities."
+
+  - id: T02
+    title: External dependency spikes and cross-cutting decisions
+    description: |
+      Resolve tech-stack §7 spikes answerable without hardware: (1) libloot from Rust - upstream Rust
+      crate/git dependency, else C++ FFI (cmake+boost present); build a throwaway compile test in the
+      scratchpad; record bundling impact for AppImage/Flatpak. (2) RAR: unrar crate vs shelling out to
+      7z/unrar (licensing, native deps). (3) keyring crate Secret Service behaviour and file fallback
+      trigger. (4) VDF/KeyValues parser crate. (5) nxm routing: how the CLI `modman nxm <url>` reaches a
+      running GUI (e.g. single-instance plugin socket/D-Bus, or launching the GUI binary which forwards)
+      and the single .desktop Exec target (binary + %u quoting) used by T07/T13/T15. (6) Pinned crate
+      list with exact versions: rusqlite (bundled vs system) + migration approach, reqwest+rustls, tokio,
+      zip, sevenz-rust, reflink-copy, quick-xml, toml, keyring, vdf parser, directories, rustix/nix
+      (st_dev, flock), sha2, wiremock/mockito, assert_cmd, tempfile, tauri-plugin-single-instance,
+      tauri-plugin-deep-link (v2). Rung: platform/stdlib decision support.
+    wave: 1
+    depends_on: []
+    agent: gem-researcher
+    exploration_mode: question
+    status: completed  # b75a089 spikes.md; libloot buildable: yes
+    retries_used: 0
+    acceptance_criteria:
+      - "docs/plan/20261020-rust-migration/spikes.md records decision + evidence (crate version, licence, build result) for libloot, RAR, keyring, VDF parser and nxm routing."
+      - "libloot section ends with an explicit line 'libloot buildable: yes|no' plus the exact integration path (git dep rev or FFI build recipe) and runtime libs to bundle."
+      - "nxm routing section names the Exec line verbatim and the CLI->GUI forwarding mechanism, with fallback when no GUI is running (enqueue in downloads table)."
+      - "Dependency table lists each crate with exact version and licence, all GPL-3.0-or-later compatible, split into core deps, core dev-deps, cli deps, desktop deps."
+    handoff:
+      constraints:
+        - "Prototype only in the scratchpad; do not edit workspace files."
+        - "No sudo."
+      high_risk_signals: [architecture]
+
+  - id: T03
+    title: "M1 core foundation: deps, all migrations, errors, config, game definitions, Steam detection, CLI skeleton"
+    description: |
+      Pre-allocate every core/cli dependency T02 pins for waves 2-3 (workspace + core + cli Cargo.toml,
+      incl. dev-deps) and all migrations: tech stack §5 tables (games, profiles, mods, mod_files,
+      deployments, downloads, collections, schema_migrations) plus deploy_journal, backups, updates_cache,
+      ratelimit, fomod_choices, deps_ack, settings, autoupdate_state/last-run log. error.rs: top-level
+      Error with #[from] wrapping stubs for each module error (ArchiveError, StagingError, DeployError,
+      NexusError, DownloadError, FomodError, LoadOrderError, StoreError, GamesError); stub enums declared
+      in each module file for W3 owners to fill. store.rs (rusqlite, WAL, embedded migrations), deploy
+      lock (flock), global config, games.rs Steam detection (libraryfolders.vdf incl. SD card,
+      appmanifest acf, compatdata prefix, buildid), game definitions as embedded TOML for all legacy
+      presets with a support field (tested for Skyrim SE, experimental otherwise) and user override dir;
+      tracing to file. CLI: global -g/--game, -y/--yes, --no-color (+NO_COLOR), --debug; help, version,
+      all legacy aliases; game detect/add/list/use/info/set/remove (remove refuses when deployment
+      active), config, log [-f] [lines]; legacy-state warning. CLI split into commands/<group>.rs.
+      Rung: reuse crates pinned by T02.
+    wave: 2
+    depends_on: [T01, T02]
+    agent: gem-implementer
+    context_cluster: port-baseline
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "Cargo.toml files contain every core/cli crate and dev-dep from spikes.md table at the pinned versions; `cargo build` and `cargo test` compile."
+      - "All listed migrations apply on an empty DB and are idempotent on re-open (test); test asserts every listed table exists."
+      - "error.rs has #[from] conversions for each listed module error; each module file declares its stub enum."
+      - "One TOML game definition per legacy preset embedded; test loads all and asserts Skyrim SE: domain skyrimspecialedition, appid 489830, subdir Data, profile bethesda, plugins format star, support tested; every other preset support experimental."
+      - "Steam detection test parses fixture libraryfolders.vdf (2+ libraries incl. SD-card path) and appmanifest acf files, returning install dir, prefix path and buildid."
+      - "CLI integration tests (assert_cmd) cover every alias and global flag from the legacy_spec.md inventory in M1 scope; help/version exit 0; NO_COLOR honoured."
+      - "game set accepts exactly the key list from legacy_spec.md item 1; config accepts the 9 documented keys; unknown keys exit non-zero."
+      - "Legacy-state warning emitted when ~/.config/nexus-mod-manager exists (test with temp HOME)."
+      - "cargo test, cargo clippy --all-targets -- -D warnings, cargo fmt --check pass; handoff lists proving test names per checklist row."
+    handoff:
+      constraints:
+        - "Core does no printing; CLI renders."
+        - "Data dir via XDG; tests use temp HOME/XDG dirs."
+        - "No v2->v3 config migration (Drop row)."
+        - "Layout profile referenced by name string; the enum/rules live in staging.rs owned by T04."
+      high_risk_signals: [schema_change, architecture]
+
+  - id: T04
+    title: "Archive extraction and layout normalization"
+    description: |
+      archive.rs: zip, 7z, rar extraction per T02 decision, archive kind detection, typed error when the
+      7z/unrar tool is missing, hardened extraction: reject '..', absolute paths, symlink and hardlink
+      entries; validate trees produced by external tools (no symlinks, no escapes) before staging.
+      staging.rs: per-mod layout normalization, case-insensitive directory merge, layout profiles
+      bethesda, cyberpunk, stardew, bannerlord, witcher3, bepinex, melonloader, ue, generic ported from
+      legacy layout_* / normalize_layout, doc filtering, per-file hash list for mod_files.
+      Rung: reuse crates; port legacy rules.
+    wave: 3
+    depends_on: [T03]
+    agent: gem-implementer
+    context_cluster: port-baseline
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "Extraction tests for zip, 7z and rar fixtures pass."
+      - "Entries with '..' or absolute paths are rejected for zip, 7z and rar (tests)."
+      - "Symlink and hardlink entries are rejected for zip, 7z and rar (fixture tests); nothing is written outside the destination."
+      - "Post-extraction validator test: a tool-extracted tree containing a symlink or escaping path is rejected before staging."
+      - "Missing 7z/unrar binary (PATH override in test) yields a typed ArchiveError naming the tool."
+      - "Each of the 9 layout profiles has at least one unit test matching the rule in legacy_spec.md."
+      - "Case-insensitive merge test: 'data/Textures' and 'Data/textures' merge into one canonical directory."
+      - "cargo test, clippy -D warnings, fmt --check pass; handoff lists proving test names."
+    handoff:
+      constraints:
+        - "Edit only archive.rs, staging.rs and their tests/fixtures."
+        - "Use the module-local error enums declared by T03; do not edit error.rs, Cargo.toml or migrations; if something is missing, stop and report."
+        - "Expose LayoutProfile enum with FromStr matching profile names in game TOML."
+      high_risk_signals: [security_sensitive]
+
+  - id: T05
+    title: "M2 deploy engine: per-library staging, link fallback, backups, journal, purge, verify"
+    description: |
+      deploy.rs: staging location under <library>/.modman/staging; deploy plan from profile order with
+      one winner per path; target game_dir or prefix_dir per definition; method chain hardlink ->
+      reflink -> symlink -> copy with st_dev check, per-file method recorded; content-addressed backup
+      store for replaced game files; SQLite-journaled transaction with resume/rollback on next launch;
+      purge restores originals byte-identical; verify; dry-run; refuse deploy/purge while the game runs;
+      deploy lock. CLI: deploy [--dry-run] [--method], purge/undeploy, verify, status/st.
+      Rung: stdlib fs + reflink-copy.
+    wave: 3
+    depends_on: [T03]
+    agent: gem-implementer
+    context_cluster: port-baseline
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "Fixture test: snapshot temp game dir (path+sha256+mode), deploy N mods with overlapping files and overwritten originals, purge, snapshot equals original byte-for-byte."
+      - "Crash-recovery test: deploy aborted after K files via injected failure; next open rolls back (or resumes) and post-purge snapshot equals original."
+      - "Fallback test: forced hardlink failure (injected or cross-device temp dirs) records reflink/symlink/copy per file in deployments table."
+      - "Conflict test: later-priority mod wins each contested path; conflicts listed by core API."
+      - "Deploy refused with typed error when game process detected (mocked probe) and when deploy lock held."
+      - "verify reports modified/missing deployed files; --dry-run changes nothing on disk (test)."
+      - "cargo test, clippy -D warnings, fmt --check pass; handoff lists proving test names."
+    handoff:
+      constraints:
+        - "Edit only deploy.rs, commands/deploy.rs (and status) and their tests; staging trees are consumed as plain directories (do not edit staging.rs)."
+        - "Use the module-local error enum; do not edit error.rs, Cargo.toml or migrations; if something is missing, stop and report."
+        - "Tests only touch tempfile dirs. Backups written and fsynced before any game file is replaced."
+      high_risk_signals: [irreversible, data_flow_change, schema_change]
+
+  - id: T06
+    title: "M3 Nexus client, auth, downloads (core only)"
+    description: |
+      nexus.rs: REST v1 + GraphQL v2 client (reqwest+rustls), AuthProvider trait with API key impl,
+      key storage in keyring with fallback to a 0600 file inside a 0700 directory when Secret Service
+      is unavailable, key validation + premium detection, x-rl-* rate-limit parsing with persisted
+      state and throttling, mod/file info, download links (premium direct, nxm key+expires exchange),
+      updates via updated endpoints cached in SQLite, search (GraphQL), mod batch query for deps,
+      adult-content setting. download.rs: resumable streaming downloads with progress events, nxm:// URL
+      parser (mods and collections/revisions; the single parser reused by CLI and GUI), downloads
+      queue/intake. Rung: reuse reqwest/keyring.
+    wave: 3
+    depends_on: [T03]
+    agent: gem-implementer
+    context_cluster: port-baseline
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "All HTTP tests use a mock server; zero requests to api.nexusmods.com in test runs."
+      - "Tests: key validation success/401, premium vs free download-link path, nxm URL parse (mod and collection revision forms, malformed/foreign-host input rejected), key+expires exchange."
+      - "Rate-limit test: headers below threshold cause throttling/typed error; state persists across client instances."
+      - "Resume test: interrupted download resumes with Range and final sha matches."
+      - "Keyring fallback test: with keyring backend unavailable (mock), key is stored in a 0600 file inside a 0700 directory; permissions asserted."
+      - "API key never appears in logs or error strings (test asserts on captured tracing output)."
+      - "cargo test, clippy -D warnings, fmt --check pass; handoff lists proving test names."
+    handoff:
+      constraints:
+        - "Edit only nexus.rs, download.rs and their tests; no CLI files."
+        - "Use the module-local error enums; do not edit error.rs, Cargo.toml or migrations; if something is missing, stop and report."
+        - "Base URLs injectable for tests. No OAuth2/SSO implementation; trait only."
+      high_risk_signals: [security_sensitive]
+
+  - id: T07
+    title: "M3 CLI mod management and Nexus commands"
+    description: |
+      Wire core into CLI: login (API key from no-echo prompt or stdin, never argv) / logout, install
+      <id|url|nxm|file> [--file] [--deploy], download, list [text] [-e|-d] [-c], info, enable/disable
+      [--all|--collection], order (#, first, last, up, down, before, after), uninstall
+      [--delete-archive], conflicts [mod] [--files], deps [--refresh] + ack/unack, updates [--install]
+      [--all], search, profile list/save/load/delete, clean, launch/play/run (steam://rungameid, offer
+      deploy), nxm register/unregister (.desktop + mimeapps using the T02 Exec target) and nxm <url>
+      (core nxm parser, then T02 forwarding mechanism or enqueue). Mod reference resolution with 5
+      forms and ambiguity errors listing matches. Rung: reuse core APIs.
+    wave: 4
+    depends_on: [T04, T05, T06]
+    agent: gem-implementer
+    context_cluster: port-baseline
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "Mod reference resolver tests: #N, full id, exact name, Nexus mod id, unique substring, and ambiguous substring error listing all matches."
+      - "CLI integration tests (temp HOME + mock Nexus) for install from local archive, install by Nexus id via mocked premium link, enable/disable, order variants, uninstall, profile save/load roundtrip."
+      - "login test: key supplied via stdin is stored; test asserts the key never appears in process args, stdout or stderr; no flag accepts the key."
+      - "deps test: requirement report lists external tools; ack marks a tool satisfied, unack reverts, persisted across runs."
+      - "nxm register writes the T02 Exec line with correct %u quoting and MimeType=x-scheme-handler/nxm; under temp XDG dirs; unregister removes both .desktop and mimeapps entries."
+      - "Every command/alias/flag in scope from legacy_spec.md has an assert_cmd test."
+      - "cargo test, clippy -D warnings, fmt --check pass; handoff lists proving test names per checklist row."
+    handoff:
+      constraints:
+        - "--fomod and reinstall --ask parse but return a typed 'not yet' error until T09a."
+        - "Edit only crates/modman-cli and thin core glue; no changes to archive/staging/deploy/nexus internals (T08 reviewing)."
+
+  - id: T08
+    title: "Security and irreversibility review: archive, staging, deploy, Nexus auth"
+    description: |
+      Independent review of T04, T05, T06: extraction confinement, purge byte-identity, journal
+      recovery, backup ordering, symlink/path traversal in deploy targets, TOCTOU, lock handling; API
+      key storage, log leaks, TLS config, nxm URL handling, rate-limit correctness. Rung: review only.
+    wave: 4
+    depends_on: [T04, T05, T06]
+    agent: gem-reviewer
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "Findings list with severity, file:line and reproduction or reasoning, returned to orchestrator."
+      - "Explicit pass/fail verdict on: purge restores byte-identical; crash recovery; key never logged; key fallback file 0600 in 0700 dir; deploy path traversal blocked; extraction cannot write outside the destination (.., absolute paths, symlink/hardlink entries, external-tool output validated)."
+    handoff:
+      constraints:
+        - "Read-only; no code edits."
+      high_risk_signals: [security_sensitive, irreversible]
+
+  - id: T09a
+    title: "M5 FOMOD installer"
+    description: |
+      fomod.rs: quick-xml parse of fomod/ModuleConfig.xml into steps/groups/options with conditions,
+      flag dependencies, install plan; recorded choices persisted in fomod_choices; modes ask/default
+      (and collection/reuse resolution API per legacy_spec.md); resolver trait for CLI prompts and GUI
+      wizard. CLI: install --fomod ask|default, reinstall [--ask], info shows FOMOD choices.
+      Rung: reuse quick-xml; port legacy fomod_py.
+    wave: 5
+    depends_on: [T07]
+    agent: gem-implementer
+    context_cluster: port-baseline
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "Parser tests with fixture ModuleConfig.xml covering SelectExactlyOne/AtMostOne/AtLeastOne/Any/All groups, flag conditions, conditionalFileInstalls; install plan output asserted."
+      - "Each FOMOD mode (ask/default/collection/reuse) has a test matching legacy_spec.md semantics; reuse replays stored choices on reinstall."
+      - "CLI tests: install --fomod default on fixture archive, reinstall --ask re-prompts (scripted stdin)."
+      - "cargo test, clippy -D warnings, fmt --check pass; handoff lists proving test names."
+    handoff:
+      constraints:
+        - "Edit only fomod.rs, commands/install.rs/reinstall/info paths and tests; do not touch archive/staging/deploy/nexus/download (T10 parallel)."
+        - "Do not edit Cargo.toml, error.rs or migrations; if missing, stop and report."
+
+  - id: T10
+    title: "Remediate T08 review findings"
+    description: "Fix all high/critical and agreed medium findings from T08 in archive/staging/deploy/nexus/download with regression tests. Rung: targeted fixes."
+    wave: 5
+    depends_on: [T08]
+    agent: gem-implementer
+    context_cluster: port-baseline
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "Each high/critical T08 finding has a fix and a regression test that fails before and passes after."
+      - "Deferred medium/low findings listed in the handoff with reason."
+      - "cargo test, clippy -D warnings, fmt --check pass."
+    handoff:
+      constraints:
+        - "Scope limited to files named in T08 findings; do not touch fomod.rs or commands/install.rs (T09a parallel); if a fix needs them, stop and report."
+      high_risk_signals: [security_sensitive, irreversible]
+
+  - id: T09b
+    title: "M5 Nexus collections"
+    description: |
+      Collections core module: GraphQL manifest fetch, revision pin, optional all/none/ask, bundled/
+      direct/manual mods, per-mod FOMOD choices via T09a collection mode, load-order rules persisted,
+      update (removes dropped mods), remove [--keep-mods], download-only, nxm collection URL input.
+      CLI: collection install/list/info/update/remove/download with --optional/--revision/--deploy.
+      Rung: port legacy collection_*.
+    wave: 6
+    depends_on: [T09a, T10]
+    agent: gem-implementer
+    context_cluster: port-baseline
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "Collection install test against mocked GraphQL + download endpoints installs all required mods, applies recorded FOMOD choices and load-order rules, honours --optional none/all and --revision."
+      - "collection update test removes mods dropped from the new revision; remove --keep-mods keeps mods."
+      - "nxm collection URL (collections/<slug>/revisions/<n>) installs the pinned revision (test)."
+      - "cargo test, clippy -D warnings, fmt --check pass; handoff lists proving test names."
+    handoff:
+      constraints:
+        - "Use the public nexus client API; do not change auth/rate-limit internals."
+
+  - id: T11
+    title: "M6 LOOT sorting, plugins.txt, load order rules, conflict data"
+    description: |
+      loadorder.rs: LOOT sorting for bethesda profile via the T02 integration path (masterlist
+      fetch/cache with injectable URL), merge with collection load-order rules, write plugins.txt in
+      the Proton prefix AppData/Local/<folder> (star: or plain:), remove managed entries on purge.
+      Expose conflict data API for the GUI conflict view. CLI surface per legacy_spec.md inventory.
+      Rung: per T02.
+    wave: 7
+    depends_on: [T09b]
+    agent: gem-implementer
+    context_cluster: port-baseline
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "plugins.txt tests: star (SSE) and plain formats written to temp prefix path matching legacy detect_plugins_file; managed entries removed on purge, user entries preserved."
+      - "LOOT sort test on fixture plugin set via libloot produces masters-before-dependents order."
+      - "Masterlist fetch is mocked; zero network access in tests."
+      - "Collection rules merge test: collection 'after' rule respected in final order."
+      - "Non-bethesda profiles skip the plugin stage (test)."
+      - "cargo test, clippy -D warnings, fmt --check pass; handoff lists proving test names."
+    handoff:
+      constraints:
+        - "Edit loadorder.rs, deploy hook points, commands/loadorder.rs; may add the libloot dependency to core Cargo.toml (sole Cargo.toml editor in W7); no autoupdate files (T12 parallel)."
+      high_risk_signals: [architecture]
+
+  - id: T12
+    title: "M7 auto-update (systemd user timer)"
+    description: |
+      Core autoupdate module: enable/disable installs/removes ~/.config/systemd/user modman-autoupdate
+      .service/.timer (interval configurable, 0 = only after updates), status, run [--force]; startup
+      check API (called by GUI at app start); /proc package-manager detection; system update
+      fingerprint; Steam game update via appmanifest buildid; never redeploy while the game runs;
+      collections auto-update only if setting enabled; journaled redeploy with rollback; last-run log
+      persisted in autoupdate_state for GUI. CLI: autoupdate enable/disable/status/run [--force].
+      Rung: port legacy autoupdate_*.
+    wave: 7
+    depends_on: [T09b]
+    agent: gem-implementer
+    context_cluster: port-baseline
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "enable/disable tests write/remove unit files under temp XDG_CONFIG_HOME with OnUnitActiveSec from interval; systemctl behind a mockable runner."
+      - "/proc package-manager detection test with fake proc root; buildid change detection test with fixture acf files."
+      - "run skips redeploy when game running and when package manager busy; collections updated only when setting enabled (tests)."
+      - "Last-run log entries (timestamp, outcome, actions) persisted and returned by status API (test); startup-check API returns pending actions without side effects (test)."
+      - "No cron/autostart code and no --scheduler flag (grep check)."
+      - "cargo test, clippy -D warnings, fmt --check pass; handoff lists proving test names."
+    handoff:
+      constraints:
+        - "Edit new autoupdate module and commands/autoupdate.rs only; no Cargo.toml or loadorder edits."
+
+  - id: T13
+    title: "M4 Tauri backend: commands, events, single-instance + deep-link, security config"
+    description: |
+      apps/desktop/src-tauri: tauri::command wrappers over core for games, mods, install, deploy/
+      purge/verify, conflicts, deps, profiles, collections, FOMOD resolver bridge, LOOT/plugins,
+      autoupdate toggle/status/last-run log, startup autoupdate check, settings, API key entry, log;
+      core progress channel -> Tauri events; single-instance + deep-link per T02 nxm routing decision,
+      every incoming URL parsed by the core nxm parser before any action; thumbnail cache in core; TS
+      bindings. Owns tauri.conf.json (security, windows, plugins). Rung: reuse Tauri plugins.
+    wave: 8
+    depends_on: [T11, T12]
+    agent: gem-implementer
+    context_cluster: port-baseline
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "cargo build and cargo clippy -D warnings pass for the desktop crate."
+      - "tauri.conf.json sets a CSP with no unsafe-eval and no remote origins; capabilities grant only app commands and the plugins required (single-instance, deep-link, plus any T02-listed)."
+      - "Test: deep-link and second-instance URLs go through the core nxm parser before any action; malformed/foreign URLs are rejected with no enqueue."
+      - "Startup runs the autoupdate check API once (test with mocked core)."
+      - "TS command/event types in apps/desktop/src/ipc pass tsc --noEmit."
+      - "No HTTP server, no ui-state/ui-detect/ui-thumbs helpers (Drop rows)."
+      - "Window default 1280x800; handoff lists proving test names."
+    handoff:
+      constraints:
+        - "Commands are thin adapters; no business logic in src-tauri."
+      high_risk_signals: [architecture, security_sensitive]
+
+  - id: T14
+    title: "M4-M7 React frontend with keyboard + gamepad spatial navigation"
+    description: |
+      apps/desktop/src: React + Vite + TS + Tailwind, TanStack Query over T13 commands, Zustand UI
+      store. Views: Overview, Mods (incl. conflict view, experimental badge for non-tested games),
+      Install (FOMOD wizard, paste-nxm input), Collections, Requirements, Activity (jobs + log),
+      Settings (auto-update toggle + last-run log, API key entry with on-screen keyboard fallback:
+      gamepad-focusable field, Steam OSK trigger, paste button). Spatial navigation + Gamepad API (A
+      select, B back, shoulders switch tabs) and full arrow-key navigation with visible focus ring;
+      1280x800, large targets, no hover-only affordances. Rung: reuse spatial-nav lib.
+    wave: 9
+    depends_on: [T13]
+    agent: gem-implementer
+    context_cluster: port-baseline
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "npm run build and tsc --noEmit pass; vitest suite passes."
+      - "All 7 views from checklist §8 implemented and reachable keyboard-only (testing-library focus tests)."
+      - "Gamepad mapping unit-tested with mocked navigator.getGamepads (A/B/shoulders/D-pad)."
+      - "API key entry reachable and submittable via gamepad with OSK fallback and paste path (test)."
+      - "Experimental badge rendered for games with support=experimental (test)."
+      - "IPC layer mockable so the UI runs under plain vite dev server."
+    handoff:
+      constraints:
+        - "Frontend only; no edits to src-tauri or crates."
+
+  - id: T15
+    title: "M7 packaging, CI, cargo-deny, runtime deps, Deck docs"
+    description: |
+      packaging/: AppImage and deb (Tauri bundler bundle section), Flatpak manifest with Steam library
+      + staging filesystem permissions and nxm .desktop, PKGBUILD, RPM spec; all use the T02 nxm Exec
+      target; CLI shipped as `modman`; runtime deps bundled/declared per T02 (libloot, 7z/unrar,
+      webkit2gtk-4.1 deps). deny.toml; minimal CI workflow (.github/workflows/ci.yml: cargo test,
+      clippy -D warnings, fmt --check, cargo deny). packaging/README.md: Deck non-Steam shortcut,
+      Game Mode nxm paste flow, Flatpak hardlink caveat, keyboard-mapped Steam Input layout fallback.
+      Rung: reuse Tauri bundler.
+    wave: 9
+    depends_on: [T13]
+    agent: gem-devops
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "Files exist: packaging/flatpak/<id>.yml, packaging/aur/PKGBUILD, packaging/rpm/modman.spec, .github/workflows/ci.yml, deny.toml; tauri.conf.json bundle targets include appimage, deb, rpm."
+      - "Each recipe declares or bundles libloot, 7z/unrar and webkit2gtk-4.1 runtime deps as decided in spikes.md."
+      - "`cargo deny check licenses` passes with a GPL-3.0-or-later compatible allow-list."
+      - "namcap/rpmlint/flatpak-builder --show-manifest run where available, else skipped-with-reason recorded."
+      - "CI workflow passes `actionlint` (or yaml lint) and runs the four checks."
+      - "packaging/README.md covers Deck shortcut, nxm paste flow, Flatpak hardlink caveat and Steam Input keyboard layout fallback."
+    handoff:
+      constraints:
+        - "Edit only packaging/, .github/, deny.toml and the bundle section of tauri.conf.json; no crates/ or apps/desktop/src edits (T14 parallel)."
+
+  - id: T13R
+    title: "Security review: nxm registration, login key input, Tauri deep-link/capabilities/CSP"
+    description: "Read-only review of T07 nxm register (.desktop Exec/%u quoting, mimeapps), T07 login key input path, and T13 deep-link/single-instance handling, capabilities and CSP. Findings feed T17."
+    wave: 9
+    depends_on: [T13]
+    agent: gem-reviewer
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "Verdict pass/fail per item: Exec/%u quoting prevents argument injection; key never in argv/logs/output; all deep-link/second-instance URLs parsed before action; CSP has no unsafe-eval/remote origins; capabilities least-privilege."
+      - "Findings with severity and file:line returned to orchestrator for T17."
+    handoff:
+      constraints:
+        - "Read-only; no code edits."
+      high_risk_signals: [security_sensitive]
+
+  - id: T16
+    title: "GUI E2E and controller-navigation verification at 1280x800"
+    description: "Drive the frontend at 1280x800 (vite dev server with mocked IPC, plus a smoke run of the real Tauri window via `npm run tauri dev`): keyboard-only flows, emulated gamepad, FOMOD wizard, API key OSK path, deploy/purge actions, focus visibility, a11y."
+    wave: 10
+    depends_on: [T14, T15]
+    agent: gem-browser-tester
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "Every view navigable end-to-end keyboard-only; no focus traps; focus ring visible (screenshots at 1280x800)."
+      - "Emulated gamepad A/B/shoulder/D-pad navigation passes on Mods, Install (FOMOD wizard) and Settings (API key entry)."
+      - "No horizontal overflow or hover-only controls at 1280x800; axe scan has no serious/critical issues."
+      - "Real Tauri window smoke run launches and loads Overview."
+      - "Report lists failures with reproduction steps."
+    handoff:
+      constraints:
+        - "Do not test against real Nexus or a real game install."
+
+  - id: T17
+    title: "Parity and quality gate (sole checklist editor)"
+    description: "Independent verification of the baseline: checklist coverage and update, workspace quality gates, CLI parity, bethesda end-to-end scenario, bundle build, T13R/T16 findings disposition, residual risks."
+    wave: 11
+    depends_on: [T13R, T15, T16]
+    agent: gem-reviewer
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "feature_parity_checklist.md updated: every Port/Change/New row names its proving test (from implementer handoffs) or recorded verification; no Drop row implemented (grep evidence)."
+      - "cargo test --workspace, cargo clippy --workspace --all-targets -- -D warnings, cargo fmt --all --check, cargo deny check results recorded."
+      - "CLI command/alias/flag set diffed against legacy_spec.md inventory with zero unexplained gaps."
+      - "End-to-end bethesda scenario (login via stdin with mock -> game detect on fixture Steam root -> install Skyrim SE fixture mod -> deploy -> verify -> purge -> byte-identical) executed and recorded; other profiles not E2E-tested in v1 by decision."
+      - "`npm run tauri build -- --bundles appimage,deb,rpm` produces artifacts; AppImage launches to the main window (smoke)."
+      - "T13R and T16 findings each marked fixed, accepted, or open."
+      - "Report records residual risks: no real Nexus API, no real Steam library or SD-card deploy, no Deck Game Mode Gamepad API/keyring verification."
+      - "Verdict pass/fail with gap list for orchestrator replan."
+    handoff:
+      constraints:
+        - "Read-only except running tests/builds and editing feature_parity_checklist.md."
+      critic_signals: [architecture]
