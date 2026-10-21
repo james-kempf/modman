@@ -5,9 +5,11 @@
 - Date: 2026-10-21
 - Toolchain: Rust at `~/.cargo/bin`, node 24, cargo-deny at `~/.cargo/bin`
 
-## Verdict: FAIL (2 open gaps; both small)
+## Final verdict: PASS (re-gated at `d7d14fd`, see §9)
 
-Everything else passed: the quality gates, the drop-row greps, the bundles, the AppImage smoke, the findings spot-checks and the T16 flow rerun.
+The first gate at `1ccd93d` failed on two gaps, G1 and G2. T17F (`d7d14fd`) fixed them and the LOW findings F3-F7. A narrow re-gate verified each fix (§9). The rest of the original gate passed: the quality gates, the drop-row greps, the bundles, the AppImage smoke, the findings spot-checks and the T16 flow rerun.
+
+Gaps from the first gate (both now **fixed** in `d7d14fd`):
 
 | # | Gap | Severity | Evidence | Suggested fix |
 | :--- | :--- | :--- | :--- | :--- |
@@ -123,13 +125,13 @@ New findings from T17:
 
 | ID | Severity | Location | Finding | Disposition |
 | :--- | :--- | :--- | :--- | :--- |
-| F1 = G2 | LOW | `crates/modman-cli/src/cli.rs` (deploy args) | `deploy -n` missing | **open** |
-| F2 = G1 | MEDIUM | `crates/modman-core/src/loadorder/plugins_txt.rs` (`remove_managed`, ~L478) | Purge does not restore `plugins.txt` byte-identical and leaves a header-only file when none existed | **open** |
-| F3 | LOW | `crates/modman-core/src/config.rs:84`, `crates/modman-core/src/app/nexus.rs:386` | The `jobs` help text and the Premium login message promise parallel downloads, which are not implemented (Change row) | open (text fix) |
-| F4 | LOW | `crates/modman-cli/tests/cli.rs:189` | Test name `later_milestone_commands_report_not_yet_implemented` is stale: it now asserts the opposite | open (rename) |
-| F5 | LOW | `crates/modman-cli/src/commands/nxm.rs` | `nxm register --help` (and unregister/status) acts instead of printing help | open |
-| F6 | LOW | `docs/plan/20261020-rust-migration/t16/flows.json` | Committed evidence is the failing pre-fix run; the 30/30 rerun is not committed | open (re-commit evidence) |
-| F7 | LOW | Change row `config fomod` | Reading of the `fomod` config key has no behavioural test (code `app/install.rs:153-158` only) | open |
+| F1 = G2 | LOW | `crates/modman-cli/src/commands/deploy.rs` (deploy args) | `deploy -n` missing | **fixed** `d7d14fd` (`deploy_short_n_is_dry_run`) |
+| F2 = G1 | MEDIUM | `crates/modman-core/src/loadorder/plugins_txt.rs` (`remove_managed`, ~L478) | Purge does not restore `plugins.txt` byte-identical and leaves a header-only file when none existed | **fixed** `d7d14fd` (`purge_restores_original_plugins_txt_byte_identical`, `purge_deletes_plugins_txt_modman_created`, `purge_keeps_user_entries_in_modman_created_plugins_txt`; E2E re-run byte-identical) |
+| F3 | LOW | `crates/modman-core/src/config.rs:84`, `crates/modman-core/src/app/nexus.rs:386` | The `jobs` help text and the Premium login message promise parallel downloads, which are not implemented (Change row) | **fixed** `d7d14fd` (texts now say sequential / no parallel) |
+| F4 | LOW | `crates/modman-cli/tests/cli.rs:189` | Test name `later_milestone_commands_report_not_yet_implemented` is stale: it now asserts the opposite | **fixed** `d7d14fd` (renamed `former_stub_commands_are_implemented_and_bare_nxm_link_is_routed`) |
+| F5 | LOW | `crates/modman-cli/src/commands/nxm.rs` | `nxm register --help` (and unregister/status) acts instead of printing help | **fixed** `d7d14fd` (`nxm_subcommand_help_prints_help_and_changes_nothing`; manual check: help printed, no `.desktop`/mimeapps written) |
+| F6 | LOW | `docs/plan/20261020-rust-migration/t16/flows.json` | Committed evidence is the failing pre-fix run; the 30/30 rerun is not committed | **fixed** `d7d14fd` (`t16/flows.json` 30/30 ok) |
+| F7 | LOW | Change row `config fomod` | Reading of the `fomod` config key has no behavioural test (code `app/install.rs:153-158` only) | **fixed** `d7d14fd` (`app::install::tests::fomod_config_key_sets_install_mode_unless_flag_given`) |
 | F8 | INFO | data dir after purge | Empty `backups/<xx>/` shard dir and `staging/.tmp` remain after purge/install | accepted |
 
 ## 7. Residual risks (not verifiable in this environment)
@@ -144,8 +146,29 @@ New findings from T17:
 - Only the bethesda profile (Skyrim SE) is end-to-end tested. Other presets are unit-tested and ship as experimental.
 - The AppImage GUI smoke shows only that the process stays up and logs `GUI start`. Rendering was checked separately: T16 took a Tauri-window screenshot, and T17 reran the flows in the vite demo.
 
-## 8. Gap list for orchestrator replan
+## 8. Gap list for orchestrator replan (first gate; all items closed by `d7d14fd`)
 
 1. G1 / F2 (MEDIUM): make purge restore `plugins.txt` byte-identical when only modman entries changed, and delete the file when none existed before. Add a regression test. Alternatively, the orchestrator explicitly accepts legacy parity and amends the criterion.
 2. G2 / F1 (LOW): add `-n` to `deploy --dry-run` and add it to the alias test.
 3. LOW clean-ups, optional for v1: F3 text, F4 test rename, F5 `nxm <sub> --help`, F6 re-commit the T16 30/30 evidence, F7 a test for the `fomod` config key.
+
+## 9. Re-gate at `d7d14fd` (T17F)
+
+Scope: only G1, G2 and F3-F7, plus the Rust gates.
+
+| Check | Result |
+| :--- | :--- |
+| `cargo fmt --all --check` | exit 0 |
+| `cargo clippy --workspace --all-targets -- -D warnings` | exit 0 |
+| `cargo test --workspace` | exit 0: **481 passed, 0 failed** (+6 new tests) |
+| G1 `e2e.sh` (prefix holds an original `plugins.txt`) | All steps PASS. During deploy, `plugins.txt` holds `*E2ETestMod.esp`. After purge, both the **game folder and the prefix are byte-identical** (tree, type, mode, size, sha256). Game file mtimes are identical; the restored `plugins.txt` has a new mtime (content identical; INFO only). |
+| G1 `e2e_noorig.sh` (no `plugins.txt` before deploy) | All steps PASS. Game folder and prefix are byte-identical; the `plugins.txt` modman created is deleted, and all prefix mtimes are identical. |
+| G1 tests | core/loadorder `purge_restores_original_plugins_txt_byte_identical`, `purge_deletes_plugins_txt_modman_created`, `purge_keeps_user_entries_in_modman_created_plugins_txt`: ok |
+| G2 | cli/cli `deploy_short_n_is_dry_run`: ok. `modman deploy -n` now parses (it reaches "No game selected" instead of "unexpected argument"). |
+| F3 | `config.rs` jobs help is now "reserved; downloads run one at a time"; the Premium login message is now "direct downloads available" |
+| F4 | cli/cli `former_stub_commands_are_implemented_and_bare_nxm_link_is_routed`: ok (the old name is gone) |
+| F5 | cli/nexus `nxm_subcommand_help_prints_help_and_changes_nothing`: ok. Manual check: `nxm register --help` printed help and wrote no `.desktop` or `mimeapps.list` under the temp HOME. |
+| F6 | `t16/flows.json`: 30/30 `ok: true` |
+| F7 | core::app::install `fomod_config_key_sets_install_mode_unless_flag_given`: ok |
+
+Open after the re-gate: none blocking. F8 (INFO, empty backup shard and `.tmp` dirs) is accepted. The residual risks in §7 are unchanged.
