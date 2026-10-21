@@ -6,7 +6,7 @@
 use clap::{Parser, Subcommand};
 
 use crate::commands::{
-    auth, autoupdate, collection, config, deploy, game, install, log, mods, nxm,
+    auth, autoupdate, collection, config, deploy, game, install, log, mods, nxm, plugins,
 };
 
 fn lowercase(s: &str) -> Result<String, std::convert::Infallible> {
@@ -112,6 +112,8 @@ pub enum Commands {
     /// Update mods and redeploy after system or Steam game updates.
     #[command(visible_aliases = ["auto-update", "au"])]
     Autoupdate(autoupdate::AutoupdateArgs),
+    /// Bethesda plugins.txt: list, LOOT sort, masterlist download.
+    Plugins(plugins::PluginsArgs),
     /// Print the version.
     Version,
     /// Unknown commands and bare nxm:// links.

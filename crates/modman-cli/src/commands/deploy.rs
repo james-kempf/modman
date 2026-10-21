@@ -111,6 +111,7 @@ pub fn deploy(ctx: &mut Ctx, args: DeployArgs) -> Result<()> {
         ));
     }
     if r.placed == 0 {
+        super::plugins::report_stage(out, &r.plugins);
         out.info("Nothing to deploy (no enabled mods with staged files).");
         return Ok(());
     }
@@ -139,6 +140,7 @@ pub fn deploy(ctx: &mut Ctx, args: DeployArgs) -> Result<()> {
         methods_summary(&r.by_method),
         r.backed_up
     ));
+    super::plugins::report_stage(out, &r.plugins);
     Ok(())
 }
 
@@ -163,6 +165,7 @@ pub fn purge(ctx: &mut Ctx, _args: PurgeArgs) -> Result<()> {
     let r = deploy::purge(&mut ctx.store, &game, &env)?;
     report_recovery(ctx, &r.recovered.as_deref().cloned());
     purge_summary(ctx, &r);
+    super::plugins::report_stage(ctx.out, &r.plugins);
     if r.changed > 0 {
         ctx.out.info(&format!(
             "Changed files were kept in {}",

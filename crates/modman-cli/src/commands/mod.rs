@@ -12,6 +12,7 @@ pub mod install;
 pub mod log;
 pub mod mods;
 pub mod nxm;
+pub mod plugins;
 
 use anyhow::{bail, Result};
 use clap::Args;
@@ -86,6 +87,7 @@ pub fn dispatch(ctx: &mut Ctx, command: Commands) -> Result<()> {
         C::Log(a) => log::run(ctx, a),
         C::Nxm(a) => nxm::run(ctx, a),
         C::Autoupdate(a) => autoupdate::run(ctx, a),
+        C::Plugins(a) => plugins::run(ctx, a),
         C::External(args) => external(ctx, args),
         // Handled before a context exists.
         C::Version => unreachable!("version is handled in main"),

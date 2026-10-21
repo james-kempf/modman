@@ -93,11 +93,15 @@ pub fn deploy(
         report.purged = Some(purge_locked(store, game, env)?);
     }
     if plan.items.is_empty() {
+        report.plugins = Some(plugin_stage(store, game, env, true));
         return Ok(report);
     }
     let pre = preflight(&root, &plan)?;
     match run_deploy(store, game, env, opts, &root, &plan, &pre, &mut report) {
-        Ok(()) => Ok(report),
+        Ok(()) => {
+            report.plugins = Some(plugin_stage(store, game, env, true));
+            Ok(report)
+        }
         Err(DeployError::InjectedCrash) => Err(DeployError::InjectedCrash),
         Err(e) => {
             if let Err(re) = recover_locked(store, game, env) {
@@ -375,7 +379,30 @@ pub fn purge(
         report.nothing_deployed = false;
     }
     report.recovered = recovered.map(Box::new);
+    report.plugins = Some(plugin_stage(store, game, env, false));
     Ok(report)
+}
+
+/// plugins.txt stage, run under the deploy lock after the journal committed
+/// (legacy `plugins_update` L1883 / `plugins_remove_managed` L1734). A
+/// failure here never undoes the deploy or purge; it is reported instead.
+fn plugin_stage(
+    store: &Store,
+    game: &GameConfig,
+    env: &DeployEnv,
+    deployed: bool,
+) -> crate::loadorder::PluginStage {
+    use crate::loadorder::{remove_managed, update_plugins, PluginStage, PluginsFiles};
+    let files = PluginsFiles::new(env.game_data_dir());
+    let r = if deployed {
+        update_plugins(store.conn(), game, &files)
+    } else {
+        remove_managed(game, &files)
+    };
+    r.unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "plugins.txt stage failed");
+        PluginStage::Failed(e.to_string())
+    })
 }
 
 fn purge_locked(

@@ -18,7 +18,7 @@
 //!   another process holds the deploy lock.
 
 mod backup;
-mod confine;
+pub(crate) mod confine;
 mod engine;
 mod place;
 mod plan;
@@ -269,6 +269,14 @@ impl DeployEnv {
             faults: Faults::default(),
         }
     }
+
+    /// Per-game data folder (`<data-dir>/<domain>`, the parent of
+    /// `overwrite_dir`): holds `plugins.managed` and `plugins.txt.orig`.
+    pub fn game_data_dir(&self) -> PathBuf {
+        self.overwrite_dir
+            .parent()
+            .map_or_else(|| self.overwrite_dir.clone(), Path::to_path_buf)
+    }
 }
 
 /// Progress event (files done of total) for deploy and purge.
@@ -305,6 +313,8 @@ pub struct DeployReport {
     /// The previous deployment removed before this one.
     pub purged: Option<PurgeReport>,
     pub recovered: Option<RecoveryReport>,
+    /// plugins.txt stage after a successful deploy (`None` on a dry run).
+    pub plugins: Option<crate::loadorder::PluginStage>,
 }
 
 /// Result of [`purge`] (legacy summary: removed, restored, missing, changed,
@@ -323,6 +333,8 @@ pub struct PurgeReport {
     /// Backups not restored because the path is occupied.
     pub kept: usize,
     pub recovered: Option<Box<RecoveryReport>>,
+    /// Removal of modman's plugins.txt entries (set by [`purge`] only).
+    pub plugins: Option<crate::loadorder::PluginStage>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
