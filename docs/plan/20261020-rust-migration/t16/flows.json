@@ -1,0 +1,280 @@
+[
+ {
+  "name": "K overview: initial focus on tab rail",
+  "ok": true
+ },
+ {
+  "name": "K overview: Purge -> confirm dialog, focus on No, inert background",
+  "ok": false,
+  "error": "focus not restored to Purge after Esc, got BODY",
+  "focus": "button:overview"
+ },
+ {
+  "name": "K overview: Purge confirmed with Yes",
+  "ok": true,
+  "info": {
+   "focus": "BODY",
+   "notices": []
+  }
+ },
+ {
+  "name": "K overview: Deploy",
+  "ok": true,
+  "info": {
+   "focus": "BODY",
+   "notices": [
+    "Deployed 20 files from 2 mods"
+   ]
+  }
+ },
+ {
+  "name": "K overview: Detect Steam games + Esc back to rail",
+  "ok": true,
+  "info": {
+   "dialog": null
+  }
+ },
+ {
+  "name": "K mods: PageDown, disable SkyUI, move down, details Esc",
+  "ok": true,
+  "info": {
+   "order": [
+    "1Unofficial Patchv1.0 · 10 fil",
+    "2SkyUIv1.0 · 10 files · 1.0 MB",
+    "3Immersive Armorsv1.0 · 10 fil"
+   ],
+   "d": "Unofficial Patch"
+  }
+ },
+ {
+  "name": "K mods: Conflicts / Updates / Profiles segments",
+  "ok": true,
+  "info": {
+   "seen": {
+    "Conflicts": true,
+    "Updates": true,
+    "Profiles": true
+   },
+   "notices": [
+    "Deployed 20 files from 2 mods",
+    "Changes are not in the game yet.",
+    "Changes are not in the game yet.",
+    "Save profile: no mock for profile_save"
+   ]
+  }
+ },
+ {
+  "name": "K install: type target, Enter -> FOMOD wizard, choose 1K, Next, confirm Yes",
+  "ok": true,
+  "info": [
+   "Changes are not in the game yet.",
+   "Save profile: no mock for profile_save",
+   "Changes are not in the game yet.",
+   "Installed Demo Mod 266 (3 files)"
+  ]
+ },
+ {
+  "name": "K install: Esc in FOMOD wizard cancels the job",
+  "ok": true,
+  "info": {
+   "f": "BODY",
+   "notices": [
+    "Save profile: no mock for profile_save",
+    "Changes are not in the game yet.",
+    "Installed Demo Mod 266 (3 files)",
+    "Install: cancelled"
+   ],
+   "focus": "button:install"
+  }
+ },
+ {
+  "name": "K install: nxm paste box + search",
+  "ok": true,
+  "info": [
+   "Changes are not in the game yet.",
+   "Installed Demo Mod 266 (3 files)",
+   "Install: cancelled",
+   "Queued mod link nxm://skyrimspecialedition/mods/266/files/1"
+  ]
+ },
+ {
+  "name": "K collections: navigate content and back",
+  "ok": true,
+  "info": {
+   "dialog": null,
+   "notices": [
+    "Installed Demo Mod 266 (3 files)",
+    "Install: cancelled",
+    "Queued mod link nxm://skyrimspecialedition/mods/266/files/1",
+    "Look up: no mock for collection_info"
+   ]
+  }
+ },
+ {
+  "name": "K requirements: navigate content and back",
+  "ok": true,
+  "info": {
+   "after": [
+    "Refresh from Nexus",
+    "Install",
+    "I have it"
+   ],
+   "notices": [
+    "Installed Demo Mod 266 (3 files)",
+    "Install: cancelled",
+    "Queued mod link nxm://skyrimspecialedition/mods/266/files/1",
+    "Look up: no mock for collection_info"
+   ]
+  }
+ },
+ {
+  "name": "K activity: navigate content and back",
+  "ok": true,
+  "info": {
+   "afterDown": "button:Dismiss notice",
+   "notices": [
+    "Installed Demo Mod 266 (3 files)",
+    "Install: cancelled",
+    "Queued mod link nxm://skyrimspecialedition/mods/266/files/1",
+    "Look up: no mock for collection_info"
+   ]
+  }
+ },
+ {
+  "name": "K settings: type API key + Enter signs in; config Save",
+  "ok": true,
+  "info": "Nexus Mods accountChange keySign outSigned in as demo PremiumKey from keyring · 20000/day"
+ },
+ {
+  "name": "K settings: Auto-update toggle reachable by arrows (signed in)",
+  "ok": true,
+  "info": {
+   "path": [
+    "down",
+    "down"
+   ],
+   "state": "true"
+  }
+ },
+ {
+  "name": "K settings: config value edit + Save",
+  "ok": true,
+  "info": {
+   "focus": "button:Save",
+   "notices": [
+    "Queued mod link nxm://skyrimspecialedition/mods/266/files/1",
+    "Look up: no mock for collection_info",
+    "Signed in as demo (Premium); key stored in the keyring",
+    "autoupdate-interval = 02"
+   ]
+  }
+ },
+ {
+  "name": "K logs",
+  "ok": true,
+  "info": {
+   "console": [],
+   "pageerr": [],
+   "net": []
+  }
+ },
+ {
+  "name": "K settings (signed out): Auto-update toggle reachable by arrows",
+  "ok": false,
+  "error": "navTo: [role=switch] unreachable by key arrows from 6",
+  "focus": "input:Nexus API key"
+ },
+ {
+  "name": "K settings (signed out): Down from Keyboard button stays in content",
+  "ok": false,
+  "error": "Down from 'Keyboard' jumped to tab rail button:settings",
+  "focus": "button:settings"
+ },
+ {
+  "name": "G rail: D-pad down/up + RB/LB",
+  "ok": true
+ },
+ {
+  "name": "G held D-pad repeats (400ms delay, 120ms period)",
+  "ok": true,
+  "info": "button:requirements"
+ },
+ {
+  "name": "G mods: RB, D-pad to Disable SkyUI, A, Details A, B closes",
+  "ok": true
+ },
+ {
+  "name": "G install: A on target opens OSK, type 266, Done, Install, FOMOD via pad",
+  "ok": true,
+  "info": [
+   "Changes are not in the game yet.",
+   "Changes are not in the game yet.",
+   "Changes are not in the game yet.",
+   "Installed Demo Mod 266 (3 files)"
+  ]
+ },
+ {
+  "name": "G install: B in FOMOD cancels",
+  "ok": true,
+  "info": [
+   "Changes are not in the game yet.",
+   "Changes are not in the game yet.",
+   "Installed Demo Mod 266 (3 files)",
+   "Install: cancelled"
+  ]
+ },
+ {
+  "name": "G settings: A on API key opens OSK, type, Show/Hide masked, Done, Sign in",
+  "ok": false,
+  "error": "focus after OSK Done: BODY",
+  "focus": "button:settings"
+ },
+ {
+  "name": "G settings: Sign in after OSK (continues after focus recovery)",
+  "ok": false,
+  "error": "navTo: [data-goal] unreachable by pad arrows from 13",
+  "focus": "input:Nexus API key"
+ },
+ {
+  "name": "G settings: B on OSK cancels without typing",
+  "ok": false,
+  "error": "goal: nothing named Change key",
+  "focus": "input:Nexus API key"
+ },
+ {
+  "name": "G logs",
+  "ok": true,
+  "info": {
+   "console": [],
+   "pageerr": [],
+   "net": []
+  }
+ },
+ {
+  "name": "G settings (fresh): OSK entry, Done, Sign in, by pad only",
+  "ok": true,
+  "info": {
+   "focusAfterDone": "BODY",
+   "keyCleared": true
+  }
+ },
+ {
+  "name": "focus lost to <body> after dialog/job",
+  "ok": false,
+  "info": [
+   "Overview: Purge confirm closed with Esc",
+   "Overview: Purge confirm answered Yes",
+   "Overview: Deploy job finished (button busy-disabled)",
+   "Install: confirm answered Yes (keyboard)",
+   "Install: FOMOD cancelled with Esc",
+   "Settings: Sign in via Enter (keyboard)",
+   "Settings: Auto-update toggle job finished",
+   "Install: OSK Done (gamepad)",
+   "Install: confirm answered A (gamepad)",
+   "Install: OSK Done (gamepad, 2nd)",
+   "Install: FOMOD cancelled with B",
+   "Settings: OSK Done (gamepad)",
+   "Settings (fresh): OSK Done (gamepad)"
+  ]
+ }
+]
