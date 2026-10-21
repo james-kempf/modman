@@ -532,7 +532,7 @@ tasks:
     wave: 10
     depends_on: [T14, T15]
     agent: gem-browser-tester
-    status: failed  # 7c53fcf artifacts; fixable: F1-F5 frontend -> T16D debug + T16F fix, then T16 re-run
+    status: completed  # 7c53fcf evidence; F1-F5 fixed in T16F 4dda37c; rerun flows 30/30, audit/axe clean, Tauri smoke pass
     retries_used: 0
     acceptance_criteria:
       - "Every view navigable end-to-end keyboard-only; no focus traps; focus ring visible (screenshots at 1280x800)."
@@ -543,6 +543,13 @@ tasks:
     handoff:
       constraints:
         - "Do not test against real Nexus or a real game install."
+
+  - id: T16F
+    title: "Fix T16 frontend defects (added by orchestrator, after T16D diagnosis)"
+    wave: 10
+    depends_on: [T16]
+    agent: gem-implementer
+    status: completed  # 4dda37c; vitest 110/110
 
   - id: T17
     title: "Parity and quality gate (sole checklist editor)"
