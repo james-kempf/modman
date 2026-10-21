@@ -1,0 +1,30 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# modman AppImage entry point.
+#
+# - No arguments: start the desktop app through the original linuxdeploy
+#   AppRun (AppRun.gui), which runs the GTK/WebKit apprun-hooks.
+# - Any argument: run the bundled `modman` CLI with the arguments unchanged.
+#   This makes `<AppImage> nxm <url>` (the nxm handler written by
+#   `modman nxm register`) and `<AppImage> autoupdate run` (the systemd
+#   timer ExecStart) work, as well as every other CLI subcommand.
+# - `--gui` / `gui` as the first argument forces the desktop app.
+#
+# WEBKIT_DISABLE_DMABUF_RENDERER defaults to 1 for the desktop app: the
+# WebKitGTK DMA-BUF renderer crashes or shows a blank window on several
+# Wayland/NVIDIA/Mesa setups. Export WEBKIT_DISABLE_DMABUF_RENDERER=0 to
+# opt back in.
+
+HERE=$(dirname "$(readlink -f "$0")")
+: "${APPDIR:=$HERE}"
+export APPDIR
+
+if [ "$#" -eq 0 ] || [ "$1" = "--gui" ] || [ "$1" = "gui" ]; then
+    [ "$#" -gt 0 ] && shift
+    : "${WEBKIT_DISABLE_DMABUF_RENDERER:=1}"
+    export WEBKIT_DISABLE_DMABUF_RENDERER
+    exec "$APPDIR/AppRun.gui" "$@"
+fi
+
+exec "$APPDIR/usr/bin/modman" "$@"

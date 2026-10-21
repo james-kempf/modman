@@ -1,0 +1,78 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Maintainer: James Kempf
+#
+# Builds modman-desktop (Tauri v2) and the `modman` CLI from a release tag.
+# Runtime deps (spikes.md §2, §6, §7): system webkit2gtk-4.1 (+ libsoup3,
+# gtk3) for the GUI and libarchive for .rar (compress-tools). libloot is a
+# pure-Rust crate and SQLite is compiled in, so neither is a dependency.
+# No 7z/unrar binary is used at runtime.
+
+pkgname=modman
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Nexus Mods manager for Steam/Proton games on Linux and the Steam Deck (GUI + CLI)"
+arch=('x86_64')
+# Upstream URL is not set yet (Cargo.toml `repository = ""`); set it before publishing.
+url="https://github.com/modman/modman"
+license=('GPL-3.0-or-later')
+depends=(
+  'webkit2gtk-4.1'
+  'libsoup3'
+  'gtk3'
+  'libarchive'
+  'dbus'
+  'hicolor-icon-theme'
+  'gcc-libs'
+  'glibc'
+)
+makedepends=(
+  'cargo'
+  'nodejs'
+  'npm'
+  'pkgconf'
+)
+optdepends=(
+  'libnotify: desktop notifications from the nxm handler and autoupdate'
+  'xdg-utils: open links and register the nxm:// handler'
+  'gnome-keyring: store the Nexus API key in the Secret Service'
+)
+options=('!lto' '!debug')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+  (cd apps/desktop && npm ci)
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  (cd apps/desktop && npm run build)
+  cargo build --frozen --release -p modman-cli
+  # tauri/custom-protocol serves the embedded dist instead of the dev URL
+  # (what `tauri build` turns on).
+  cargo build --frozen --release -p modman-desktop --features tauri/custom-protocol
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo test --frozen --release -p modman-core -p modman-cli
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 target/release/modman-desktop "$pkgdir/usr/bin/modman-desktop"
+  install -Dm755 target/release/modman "$pkgdir/usr/bin/modman"
+  install -Dm644 packaging/common/org.modman.app.desktop "$pkgdir/usr/share/applications/org.modman.app.desktop"
+  install -Dm644 packaging/common/modman-nxm.desktop "$pkgdir/usr/share/applications/modman-nxm.desktop"
+  install -Dm644 packaging/common/org.modman.app.metainfo.xml "$pkgdir/usr/share/metainfo/org.modman.app.metainfo.xml"
+  install -Dm644 apps/desktop/src-tauri/icons/32x32.png "$pkgdir/usr/share/icons/hicolor/32x32/apps/org.modman.app.png"
+  install -Dm644 apps/desktop/src-tauri/icons/128x128.png "$pkgdir/usr/share/icons/hicolor/128x128/apps/org.modman.app.png"
+  install -Dm644 apps/desktop/src-tauri/icons/128x128@2x.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/org.modman.app.png"
+  install -Dm644 packaging/README.md "$pkgdir/usr/share/doc/$pkgname/README.packaging.md"
+}

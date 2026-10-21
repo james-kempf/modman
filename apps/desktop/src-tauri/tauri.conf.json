@@ -43,6 +43,38 @@
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.png"
-    ]
+    ],
+    "category": "Game",
+    "shortDescription": "Nexus Mods manager for Linux",
+    "longDescription": "Install, order and deploy Nexus Mods for Steam/Proton games on Linux and the Steam Deck. Ships the desktop app (modman-desktop) and the command-line tool (modman), which also handles nxm:// links.",
+    "license": "GPL-3.0-or-later",
+    "licenseFile": "../../../LICENSE",
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": false,
+        "files": {
+          "/usr/bin/modman": "../../../target/release/modman"
+        }
+      },
+      "deb": {
+        "section": "games",
+        "depends": [
+          "libarchive13t64 | libarchive13"
+        ],
+        "files": {
+          "/usr/bin/modman": "../../../target/release/modman",
+          "/usr/share/applications/modman-nxm.desktop": "../../../packaging/common/modman-nxm.desktop"
+        }
+      },
+      "rpm": {
+        "depends": [
+          "libarchive"
+        ],
+        "files": {
+          "/usr/bin/modman": "../../../target/release/modman",
+          "/usr/share/applications/modman-nxm.desktop": "../../../packaging/common/modman-nxm.desktop"
+        }
+      }
+    }
   }
 }
