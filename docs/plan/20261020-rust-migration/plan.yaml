@@ -231,7 +231,7 @@ tasks:
     depends_on: [T03]
     agent: gem-implementer
     context_cluster: port-baseline
-    status: pending
+    status: completed  # e8d75c8
     retries_used: 0
     acceptance_criteria:
       - "All HTTP tests use a mock server; zero requests to api.nexusmods.com in test runs."
