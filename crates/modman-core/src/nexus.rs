@@ -21,8 +21,8 @@ mod updates;
 pub use auth::{ApiKey, ApiKeyAuth, AuthProvider, NxmKey};
 pub(crate) use client::network_message as client_network_message;
 pub use client::{
-    install_crypto_provider, Account, CdnLink, FileInfo, FileUpdate, GameInfo, ModFiles, ModInfo,
-    NexusClient, NexusConfig, RetryPolicy, SharedStore, UpdatedMod, DEFAULT_GRAPHQL_URL,
+    install_crypto_provider, Account, CdnLink, FileInfo, FileUpdate, GameInfo, Md5Match, ModFiles,
+    ModInfo, NexusClient, NexusConfig, RetryPolicy, SharedStore, UpdatedMod, DEFAULT_GRAPHQL_URL,
     DEFAULT_REST_BASE,
 };
 pub use deps::{

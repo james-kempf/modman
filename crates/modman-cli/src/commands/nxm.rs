@@ -4,7 +4,8 @@
 //!
 //! `nxm <url>` parses the link with the core parser first, then forwards it
 //! to a running GUI over D-Bus (5 s timeout). Without a GUI the link is
-//! queued in `downloads` and processed inline.
+//! queued in `downloads` and processed inline: a mod link installs the
+//! file, a collection link installs the (pinned) collection revision.
 
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -311,19 +312,33 @@ fn handle(ctx: &mut Ctx, url: &str) -> Result<()> {
     }
     let row = download::enqueue_nxm(&ctx.store, &link)?;
     let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    if !interactive {
+        // Background run: no prompts (optional mods default to none).
+        ctx.yes = true;
+    }
     let m = match &link {
-        NxmLink::Collection { game, slug, .. } => {
-            let msg = format!("Collection {slug} ({game}) queued; open modman to install it (collections arrive with milestone M5).");
+        NxmLink::Collection {
+            game,
+            slug,
+            revision,
+        } => {
             if !interactive {
-                notify(&msg);
+                notify(&format!("Installing collection {slug} ({game})…"));
             }
-            ctx.out.info(&msg);
-            return Ok(());
+            let res = super::collection::install_link(ctx, game, slug, *revision, row);
+            if !interactive {
+                notify(&match &res {
+                    Ok(()) => {
+                        format!("Installed collection {slug}. Run 'modman deploy' to apply it.")
+                    }
+                    Err(_) => format!("Installing collection {slug} failed — see: modman log"),
+                });
+            }
+            return res;
         }
         NxmLink::Mod(m) => m.clone(),
     };
     if !interactive {
-        ctx.yes = true;
         notify(&format!("Installing mod {} ({})…", m.mod_id, m.game));
     }
     let res = (|| -> Result<bool> {

@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, bail, Result};
 use clap::Args;
 use modman_core::config::Config;
-use modman_core::download::NxmLink;
+use modman_core::download::{self, NxmLink};
 use modman_core::fomod::{
     FomodError, FomodMode, FomodResolver, GroupPrompt, GroupType, ModuleConfig, ResolvedMode, Step,
 };
@@ -18,7 +18,7 @@ use modman_core::mods::{self, InstallHooks, InstallMeta, InstallOutcome, ModReco
 use modman_core::nexus::{FileInfo, NxmKey};
 use modman_core::store::{DeployLock, StoreError};
 
-use super::{deploy, mods as modcmd, not_yet};
+use super::{collection, deploy, mods as modcmd};
 use crate::context::{games_hint, Ctx};
 use crate::nexus::{self as nx, Nexus};
 use crate::output::{human_size, Printer};
@@ -400,29 +400,29 @@ fn install_mode(ctx: &Ctx, flag: Option<&str>) -> Result<FomodMode> {
     }
 }
 
-/// Legacy `choose_file`: MAIN, UPDATE, OPTIONAL, MISCELLANEOUS, newest first.
-fn choose_file(ctx: &Ctx, files: &[FileInfo]) -> Result<u64> {
+/// Downloadable files in legacy `choose_file` order (MAIN, UPDATE,
+/// OPTIONAL, MISCELLANEOUS, newest first) and the index of the default: the
+/// author's primary file, else the first (legacy L2849-2859).
+fn file_rows(files: &[FileInfo]) -> (Vec<&FileInfo>, usize) {
     const CATS: [&str; 4] = ["MAIN", "UPDATE", "OPTIONAL", "MISCELLANEOUS"];
-    let mut rows: Vec<&FileInfo> = files
-        .iter()
-        .filter(|f| {
-            f.category_name
-                .as_deref()
-                .is_some_and(|c| CATS.contains(&c))
-        })
-        .collect();
-    rows.sort_by_key(|f| {
-        let c = CATS
-            .iter()
+    let cat = |f: &FileInfo| {
+        CATS.iter()
             .position(|c| Some(*c) == f.category_name.as_deref())
-            .unwrap_or(9);
-        (c, std::cmp::Reverse(f.uploaded_timestamp.unwrap_or(0)))
-    });
-    let Some(first) = rows.first() else {
-        bail!("This mod has no downloadable files.");
     };
+    let mut rows: Vec<&FileInfo> = files.iter().filter(|f| cat(f).is_some()).collect();
+    rows.sort_by_key(|f| (cat(f), std::cmp::Reverse(f.uploaded_timestamp.unwrap_or(0))));
+    let def = rows.iter().position(|f| f.is_primary).unwrap_or(0);
+    (rows, def)
+}
+
+/// Legacy `choose_file`: asks when interactive, else takes the default.
+fn choose_file(ctx: &Ctx, files: &[FileInfo]) -> Result<u64> {
+    let (rows, def) = file_rows(files);
+    if rows.is_empty() {
+        bail!("This mod has no downloadable files.");
+    }
     if rows.len() == 1 || !ctx.is_interactive() {
-        return Ok(first.file_id);
+        return Ok(rows[def].file_id);
     }
     eprintln!("Files:");
     for (i, f) in rows.iter().enumerate() {
@@ -436,7 +436,7 @@ fn choose_file(ctx: &Ctx, files: &[FileInfo]) -> Result<u64> {
         );
     }
     loop {
-        let a = ctx.ask("Which file?", "1");
+        let a = ctx.ask("Which file?", &(def + 1).to_string());
         match a.parse::<usize>() {
             Ok(n) if (1..=rows.len()).contains(&n) => return Ok(rows[n - 1].file_id),
             _ => ctx
@@ -593,6 +593,40 @@ fn install_nexus_with(
     Ok(Some(o))
 }
 
+/// Identifies a local archive on Nexus by its md5 when logged in, so
+/// updates can be tracked (legacy L3298-3305). Lookup failures are ignored.
+fn identify(ctx: &Ctx, game: &GameConfig, meta: &mut InstallMeta) {
+    let Some(md5) = meta.md5.clone() else { return };
+    let Ok(Some(nexus)) = nx::connect(ctx, false) else {
+        return;
+    };
+    if !nexus.client.is_authenticated() {
+        return;
+    }
+    let hit = match nexus.run(nexus.client.md5_search(&game.domain, &md5)) {
+        Ok(Ok(hits)) => hits.into_iter().next(),
+        Ok(Err(e)) => {
+            tracing::debug!("md5 lookup failed: {e}");
+            None
+        }
+        Err(_) => None,
+    };
+    let Some(h) = hit else { return };
+    if meta.name.is_none() {
+        meta.name = h.mod_name.clone();
+    }
+    meta.nexus_mod_id = Some(h.mod_id);
+    meta.nexus_file_id = Some(h.file_id);
+    meta.version = h.version.clone();
+    meta.source = Some("nexus".into());
+    ctx.out.info(&format!(
+        "Identified on Nexus: {} (mod {}, file {})",
+        meta.name.as_deref().unwrap_or("?"),
+        h.mod_id,
+        h.file_id
+    ));
+}
+
 fn install_local(
     ctx: &mut Ctx,
     game: &GameConfig,
@@ -620,17 +654,24 @@ fn install_local(
     } else {
         path.clone()
     };
-    let meta = InstallMeta {
+    let mut meta = InstallMeta {
         name: name.map(str::to_string),
         source: Some("local".into()),
         fomod_mode: install_mode(ctx, fomod)?,
         ..Default::default()
     };
+    if archive.is_file() {
+        meta.md5 = Some(download::md5_file(&archive)?);
+        identify(ctx, game, &mut meta);
+    }
     out.info(&format!("Installing from {base}..."));
     let lock = staging_lock(ctx)?;
     let o = install_archive(ctx, game, &archive, &meta, fomod == Some("ask"))?;
     drop(lock);
     out.success(&format!("Installed {} → {}", out.bold(&o.name), o.uid));
+    if meta.nexus_mod_id.is_some() {
+        modcmd::requirements_after_install(ctx, game, o.mod_id);
+    }
     Ok(())
 }
 
@@ -647,7 +688,23 @@ pub fn install(ctx: &mut Ctx, args: InstallArgs) -> Result<()> {
             install_local(ctx, &game, &p, args.name.as_deref(), args.fomod.as_deref())?;
             game
         }
-        Target::Collection(_) => return not_yet("collection install", "M5"),
+        Target::Collection(reference) => {
+            // `install --fomod` values that collections accept pass through.
+            let fomod = args
+                .fomod
+                .filter(|f| matches!(f.as_str(), "ask" | "default"));
+            return collection::install(
+                ctx,
+                collection::InstallOpts {
+                    reference,
+                    optional: args.optional,
+                    fomod,
+                    revision: args.revision,
+                    deploy: args.deploy,
+                    download_only: args.download_only,
+                },
+            );
+        }
         Target::Nexus {
             game,
             mod_id,
@@ -695,7 +752,11 @@ pub fn install(ctx: &mut Ctx, args: InstallArgs) -> Result<()> {
 pub fn download(ctx: &mut Ctx, args: DownloadArgs) -> Result<()> {
     let target = parse_target(&args.target)?;
     let (game, mod_id, file_id, key) = match target {
-        Some(Target::Collection(_)) => return not_yet("collection download", "M5"),
+        Some(Target::Collection(t)) => {
+            let mut opts = collection::passthrough(&t, &args.rest)?;
+            opts.download_only = true;
+            return collection::install(ctx, opts);
+        }
         Some(Target::Nexus {
             game,
             mod_id,
@@ -780,6 +841,34 @@ mod tests {
             file_id: f,
             key: None,
         })
+    }
+
+    fn file(id: u64, cat: &str, ts: i64, primary: bool) -> FileInfo {
+        FileInfo {
+            file_id: id,
+            name: format!("f{id}"),
+            version: None,
+            category_name: Some(cat.into()),
+            file_name: None,
+            size_in_bytes: None,
+            uploaded_timestamp: Some(ts),
+            is_primary: primary,
+        }
+    }
+
+    #[test]
+    fn file_rows_default_to_the_primary_file() {
+        let files = [
+            file(1, "OPTIONAL", 5, false),
+            file(2, "MAIN", 1, false),
+            file(3, "MAIN", 2, false),
+            file(4, "OLD_VERSION", 9, true),
+        ];
+        let (rows, def) = file_rows(&files);
+        let ids: Vec<u64> = rows.iter().map(|f| f.file_id).collect();
+        assert_eq!((ids, def), (vec![3, 2, 1], 0));
+        let files = [file(1, "MAIN", 2, false), file(2, "OPTIONAL", 1, true)];
+        assert_eq!(file_rows(&files).1, 1);
     }
 
     #[test]

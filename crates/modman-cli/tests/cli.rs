@@ -188,9 +188,10 @@ fn every_legacy_alias_resolves_to_its_command() {
 #[test]
 fn later_milestone_commands_report_not_yet_implemented() {
     let env = Env::new();
+    // Collections arrived with M5: list needs a game, not a milestone.
     env.run(&["collection", "list"])
         .failure()
-        .stderr(contains("collection: not implemented yet (milestone M5)"));
+        .stderr(contains("No game selected").and(contains("not implemented").not()));
     env.run(&["au", "status"])
         .failure()
         .stderr(contains("autoupdate: not implemented yet (milestone M7)"));

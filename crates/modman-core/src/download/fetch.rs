@@ -92,6 +92,13 @@ fn hash_file(path: &Path) -> std::io::Result<(String, String, u64)> {
     Ok((hex(&sha.finalize()), hex(&md5.finalize()), n_total))
 }
 
+/// Lower-case hex md5 of a file (identifies local archives on Nexus).
+pub fn md5_file(path: &Path) -> Result<String, DownloadError> {
+    hash_file(path)
+        .map(|(_, md5, _)| md5)
+        .map_err(DownloadError::io(path))
+}
+
 /// `bytes <start>-<end>/<total>` -> (start, total).
 fn content_range(v: &str) -> Option<(u64, Option<u64>)> {
     let rest = v.trim().strip_prefix("bytes ")?;

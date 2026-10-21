@@ -94,7 +94,7 @@ fn install_aliases_name_flag_and_deploy_flag() {
 }
 
 #[test]
-fn install_rejects_unknown_targets_and_defers_collections() {
+fn install_rejects_unknown_targets_and_routes_collections() {
     let (env, _) = setup();
     env.run(&["install", "not a target"])
         .failure()
@@ -112,9 +112,8 @@ fn install_rejects_unknown_targets_and_defers_collections() {
         "--download-only",
     ])
     .failure()
-    .stderr(contains(
-        "collection install: not implemented yet (milestone M5)",
-    ));
+    // Routed to the collection installer, which needs a login.
+    .stderr(contains("Not logged in"));
     env.run(&[
         "install",
         "nxm://testgame/collections/abc123",
@@ -123,10 +122,10 @@ fn install_rejects_unknown_targets_and_defers_collections() {
         "--deploy",
     ])
     .failure()
-    .stderr(contains("collection install: not implemented yet"));
+    .stderr(contains("Not logged in"));
     env.run(&["dl", "nxm://testgame/collections/abc123"])
         .failure()
-        .stderr(contains("collection download: not implemented yet"));
+        .stderr(contains("Not logged in"));
     assert!(env.uids().is_empty());
 }
 

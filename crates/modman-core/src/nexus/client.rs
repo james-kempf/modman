@@ -140,6 +140,18 @@ pub struct FileInfo {
     pub size_in_bytes: Option<u64>,
     #[serde(default)]
     pub uploaded_timestamp: Option<i64>,
+    /// The file the author marked as the main download.
+    #[serde(default)]
+    pub is_primary: bool,
+}
+
+/// One hit of `md5_search` (a local archive identified on Nexus).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Md5Match {
+    pub mod_id: u64,
+    pub file_id: u64,
+    pub mod_name: Option<String>,
+    pub version: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -594,6 +606,71 @@ impl NexusClient {
             return Err(NexusError::NoDownloadLink);
         }
         Ok(encode_uri(&pick.uri))
+    }
+
+    /// Identifies a file by checksum (legacy `install_local` L3300). No hit
+    /// is an empty list, not an error.
+    pub async fn md5_search(&self, game: &str, md5: &str) -> Result<Vec<Md5Match>, NexusError> {
+        let g = check_domain(game)?;
+        if md5.len() != 32 || !md5.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(NexusError::BadUrl(format!("invalid md5 {md5:?}")));
+        }
+        let md5 = md5.to_ascii_lowercase();
+        let path = format!("/games/{g}/mods/md5_search/{md5}.json");
+        let hits: Vec<Value> = match self.rest_get(&path, &[], "md5 search", None).await {
+            Ok(v) => v,
+            Err(NexusError::NotFound(_)) => return Ok(Vec::new()),
+            Err(e) => return Err(e),
+        };
+        let u = |v: Option<&Value>| match v {
+            Some(Value::Number(n)) => n.as_u64(),
+            Some(Value::String(s)) => s.parse().ok(),
+            _ => None,
+        };
+        let s = |v: Option<&Value>| v.and_then(Value::as_str).map(str::to_owned);
+        Ok(hits
+            .iter()
+            .filter_map(|h| {
+                Some(Md5Match {
+                    mod_id: u(h.pointer("/mod/mod_id"))?,
+                    file_id: u(h.pointer("/file_details/file_id"))?,
+                    mod_name: s(h.pointer("/mod/name")),
+                    version: s(h.pointer("/file_details/version")),
+                })
+            })
+            .collect())
+    }
+
+    /// Resolves a collection revision's `downloadLink` (an API-relative
+    /// path, legacy L2199-2203) to the archive's CDN URI. The link must stay
+    /// on the API origin: the request carries the `apikey` header.
+    pub async fn collection_archive_uri(&self, link: &str) -> Result<String, NexusError> {
+        let base = &self.cfg.rest_base;
+        let url = if link.starts_with('/') && !link.starts_with("//") {
+            base.join(link)
+        } else {
+            Url::parse(link)
+        }
+        .map_err(|e| NexusError::BadUrl(e.to_string()))?;
+        if url.origin() != base.origin() {
+            return Err(NexusError::BadUrl(
+                "collection download link points outside the Nexus API".into(),
+            ));
+        }
+        let body = self
+            .send(Method::GET, url, None, "collection archive", None)
+            .await?;
+        let v: Value = serde_json::from_str(&body)
+            .map_err(|e| NexusError::Decode(format!("collection download link: {e}")))?;
+        let first = v
+            .get("download_links")
+            .unwrap_or(&v)
+            .get(0)
+            .and_then(|l| l.get("URI"))
+            .and_then(Value::as_str)
+            .filter(|u| !u.is_empty())
+            .ok_or(NexusError::NoDownloadLink)?;
+        Ok(encode_uri(first))
     }
 
     pub(crate) async fn post_graphql(&self, payload: &Value) -> Result<String, NexusError> {

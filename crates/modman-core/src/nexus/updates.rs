@@ -169,6 +169,7 @@ mod tests {
             file_name: None,
             size_in_bytes: None,
             uploaded_timestamp: None,
+            is_primary: false,
         }
     }
 

@@ -500,14 +500,14 @@ fn bare_nxm_link_routes_to_handler_and_bad_links_fail() {
 }
 
 #[test]
-fn nxm_collection_link_is_queued_only() {
+fn nxm_collection_link_without_login_fails_and_marks_row_failed() {
     let env = Env::new();
     env.run(&["nxm", "nxm://testgame/collections/abc123/revisions/4"])
-        .success()
-        .stdout(contains("queued"));
+        .failure()
+        .stderr(contains("Not logged in"));
     assert_eq!(
-        env.query_i64("SELECT COUNT(*) FROM downloads WHERE collection_slug = 'abc123' AND collection_revision = 4 AND status = 'queued'"),
+        env.query_i64("SELECT COUNT(*) FROM downloads WHERE collection_slug = 'abc123' AND collection_revision = 4 AND status = 'failed'"),
         1
     );
-    assert!(env.calls("notify-send").contains("Collection abc123"));
+    assert!(env.calls("notify-send").contains("collection abc123"));
 }

@@ -6,6 +6,7 @@
 
 pub mod archive; // M3: zip / 7z / rar extraction
 pub mod blocking; // sync adapter for async APIs (CLI)
+pub mod collections; // M5: Nexus collections
 pub mod config; // M1: global settings
 pub mod deploy; // M2: hardlink / reflink / symlink / copy, backups, purge
 pub mod download; // M3: resumable downloads, nxm:// intake queue

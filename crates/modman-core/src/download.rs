@@ -9,7 +9,7 @@ mod fetch;
 mod nxm;
 mod queue;
 
-pub use fetch::{file_name_from_uri, DownloadEvent, FetchRequest, Fetched, Fetcher};
+pub use fetch::{file_name_from_uri, md5_file, DownloadEvent, FetchRequest, Fetched, Fetcher};
 pub use nxm::{NxmLink, NxmModLink, MAX_NXM_LEN};
 pub use queue::{
     enqueue, enqueue_nxm, get, list, mark_done, mark_failed, set_status, update_progress, Download,

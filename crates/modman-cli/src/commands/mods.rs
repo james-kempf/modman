@@ -228,7 +228,7 @@ pub fn list(ctx: &mut Ctx, args: ListArgs) -> Result<()> {
     Ok(())
 }
 
-fn fmt_time(epoch: i64) -> String {
+pub(crate) fn fmt_time(epoch: i64) -> String {
     // Days since 1970 -> civil date (UTC), to avoid a time crate.
     let days = epoch.div_euclid(86_400);
     let secs = epoch.rem_euclid(86_400);
@@ -653,6 +653,38 @@ pub fn requirements_after_install(ctx: &Ctx, game: &GameConfig, mod_row: i64) {
         },
     ) {
         print_report(ctx, &rows, false, "Requirements");
+    }
+}
+
+/// After a collection install: refresh and print the problems among the
+/// collection's requirements, including its external resources (legacy
+/// L2547-2555).
+pub fn requirements_after_collection(ctx: &Ctx, game: &GameConfig, ids: &[i64]) {
+    if ids.is_empty() {
+        return;
+    }
+    let nexus_ids: Vec<u64> = mods::list_mods(ctx.store.conn(), &game.domain)
+        .unwrap_or_default()
+        .iter()
+        .filter(|m| ids.contains(&m.id))
+        .filter_map(|m| m.nexus_mod_id)
+        .collect();
+    if !nexus_ids.is_empty() {
+        refresh_deps(ctx, game, &nexus_ids, false, true);
+    }
+    if let Ok(rows) = requirements::analyze(
+        &ctx.store,
+        game,
+        &Scope {
+            mods: Some(ids.to_vec()),
+        },
+    ) {
+        print_report(
+            ctx,
+            &rows,
+            true,
+            "Requirements not included in the collection",
+        );
     }
 }
 
