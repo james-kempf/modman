@@ -524,7 +524,7 @@ tasks:
     wave: 10
     depends_on: [T15]
     agent: gem-implementer
-    status: in_progress
+    status: completed  # 26aac3e
 
   - id: T16
     title: "GUI E2E and controller-navigation verification at 1280x800"
