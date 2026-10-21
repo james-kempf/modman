@@ -191,9 +191,9 @@ fn later_milestone_commands_report_not_yet_implemented() {
     env.run(&["i", "123"])
         .failure()
         .stderr(contains("install: not implemented yet"));
-    env.run(&["undeploy"])
+    env.run(&["run"])
         .failure()
-        .stderr(contains("purge: not implemented yet"));
+        .stderr(contains("launch: not implemented yet"));
     // A bare nxm:// link is routed to the nxm command (legacy L5041).
     env.run(&["nxm://skyrimspecialedition/mods/1/files/2"])
         .failure()
