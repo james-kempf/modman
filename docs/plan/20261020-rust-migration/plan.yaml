@@ -309,7 +309,7 @@ tasks:
     depends_on: [T07]
     agent: gem-implementer
     context_cluster: port-baseline
-    status: pending
+    status: completed  # dbed51e
     retries_used: 0
     acceptance_criteria:
       - "Parser tests with fixture ModuleConfig.xml covering SelectExactlyOne/AtMostOne/AtLeastOne/Any/All groups, flag conditions, conditionalFileInstalls; install plan output asserted."
