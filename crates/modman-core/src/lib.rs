@@ -5,15 +5,19 @@
 //! adapters over this crate. Milestones refer to `linux_mod_manager_tech_stack.md` §8.
 
 pub mod archive; // M3: zip / 7z / rar extraction
+pub mod blocking; // sync adapter for async APIs (CLI)
 pub mod config; // M1: global settings
 pub mod deploy; // M2: hardlink / reflink / symlink / copy, backups, purge
 pub mod download; // M3: resumable downloads, nxm:// intake queue
 pub mod error;
 pub mod fomod; // M5: ModuleConfig.xml parser and install plan
 pub mod games; // M1: game definitions, Steam detection, configured games
+pub mod ipc; // M3: nxm routing constants (CLI -> GUI)
 pub mod loadorder; // M6: LOOT sorting and collection rules
+pub mod mods; // M3: installed mods, order, profiles, install pipeline
 pub mod nexus; // M3: REST v1 + GraphQL v2 client, auth, rate limits
 pub mod paths; // M1: XDG locations
+pub mod requirements; // M3: deps report, external tools, acks
 pub mod staging; // M2: layout normalisation, staged file lists
 pub mod store; // M1: SQLite schema, migrations, deploy lock
 

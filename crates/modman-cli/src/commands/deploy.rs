@@ -227,9 +227,44 @@ fn status_line(ctx: &Ctx, s: &DeployStatus) -> String {
     line
 }
 
+/// Account lines (legacy `cmd_status` L4323-4345). Offline: shows what the
+/// last login recorded and never probes the keyring.
+fn account_section(ctx: &Ctx) -> Result<()> {
+    use crate::nexus::{key_source, PREMIUM_KEY, USER_KEY};
+    let out = ctx.out;
+    println!("{}", out.bold("Account"));
+    match key_source(ctx)? {
+        Some(src) => println!("  API key       : {} ({src})", out.green("configured")),
+        None => println!(
+            "  API key       : {}",
+            out.yellow("not set — run: modman login")
+        ),
+    }
+    if let Some(user) = ctx.store.setting(USER_KEY)? {
+        let tier = match ctx.store.setting(PREMIUM_KEY)?.as_deref() {
+            Some("true") => "Premium",
+            Some(_) => "Free",
+            None => "unknown",
+        };
+        println!("  Logged in as  : {} ({tier})", out.green(&user));
+    }
+    if let Some(rl) = modman_core::nexus::RateLimit::load(&ctx.store)? {
+        println!("  API quota     : {}", rl.summary());
+    }
+    let nxm = if super::nxm::registered(ctx) {
+        out.green("registered")
+    } else {
+        format!("{} (modman nxm register)", out.yellow("not registered"))
+    };
+    println!("  nxm:// links  : {nxm}");
+    println!();
+    Ok(())
+}
+
 pub fn status(ctx: &mut Ctx, _args: StatusArgs) -> Result<()> {
     let out = ctx.out;
     out.heading("Status");
+    account_section(ctx)?;
     let all = games::list_games(ctx.store.conn())?;
     if all.is_empty() {
         out.info("No games configured. Run: modman game add <domain>");

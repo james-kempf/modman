@@ -5,6 +5,7 @@ mod cli;
 mod commands;
 mod context;
 mod logging;
+mod nexus;
 mod output;
 
 use std::process::ExitCode;
@@ -50,6 +51,18 @@ fn main() -> ExitCode {
     }
 }
 
+/// Command line for the log: URL queries (nxm `key`/`expires`, signed CDN
+/// parameters) are dropped.
+fn redact_args(args: &[String]) -> String {
+    args.iter()
+        .map(|a| match (a.contains("://"), a.split_once('?')) {
+            (true, Some((base, _))) => format!("{base}?<redacted>"),
+            _ => a.clone(),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn run(cli: Cli, out: Printer, argv: &[String]) -> Result<()> {
     let command = match cli.command {
         None => {
@@ -76,7 +89,7 @@ fn run(cli: Cli, out: Printer, argv: &[String]) -> Result<()> {
     if matches!(command, Commands::Login(_)) {
         tracing::info!("CMD login");
     } else {
-        tracing::info!("CMD {}", argv[1..].join(" "));
+        tracing::info!("CMD {}", redact_args(&argv[1..]));
     }
     tracing::debug!(
         config = %paths.config_dir.display(),
@@ -99,4 +112,19 @@ fn run(cli: Cli, out: Printer, argv: &[String]) -> Result<()> {
         game: cli.game,
     };
     commands::dispatch(&mut ctx, command)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn logged_command_line_drops_url_queries() {
+        let a: Vec<String> = ["nxm", "nxm://g/mods/1/files/2?key=K&expires=9", "-y"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(
+            super::redact_args(&a),
+            "nxm nxm://g/mods/1/files/2?<redacted> -y"
+        );
+    }
 }

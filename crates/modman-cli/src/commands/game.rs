@@ -123,7 +123,7 @@ fn list(ctx: &Ctx) -> Result<()> {
     Ok(())
 }
 
-fn add(
+pub(crate) fn add(
     ctx: &Ctx,
     domain: &str,
     path: Option<String>,
@@ -140,6 +140,19 @@ fn add(
         (None, Some(d)) => GameConfig::from_definition(d),
         (None, None) => GameConfig::custom(&domain),
     };
+    // Logged in: Nexus must know the domain (legacy L4027-4034).
+    if let Some(nexus) = crate::nexus::connect(ctx, false)?.filter(|n| n.client.is_authenticated())
+    {
+        match nexus.run(nexus.client.game(&domain))? {
+            Ok(info) => {
+                if def.is_none() && existing.is_none() && !info.name.is_empty() {
+                    g.name = info.name.clone();
+                }
+                g.nexus_game_id = Some(info.id as i64);
+            }
+            Err(e) => bail!("Nexus does not know the game domain '{domain}': {e}"),
+        }
+    }
     let mut profile = profile;
     let mut subdir = subdir;
     if def.is_none() {

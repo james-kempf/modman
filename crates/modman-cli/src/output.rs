@@ -81,3 +81,67 @@ impl Printer {
         println!("\n{}", self.bold(&format!("── {title} ")));
     }
 }
+
+/// JSON string literal (the CLI has no JSON library; output is small).
+pub fn json_str(s: &str) -> String {
+    let mut o = String::with_capacity(s.len() + 2);
+    o.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => o.push_str("\\\""),
+            '\\' => o.push_str("\\\\"),
+            '\n' => o.push_str("\\n"),
+            '\r' => o.push_str("\\r"),
+            '\t' => o.push_str("\\t"),
+            c if (c as u32) < 0x20 => o.push_str(&format!("\\u{:04x}", c as u32)),
+            c => o.push(c),
+        }
+    }
+    o.push('"');
+    o
+}
+
+/// `1.5 MB`-style size.
+pub fn human_size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut v = bytes as f64;
+    let mut i = 0;
+    while v >= 1024.0 && i < UNITS.len() - 1 {
+        v /= 1024.0;
+        i += 1;
+    }
+    if i == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{v:.1} {}", UNITS[i])
+    }
+}
+
+/// Cuts `s` to `n` characters with an ellipsis.
+pub fn trunc(s: &str, n: usize) -> String {
+    if s.chars().count() <= n {
+        s.to_string()
+    } else {
+        let mut t: String = s.chars().take(n.saturating_sub(1)).collect();
+        t.push('…');
+        t
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_strings_are_escaped() {
+        assert_eq!(json_str("a\"b\\c\n\u{1}"), r#""a\"b\\c\n\u0001""#);
+    }
+
+    #[test]
+    fn sizes_and_truncation() {
+        assert_eq!(human_size(512), "512 B");
+        assert_eq!(human_size(1536), "1.5 KB");
+        assert_eq!(trunc("abcdef", 4), "abc…");
+        assert_eq!(trunc("abc", 4), "abc");
+    }
+}

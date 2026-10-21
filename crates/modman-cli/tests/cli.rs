@@ -188,16 +188,24 @@ fn every_legacy_alias_resolves_to_its_command() {
 #[test]
 fn later_milestone_commands_report_not_yet_implemented() {
     let env = Env::new();
-    env.run(&["i", "123"])
+    env.run(&["collection", "list"])
         .failure()
-        .stderr(contains("install: not implemented yet"));
-    env.run(&["run"])
+        .stderr(contains("collection: not implemented yet (milestone M5)"));
+    env.run(&["au", "status"])
         .failure()
-        .stderr(contains("launch: not implemented yet"));
-    // A bare nxm:// link is routed to the nxm command (legacy L5041).
-    env.run(&["nxm://skyrimspecialedition/mods/1/files/2"])
+        .stderr(contains("autoupdate: not implemented yet (milestone M7)"));
+    // A bare nxm:// link is routed to the nxm handler (legacy L5041), which
+    // rejects malformed links.
+    env.cmd()
+        .env(
+            "DBUS_SESSION_BUS_ADDRESS",
+            "unix:path=/nonexistent/modman-test-bus",
+        )
+        .env("PATH", "/nonexistent")
+        .arg("nxm://evil.example/mods/1/files/2")
+        .assert()
         .failure()
-        .stderr(contains("nxm: not implemented yet"));
+        .stderr(contains("Unrecognised nxm link"));
 }
 
 // ── global flags ────────────────────────────────────────────

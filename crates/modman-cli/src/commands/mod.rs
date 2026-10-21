@@ -26,9 +26,32 @@ pub struct StubArgs {
     pub args: Vec<String>,
 }
 
-/// Typed "not yet" error for commands of later milestones.
-pub fn not_yet(command: &str, milestone: &str) -> Result<()> {
-    bail!("{command}: not implemented yet (milestone {milestone})")
+/// Typed "not yet" error for features of later milestones.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotYet {
+    pub what: String,
+    pub milestone: &'static str,
+}
+
+impl std::fmt::Display for NotYet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}: not implemented yet (milestone {})",
+            self.what, self.milestone
+        )
+    }
+}
+
+impl std::error::Error for NotYet {}
+
+/// Fails with [`NotYet`].
+pub fn not_yet(what: &str, milestone: &'static str) -> Result<()> {
+    Err(NotYet {
+        what: what.to_string(),
+        milestone,
+    }
+    .into())
 }
 
 /// Runs a parsed command.
