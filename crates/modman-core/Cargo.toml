@@ -1,0 +1,11 @@
+[package]
+name = "modman-core"
+description = "Core engine for modman: game detection, Nexus client, deployment, state"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
