@@ -647,3 +647,64 @@ fn group_readable_credentials_file_is_refused() {
     );
     assert!(!err.to_string().contains(KEY));
 }
+
+#[test]
+fn symlinked_credentials_file_is_refused() {
+    let tmp = tempfile::tempdir().unwrap();
+    let paths = Paths::for_home(tmp.path());
+    let ks = KeyStorage::new(&paths, ProbeOutcome::Unavailable("x".into()));
+    ks.save(&ApiKey::new(KEY).unwrap()).unwrap();
+    // A planted link to a 0600 file someone else controls the content of.
+    let elsewhere = tmp.path().join("planted.toml");
+    std::fs::rename(ks.file_path(), &elsewhere).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, ks.file_path()).unwrap();
+    let err = ks.load(None).unwrap_err();
+    assert!(err.to_string().contains("symbolic link"), "{err}");
+    assert!(!err.to_string().contains(KEY));
+}
+
+// --- redirects ------------------------------------------------------------
+
+#[tokio::test]
+async fn api_key_is_not_forwarded_on_cross_origin_redirect() {
+    let api = MockServer::start().await;
+    let other = MockServer::start().await;
+    Mock::given(path("/v1/users/validate.json"))
+        .respond_with(
+            ResponseTemplate::new(302)
+                .insert_header("location", format!("{}/steal", other.uri()).as_str()),
+        )
+        .mount(&api)
+        .await;
+    Mock::given(path("/steal"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(validate_body(true)))
+        .mount(&other)
+        .await;
+    let err = client(&api).validate().await.unwrap_err();
+    assert!(
+        matches!(err, NexusError::Http { status: 302, .. }),
+        "{err:?}"
+    );
+    let seen = other.received_requests().await.unwrap();
+    assert!(
+        seen.iter().all(|r| !r.headers.contains_key("apikey")),
+        "apikey leaked to another host"
+    );
+    assert!(seen.is_empty());
+}
+
+#[tokio::test]
+async fn same_origin_redirect_is_followed() {
+    let api = MockServer::start().await;
+    Mock::given(path("/v1/users/validate.json"))
+        .respond_with(ResponseTemplate::new(302).insert_header("location", "/v1/moved.json"))
+        .mount(&api)
+        .await;
+    Mock::given(path("/v1/moved.json"))
+        .and(header("apikey", KEY))
+        .respond_with(ResponseTemplate::new(200).set_body_json(validate_body(false)))
+        .expect(1)
+        .mount(&api)
+        .await;
+    assert_eq!(client(&api).validate().await.unwrap().user_id, 7);
+}

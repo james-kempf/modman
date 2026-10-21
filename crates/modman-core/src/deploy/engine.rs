@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::backup::{Blob, BlobStore};
+use super::confine::{confine, is_escape, Confined};
 use super::place::{is_ours, mtime_ns, place, tmp_path, Placed};
 use super::plan::{build_plan, CaseResolver, Plan};
 use super::{
@@ -44,6 +45,23 @@ fn guard(game: &GameConfig, env: &DeployEnv) -> Result<DeployLock, DeployError> 
 
 fn target_of(s: &str) -> Target {
     Target::parse(s).unwrap_or_default()
+}
+
+/// [`confine`] with errors mapped for `rel` under `root`: a symlinked or
+/// blocked folder is a [`DeployError::PathConflict`].
+fn confined(root: &Path, rel: &str, create_parents: bool) -> Result<Confined, DeployError> {
+    confine(root, rel, create_parents).map_err(|e| confine_err(root, rel, e))
+}
+
+fn confine_err(root: &Path, rel: &str, e: io::Error) -> DeployError {
+    if is_escape(&e) {
+        DeployError::PathConflict {
+            rel: rel.to_string(),
+            reason: format!("refusing to write through a symbolic link or non-folder ({e})"),
+        }
+    } else {
+        io_err(&root.join(rel))(e)
+    }
 }
 
 /// Deploys the enabled mods of `game`. Recovers an interrupted run first and
@@ -194,9 +212,11 @@ fn run_deploy(
         id
     };
     for d in &pre.new_dirs {
-        let p = root.join(d);
-        match fs::create_dir(&p) {
-            Err(e) if e.kind() != io::ErrorKind::AlreadyExists => return Err(io_err(&p)(e)),
+        let c = confined(root, d, false)?;
+        match fs::create_dir(&c.path) {
+            Err(e) if e.kind() != io::ErrorKind::AlreadyExists => {
+                return Err(io_err(&root.join(d))(e))
+            }
             _ => {}
         }
     }
@@ -213,8 +233,8 @@ fn run_deploy(
         let mut chunk_blobs = Vec::with_capacity(chunk.len());
         for p in chunk {
             chunk_blobs.push(if p.original {
-                let abs = root.join(&p.rel);
-                Some(blobs.store(&abs).map_err(io_err(&abs))?)
+                let c = confined(root, &p.rel, false)?;
+                Some(blobs.store(&c.path).map_err(io_err(&root.join(&p.rel)))?)
             } else {
                 None
             });
@@ -269,13 +289,17 @@ fn run_deploy(
             }
             let item = &plan.items[p.plan_idx];
             let abs = root.join(&p.rel);
-            let method = place(&item.source, &abs, &chain, &env.faults).map_err(|source| {
-                DeployError::Place {
-                    path: abs.clone(),
-                    source,
-                }
-            })?;
-            let meta = fs::symlink_metadata(&abs).map_err(io_err(&abs))?;
+            // Re-checked here: a folder swapped for a symlink since preflight
+            // fails the deploy (and rolls it back) instead of escaping.
+            let c = confined(root, &p.rel, false)?;
+            let method =
+                place(&item.source, &c.path, &abs, &chain, &env.faults).map_err(|source| {
+                    DeployError::Place {
+                        path: abs.clone(),
+                        source,
+                    }
+                })?;
+            let meta = fs::symlink_metadata(&c.path).map_err(io_err(&abs))?;
             rows.push((method, meta));
             placed += 1;
             *report.by_method.entry(method).or_default() += 1;
@@ -427,7 +451,47 @@ fn recover_locked(
             undo,
         });
     }
+    if last.is_some() {
+        sweep_orphan_blobs(store.conn(), &env.backup_dir)?;
+    }
     Ok(last)
+}
+
+/// Deletes blobs no held backup (of any game) refers to, and leftover
+/// `.incoming-*` temp files. A crash between storing a backup (step A) and
+/// journaling it (step B) leaves such orphans. Runs under the deploy lock,
+/// which is global, so no other deploy is between A and B.
+fn sweep_orphan_blobs(conn: &Connection, backup_dir: &Path) -> Result<(), DeployError> {
+    let Ok(top) = fs::read_dir(backup_dir) else {
+        return Ok(());
+    };
+    let mut held = conn.prepare(
+        "SELECT EXISTS (SELECT 1 FROM backups WHERE sha256 = ?1 AND restored_at IS NULL)",
+    )?;
+    for shard in top.flatten() {
+        let name = shard.file_name();
+        let name = name.to_string_lossy();
+        let path = shard.path();
+        if name.starts_with(".incoming-") {
+            let _ = fs::remove_file(&path);
+            continue;
+        }
+        let is_shard = name.len() == 2 && name.bytes().all(|b| b.is_ascii_hexdigit());
+        if !is_shard || !shard.file_type().is_ok_and(|t| t.is_dir()) {
+            continue;
+        }
+        for blob in fs::read_dir(&path).map_err(io_err(&path))?.flatten() {
+            let sha = blob.file_name().to_string_lossy().into_owned();
+            if sha.len() != 64 || !sha.starts_with(name.as_ref()) {
+                continue;
+            }
+            if !held.query_row([&sha], |r| r.get::<_, bool>(0))? {
+                tracing::info!(blob = %sha, "removing orphaned backup blob");
+                let _ = fs::remove_file(blob.path());
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Undoes `place` steps that never got a `deployments` row (crash between
@@ -557,21 +621,53 @@ fn undo_entry(
     report: &mut PurgeReport,
 ) -> Result<(), DeployError> {
     let root = target_root(game, e.target)?;
-    let abs = root.join(&e.rel);
+    let shown = root.join(&e.rel);
     let blobs = BlobStore {
         root: &env.backup_dir,
     };
     let recorded = e.deployment_id.is_some();
-    let _ = fs::remove_file(tmp_path(&abs));
+    // A missing parent folder means the file is gone too.
+    let c = match confine(&root, &e.rel, false) {
+        Ok(c) => Some(c),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => None,
+        Err(err) if is_escape(&err) => {
+            // A folder on the path became a symlink (or file) after deploy:
+            // nothing of ours can be there, and nothing is written through
+            // it. A held backup stays held (and the deployment active).
+            tracing::warn!(path = %shown.display(), error = %err, "leaving path alone: a folder on it is no longer a real folder");
+            if e.backup.is_some() {
+                report.kept += 1;
+            } else if recorded {
+                report.missing += 1;
+            }
+            if let Some(id) = e.deployment_id {
+                store
+                    .conn()
+                    .execute("DELETE FROM deployments WHERE id = ?1", [id])?;
+            }
+            return Ok(());
+        }
+        Err(err) => return Err(confine_err(&root, &e.rel, err)),
+    };
+    let abs = c.as_ref().map(|c| c.path.as_path());
+    if let Some(abs) = abs {
+        let _ = fs::remove_file(tmp_path(abs));
+    }
     let mut restore = e.backup.as_ref();
-    match fs::symlink_metadata(&abs) {
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+    match abs.map(fs::symlink_metadata) {
+        None => {
             if recorded {
                 report.missing += 1;
             }
         }
-        Err(err) => return Err(io_err(&abs)(err)),
-        Ok(meta) => {
+        Some(Err(err)) if err.kind() == io::ErrorKind::NotFound => {
+            if recorded {
+                report.missing += 1;
+            }
+        }
+        Some(Err(err)) => return Err(io_err(&shown)(err)),
+        Some(Ok(meta)) => {
+            let abs = abs.expect("metadata came from a path");
             let placed = Placed {
                 method: e.method,
                 source: &e.source,
@@ -579,30 +675,35 @@ fn undo_entry(
                 size: e.size,
                 mtime_ns: e.mtime_ns,
             };
-            if e.backup
+            // Ours is checked first: a placement byte-identical to the
+            // original (but with the mod's mode, or hardlinked to staging)
+            // must still be replaced by the real original.
+            if is_ours(&placed, abs, &meta) {
+                fs::remove_file(abs).map_err(io_err(&shown))?;
+                report.removed += 1;
+            } else if e
+                .backup
                 .as_ref()
-                .is_some_and(|(_, b)| blobs.matches(b, &abs, &meta))
+                .is_some_and(|(_, b)| blobs.matches(b, abs, &meta))
             {
                 restore = None;
                 if recorded {
                     report.restored += 1;
                 }
-            } else if is_ours(&placed, &abs, &meta) {
-                fs::remove_file(&abs).map_err(io_err(&abs))?;
-                report.removed += 1;
             } else if let (Some((_, b)), true) = (&e.backup, recorded) {
                 let dest = env.overwrite_dir.join(".stale-backups").join(&e.rel);
                 blobs.copy_out(b, &dest).map_err(io_err(&dest))?;
                 restore = None;
                 report.changed += 1;
             } else {
-                move_out(&abs, &env.overwrite_dir.join(&e.rel)).map_err(io_err(&abs))?;
+                move_out(abs, &env.overwrite_dir.join(&e.rel)).map_err(io_err(&shown))?;
                 report.changed += 1;
             }
         }
     }
     if let Some((_, b)) = restore {
-        blobs.restore(b, &abs).map_err(io_err(&abs))?;
+        let c = confined(&root, &e.rel, true)?;
+        blobs.restore(b, &c.path).map_err(io_err(&shown))?;
         report.restored += 1;
     }
     let tx = store.conn_mut().transaction()?;
@@ -701,14 +802,23 @@ fn undo_all(
         let Some((_, b)) = load_backup(store.conn(), id)? else {
             continue;
         };
-        let abs = target_root(game, target_of(&target))?.join(&rel);
-        match fs::symlink_metadata(&abs) {
+        let root = target_root(game, target_of(&target))?;
+        let shown = root.join(&rel);
+        let c = match confine(&root, &rel, true) {
+            Ok(c) => c,
+            Err(err) if is_escape(&err) => {
+                report.kept += 1;
+                continue;
+            }
+            Err(err) => return Err(confine_err(&root, &rel, err)),
+        };
+        match fs::symlink_metadata(&c.path) {
             Err(err) if err.kind() == io::ErrorKind::NotFound => {
-                blobs.restore(&b, &abs).map_err(io_err(&abs))?;
+                blobs.restore(&b, &c.path).map_err(io_err(&shown))?;
                 report.restored += 1;
             }
-            Err(err) => return Err(io_err(&abs)(err)),
-            Ok(meta) if blobs.matches(&b, &abs, &meta) => {}
+            Err(err) => return Err(io_err(&shown)(err)),
+            Ok(meta) if blobs.matches(&b, &c.path, &meta) => {}
             Ok(_) => {
                 report.kept += 1;
                 continue;
@@ -731,7 +841,8 @@ fn undo_all(
     };
     for (target, rel) in dirs {
         if let Ok(root) = target_root(game, target_of(&target)) {
-            if let Err(e) = fs::remove_dir(root.join(&rel)) {
+            let removed = confine(&root, &rel, false).and_then(|c| fs::remove_dir(&c.path));
+            if let Err(e) = removed {
                 tracing::debug!(dir = %rel, error = %e, "kept folder");
             }
         }

@@ -191,13 +191,31 @@ pub fn conflicts(conn: &Connection, game: &GameConfig) -> Result<Vec<Conflict>, 
     Ok(build_plan(conn, game)?.conflicts())
 }
 
-/// A directory entry: real name and whether it is (or links to) a directory.
-type Listing = HashMap<String, (String, bool)>;
+/// Kind of a directory entry, from `lstat`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    File,
+    Dir,
+    /// A symlink; `to_dir` when it resolves to a folder.
+    Link {
+        to_dir: bool,
+    },
+}
+
+/// A directory entry: real name and kind.
+type Listing = HashMap<String, (String, Kind)>;
 
 /// Maps plan paths onto existing spellings in the target, case-insensitively.
 /// Read-only; folders that do not exist are reported in [`Self::new_dirs`].
+///
+/// Symlinked folders are followed only when they resolve inside the root;
+/// the returned path then uses the resolved spelling, so it contains no
+/// symlinked folder (placement re-checks this with an `O_NOFOLLOW` walk).
+/// A symlinked folder leading outside the root is a [`DeployError::PathConflict`].
 pub(crate) struct CaseResolver {
     root: PathBuf,
+    /// Canonical root, computed on first use.
+    canon_root: Option<PathBuf>,
     listings: HashMap<String, Listing>,
     new_lookup: HashMap<String, String>,
     /// Folders to create (real spelling), parents first.
@@ -216,13 +234,14 @@ impl CaseResolver {
     pub fn new(root: &Path) -> Self {
         Self {
             root: root.to_path_buf(),
+            canon_root: None,
             listings: HashMap::new(),
             new_lookup: HashMap::new(),
             new_dirs: Vec::new(),
         }
     }
 
-    fn lookup(&mut self, dir: &str, name: &str) -> Result<Option<(String, bool)>, DeployError> {
+    fn lookup(&mut self, dir: &str, name: &str) -> Result<Option<(String, Kind)>, DeployError> {
         if !self.listings.contains_key(dir) {
             let abs = self.root.join(dir);
             let mut map = Listing::new();
@@ -231,11 +250,20 @@ impl CaseResolver {
                 let Some(n) = e.file_name().to_str().map(str::to_string) else {
                     continue;
                 };
-                let is_dir = std::fs::metadata(e.path()).is_ok_and(|m| m.is_dir());
+                let ft = e.file_type().map_err(io_err(&e.path()))?;
+                let kind = if ft.is_symlink() {
+                    Kind::Link {
+                        to_dir: std::fs::metadata(e.path()).is_ok_and(|m| m.is_dir()),
+                    }
+                } else if ft.is_dir() {
+                    Kind::Dir
+                } else {
+                    Kind::File
+                };
                 // An exact spelling beats a case-insensitive one.
-                map.insert(n.clone(), (n.clone(), is_dir));
+                map.insert(n.clone(), (n.clone(), kind));
                 map.entry(format!("\0{}", n.to_lowercase()))
-                    .or_insert((n, is_dir));
+                    .or_insert((n, kind));
             }
             self.listings.insert(dir.to_string(), map);
         }
@@ -246,29 +274,54 @@ impl CaseResolver {
             .cloned())
     }
 
+    /// Root-relative real path of the folder symlink `link` (root-relative),
+    /// or `None` when it resolves outside the root (or not to a folder).
+    fn follow_inside(&mut self, link: &str) -> Result<Option<String>, DeployError> {
+        if self.canon_root.is_none() {
+            let c = self.root.canonicalize().map_err(io_err(&self.root))?;
+            self.canon_root = Some(c);
+        }
+        let canon_root = self.canon_root.as_deref().expect("set above");
+        let Ok(target) = self.root.join(link).canonicalize() else {
+            return Ok(None);
+        };
+        Ok(target
+            .strip_prefix(canon_root)
+            .ok()
+            .filter(|_| target.is_dir())
+            .and_then(Path::to_str)
+            .map(str::to_string))
+    }
+
     /// Real relative path for `rel` and whether something exists there.
     pub fn resolve(&mut self, rel: &str) -> Result<(String, bool), DeployError> {
-        let comps: Vec<&str> = rel.split('/').filter(|c| !c.is_empty()).collect();
         let conflict = |reason: &str| DeployError::PathConflict {
             rel: rel.to_string(),
             reason: reason.to_string(),
         };
+        let comps = super::confine::components(rel).map_err(conflict)?;
         let mut real = String::new();
         let mut fresh = false;
         for (i, c) in comps.iter().enumerate() {
             let last = i + 1 == comps.len();
             if !fresh {
-                if let Some((name, is_dir)) = self.lookup(&real, c)? {
-                    if last {
-                        if is_dir {
-                            return Err(conflict("a folder exists at that path"));
+                if let Some((name, kind)) = self.lookup(&real, c)? {
+                    let here = join(&real, &name);
+                    match kind {
+                        Kind::Dir | Kind::Link { to_dir: true } if last => {
+                            return Err(conflict("a folder exists at that path"))
                         }
-                        return Ok((join(&real, &name), true));
+                        _ if last => return Ok((here, true)),
+                        Kind::Dir => real = here,
+                        Kind::Link { to_dir: true } => {
+                            real = self.follow_inside(&here)?.ok_or_else(|| {
+                                conflict(&format!(
+                                    "{here} is a symbolic link to a folder outside the target folder"
+                                ))
+                            })?;
+                        }
+                        _ => return Err(conflict(&format!("{here} is a file"))),
                     }
-                    if !is_dir {
-                        return Err(conflict(&format!("{} is a file", join(&real, &name))));
-                    }
-                    real = join(&real, &name);
                     continue;
                 }
             }

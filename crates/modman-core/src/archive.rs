@@ -49,6 +49,25 @@ pub enum ArchiveError {
     /// A tree produced by extraction (or copied from a folder) is unsafe to stage.
     #[error("unsafe extracted tree at {}: {reason}", path.display())]
     UnsafeTree { path: PathBuf, reason: &'static str },
+    /// Extraction stopped at a size or file-count cap (archive bomb guard).
+    #[error("archive expands beyond the {what} limit of {limit}; refusing to extract")]
+    TooLarge { what: &'static str, limit: u64 },
+}
+
+/// Caps on what one extraction may write.
+#[derive(Debug, Clone, Copy)]
+struct Limits {
+    files: u64,
+    bytes: u64,
+}
+
+impl Limits {
+    /// Generous for real mods (large texture packs run to tens of GiB),
+    /// small enough to stop an archive bomb before it fills the disk.
+    const DEFAULT: Limits = Limits {
+        files: 1_000_000,
+        bytes: 128 << 30,
+    };
 }
 
 fn io_err(path: &Path) -> impl FnOnce(io::Error) -> ArchiveError + '_ {
@@ -153,6 +172,15 @@ pub fn extract(src: &Path, dest: &Path) -> Result<Extracted, ArchiveError> {
 }
 
 fn extract_with(src: &Path, dest: &Path, libarchive: bool) -> Result<Extracted, ArchiveError> {
+    extract_limited(src, dest, libarchive, Limits::DEFAULT)
+}
+
+fn extract_limited(
+    src: &Path,
+    dest: &Path,
+    libarchive: bool,
+    limits: Limits,
+) -> Result<Extracted, ArchiveError> {
     let is_dir = fs::metadata(src).map_err(io_err(src))?.is_dir();
     let kind = if is_dir {
         None
@@ -170,6 +198,7 @@ fn extract_with(src: &Path, dest: &Path, libarchive: bool) -> Result<Extracted, 
         dest,
         files: 0,
         bytes: 0,
+        limits,
     };
     let result = match kind {
         None => copy_dir(src, &mut sink),
@@ -314,6 +343,7 @@ struct Sink<'a> {
     dest: &'a Path,
     files: u64,
     bytes: u64,
+    limits: Limits,
 }
 
 impl Sink<'_> {
@@ -323,6 +353,12 @@ impl Sink<'_> {
     }
 
     fn file(&mut self, rel: &Path, data: &mut dyn Read, exec: bool) -> Result<(), ArchiveError> {
+        if self.files >= self.limits.files {
+            return Err(ArchiveError::TooLarge {
+                what: "file count",
+                limit: self.limits.files,
+            });
+        }
         let p = self.dest.join(rel);
         if let Some(parent) = p.parent() {
             fs::create_dir_all(parent).map_err(io_err(parent))?;
@@ -335,7 +371,15 @@ impl Sink<'_> {
             .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
             .open(&p)
             .map_err(io_err(&p))?;
-        let n = io::copy(data, &mut f).map_err(io_err(&p))?;
+        // Header sizes can lie; count what is actually written.
+        let room = self.limits.bytes - self.bytes;
+        let n = io::copy(&mut data.take(room + 1), &mut f).map_err(io_err(&p))?;
+        if n > room {
+            return Err(ArchiveError::TooLarge {
+                what: "size",
+                limit: self.limits.bytes,
+            });
+        }
         self.files += 1;
         self.bytes += n;
         Ok(())
@@ -989,6 +1033,46 @@ mod tests {
                 "{bad:?} accepted"
             );
         }
+    }
+
+    #[test]
+    fn extraction_stops_at_file_count_and_size_caps() {
+        let (t, out) = scratch();
+        let z = t.path().join("many.zip");
+        let files: Vec<String> = (0..3).map(|i| format!("f{i}.txt")).collect();
+        let entries: Vec<ZipEntry> = files.iter().map(|n| ZipEntry::File(n, b"x")).collect();
+        make_zip(&z, &entries);
+        let limits = Limits {
+            files: 2,
+            bytes: 1 << 20,
+        };
+        let err = extract_limited(&z, &out, false, limits).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                ArchiveError::TooLarge {
+                    what: "file count",
+                    ..
+                }
+            ),
+            "{err}"
+        );
+        assert!(listing(&out).is_empty(), "partial output left");
+
+        let (t, out) = scratch();
+        let z = t.path().join("bomb.zip");
+        make_zip(&z, &[ZipEntry::File("zeros.bin", &[0u8; 4096])]);
+        let limits = Limits {
+            files: 10,
+            bytes: 1000,
+        };
+        let err = extract_limited(&z, &out, false, limits).unwrap_err();
+        assert!(
+            matches!(err, ArchiveError::TooLarge { what: "size", .. }),
+            "{err}"
+        );
+        assert!(listing(&out).is_empty(), "partial output left");
+        outside_untouched(&t);
     }
 
     #[test]

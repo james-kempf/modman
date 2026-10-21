@@ -80,7 +80,11 @@ fn try_method(m: Method, src: &Path, src_meta: &fs::Metadata, tmp: &Path) -> io:
             copy_attrs(&f, src_meta)
         }
         Method::Copy => {
-            let mut out = File::create(tmp)?;
+            // create_new: never write through a symlink planted at the temp name.
+            let mut out = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(tmp)?;
             io::copy(&mut File::open(src)?, &mut out)?;
             copy_attrs(&out, src_meta)
         }
@@ -90,9 +94,11 @@ fn try_method(m: Method, src: &Path, src_meta: &fs::Metadata, tmp: &Path) -> io:
 /// Places `src` at `target` with the first method in `chain` that works,
 /// replacing whatever is there atomically (temp file + rename). Hardlink and
 /// reflink are skipped when source and target folder differ in `st_dev`.
+/// `shown` is the user-facing spelling of `target` (logs, fault injection).
 pub(crate) fn place(
     src: &Path,
     target: &Path,
+    shown: &Path,
     chain: &[Method],
     faults: &Faults,
 ) -> io::Result<Method> {
@@ -105,7 +111,7 @@ pub(crate) fn place(
         if m.same_device_only() && !same_dev {
             continue;
         }
-        if faults.deny.as_ref().is_some_and(|deny| deny(m, target)) {
+        if faults.deny.as_ref().is_some_and(|deny| deny(m, shown)) {
             last = io::Error::other(format!("{} denied (fault injection)", m.as_str()));
             continue;
         }
@@ -114,7 +120,7 @@ pub(crate) fn place(
             Ok(()) => return Ok(m),
             Err(e) => {
                 let _ = fs::remove_file(&tmp);
-                tracing::debug!(method = m.as_str(), path = %target.display(), error = %e, "deploy method failed");
+                tracing::debug!(method = m.as_str(), path = %shown.display(), error = %e, "deploy method failed");
                 last = e;
             }
         }
@@ -188,7 +194,7 @@ mod tests {
         let dst = tmp.path().join("dst");
         fs::write(&src, "new").unwrap();
         fs::write(&dst, "old").unwrap();
-        let m = place(&src, &dst, &[Method::Hardlink], &Faults::default()).unwrap();
+        let m = place(&src, &dst, &dst, &[Method::Hardlink], &Faults::default()).unwrap();
         assert_eq!(m, Method::Hardlink);
         assert_eq!(fs::read_to_string(&dst).unwrap(), "new");
         assert!(!tmp_path(&dst).exists());

@@ -279,8 +279,24 @@ impl Fetcher {
             .map_err(|e| Attempt::Retry(DownloadError::Network(net(e))))?;
         let status = resp.status();
         if status == StatusCode::RANGE_NOT_SATISFIABLE && have > 0 {
-            // The part is already complete (or garbage); verify decides.
-            return Ok(Progressed { resumed_from: have });
+            // The part is complete or garbage. A checksum (verify) or the
+            // server's `bytes */<len>` can tell; with neither, start over.
+            let total = resp
+                .headers()
+                .get(CONTENT_RANGE)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.strip_prefix("bytes */"))
+                .and_then(|n| n.trim().parse::<u64>().ok());
+            if req.md5.is_some() || req.sha256.is_some() || total == Some(have) {
+                return Ok(Progressed { resumed_from: have });
+            }
+            tracing::warn!(
+                "server refused the resume range and nothing verifies the partial file; restarting"
+            );
+            let _ = tokio::fs::remove_file(part).await;
+            return Err(Attempt::Retry(DownloadError::Http {
+                status: status.as_u16(),
+            }));
         }
         if !status.is_success() {
             let e = DownloadError::Http {

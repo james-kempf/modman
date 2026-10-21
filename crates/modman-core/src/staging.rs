@@ -36,6 +36,24 @@ pub enum StagingError {
     UnknownProfile(String),
 }
 
+/// A layout path (setting or computed) that would leave the staging folder.
+fn unsafe_rel(out: &Path, rel: &str) -> StagingError {
+    StagingError::Io {
+        path: out.join(rel.replace('\0', "")),
+        source: io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "unsafe relative path ('.', '..', absolute or NUL)",
+        ),
+    }
+}
+
+fn non_utf8(path: &Path) -> StagingError {
+    StagingError::Io {
+        path: path.to_path_buf(),
+        source: io::Error::new(io::ErrorKind::InvalidData, "file name is not valid UTF-8"),
+    }
+}
+
 fn io_err(path: &Path) -> impl FnOnce(io::Error) -> StagingError + '_ {
     move |source| StagingError::Io {
         path: path.to_path_buf(),
@@ -308,10 +326,13 @@ fn entries(dir: &Path) -> Result<Vec<Ent>, StagingError> {
     for e in fs::read_dir(dir).map_err(io_err(dir))? {
         let e = e.map_err(io_err(dir))?;
         let is_dir = e.file_type().map_err(io_err(&e.path()))?.is_dir();
-        v.push(Ent {
-            name: e.file_name().to_string_lossy().into_owned(),
-            is_dir,
-        });
+        // A lossy name would point at a different (or no) file when used
+        // as a path again, so such names are refused.
+        let name = e
+            .file_name()
+            .into_string()
+            .map_err(|_| non_utf8(&e.path()))?;
+        v.push(Ent { name, is_dir });
     }
     v.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(v)
@@ -382,10 +403,17 @@ impl<'o> Placer<'o> {
     }
 
     /// Moves `src` (file or directory) to `out/rel`, merging directories.
+    /// `.`, `..` and NUL in `rel` are refused, so nothing lands outside `out`.
     fn place(&mut self, src: &Path, rel: &str) -> Result<(), StagingError> {
+        let comps: Vec<&str> = rel.split('/').filter(|c| !c.is_empty()).collect();
+        if comps
+            .iter()
+            .any(|c| matches!(*c, "." | "..") || c.contains('\0'))
+        {
+            return Err(unsafe_rel(self.out, rel));
+        }
         let mut dir = self.out.to_path_buf();
         fs::create_dir_all(&dir).map_err(io_err(&dir))?;
-        let comps: Vec<&str> = rel.split('/').filter(|c| !c.is_empty()).collect();
         let Some((last, parents)) = comps.split_last() else {
             return Ok(());
         };
@@ -780,7 +808,11 @@ pub fn normalize_layout(
     out: &Path,
     opts: &LayoutOptions<'_>,
 ) -> Result<LayoutOutcome, StagingError> {
-    let paks_dir = opts.paks_dir.unwrap_or("").trim_matches('/').to_string();
+    let raw_paks = opts.paks_dir.unwrap_or("");
+    if crate::deploy::check_rel_dir(raw_paks).is_err() {
+        return Err(unsafe_rel(out, raw_paks));
+    }
+    let paks_dir = raw_paks.trim_matches('/').to_string();
     fs::create_dir_all(out).map_err(io_err(out))?;
     let mut l = Layout {
         profile: opts.profile,
@@ -857,8 +889,8 @@ pub fn staged_files(root: &Path) -> Result<Vec<StagedFile>, StagingError> {
             .strip_prefix(root)
             .expect("walkdir yields paths under its root")
             .components()
-            .map(|c| c.as_os_str().to_string_lossy())
-            .collect::<Vec<_>>()
+            .map(|c| c.as_os_str().to_str().ok_or_else(|| non_utf8(p)))
+            .collect::<Result<Vec<_>, _>>()?
             .join("/");
         out.push(StagedFile {
             path: rel,
@@ -1300,6 +1332,51 @@ mod tests {
     }
 
     // ---- ue ----
+
+    #[test]
+    fn paks_dir_with_parent_component_is_refused() {
+        let t = tempfile::tempdir().unwrap();
+        let src = t.path().join("src");
+        mk(&src, &["a_P.pak"]);
+        let out = t.path().join("out");
+        for bad in ["../escape", "/abs", "Pal/./x"] {
+            let mut o = LayoutOptions::new(P::Ue, "x");
+            o.paks_dir = Some(bad);
+            assert!(normalize_layout(&src, &out, &o).is_err(), "{bad}");
+        }
+        assert!(!t.path().join("escape").exists());
+        assert!(src.join("a_P.pak").exists(), "nothing moved");
+    }
+
+    #[test]
+    fn non_utf8_names_are_refused_not_mangled() {
+        use std::os::unix::ffi::OsStrExt;
+        let t = tempfile::tempdir().unwrap();
+        let src = t.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        let bad = std::ffi::OsStr::from_bytes(b"caf\xe9.esp");
+        fs::write(src.join(bad), "x").unwrap();
+        assert!(staged_files(&src).is_err());
+        let out = t.path().join("out");
+        let o = LayoutOptions::new(P::Generic, "x");
+        assert!(normalize_layout(&src, &out, &o).is_err());
+        assert!(
+            src.join(bad).exists(),
+            "left in place, not renamed to U+FFFD"
+        );
+    }
+
+    #[test]
+    fn placer_refuses_parent_components() {
+        let t = tempfile::tempdir().unwrap();
+        let f = t.path().join("f");
+        fs::write(&f, "x").unwrap();
+        let out = t.path().join("out");
+        let mut p = Placer::new(&out);
+        assert!(p.place(&f, "a/../../escape").is_err());
+        assert!(!t.path().join("escape").exists());
+        assert!(f.exists());
+    }
 
     #[test]
     fn ue_flattens_paks_into_paks_dir() {

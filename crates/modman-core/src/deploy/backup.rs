@@ -83,7 +83,10 @@ impl BlobStore<'_> {
             let link = fs::read(&b.path)?;
             std::os::unix::fs::symlink(std::ffi::OsStr::from_bytes(&link), &tmp)?;
         } else {
-            let mut out = File::create(&tmp)?;
+            let mut out = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&tmp)?;
             io::copy(&mut File::open(&b.path)?, &mut out)?;
             out.set_modified(system_time(b.mtime_ns))?;
             out.set_permissions(fs::Permissions::from_mode(b.mode & 0o7777))?;

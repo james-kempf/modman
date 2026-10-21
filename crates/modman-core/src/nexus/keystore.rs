@@ -6,8 +6,8 @@
 //! All calls block; wrap them in `spawn_blocking` from async code.
 
 use std::fs::{self, OpenOptions};
-use std::io::Write;
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+use std::io::{Read, Write};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
 use std::time::Duration;
@@ -287,11 +287,30 @@ impl KeyStorage {
     }
 
     fn read_file(&self) -> Result<Option<ApiKey>, NexusError> {
-        let meta = match fs::metadata(&self.file) {
-            Ok(m) => m,
+        // O_NOFOLLOW, then checks on the opened file itself (no TOCTOU): a
+        // symlink or a file owned by someone else could feed us a key.
+        let mut f = match OpenOptions::new()
+            .read(true)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .open(&self.file)
+        {
+            Ok(f) => f,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) if e.raw_os_error() == Some(rustix::io::Errno::LOOP.raw_os_error()) => {
+                return Err(NexusError::Keyring(format!(
+                    "{} is a symbolic link; refusing to read credentials through it",
+                    self.file.display()
+                )))
+            }
             Err(e) => return Err(NexusError::io(&self.file)(e)),
         };
+        let meta = f.metadata().map_err(NexusError::io(&self.file))?;
+        if !meta.is_file() || meta.uid() != rustix::process::geteuid().as_raw() {
+            return Err(NexusError::Keyring(format!(
+                "{} is not a regular file owned by you; refusing to read it",
+                self.file.display()
+            )));
+        }
         let mode = meta.permissions().mode() & 0o777;
         if mode & 0o077 != 0 {
             return Err(NexusError::InsecureCredentials {
@@ -299,7 +318,9 @@ impl KeyStorage {
                 mode,
             });
         }
-        let text = fs::read_to_string(&self.file).map_err(NexusError::io(&self.file))?;
+        let mut text = String::new();
+        f.read_to_string(&mut text)
+            .map_err(NexusError::io(&self.file))?;
         // Parse errors could quote the file (the key), so they are not echoed.
         let parsed: CredentialsFile = toml::from_str(&text).map_err(|_| {
             NexusError::Keyring(format!("{} is not valid TOML", self.file.display()))

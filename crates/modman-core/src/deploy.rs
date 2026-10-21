@@ -18,6 +18,7 @@
 //!   another process holds the deploy lock.
 
 mod backup;
+mod confine;
 mod engine;
 mod place;
 mod plan;
@@ -30,6 +31,17 @@ use std::sync::Arc;
 pub use engine::{deploy, purge, recover, status, verify};
 pub use plan::{build_plan, conflicts, Conflict, ModRef, Plan, PlanItem, SkippedMod};
 pub use probe::{GameProbe, NeverRunning, ProcProbe};
+
+/// Checks a game-relative folder setting (`subdir`, `paks_dir`): relative,
+/// no `.`/`..` components, no NUL. `.` alone and a leading `./` (legacy
+/// spelling) are accepted.
+pub fn check_rel_dir(value: &str) -> Result<(), &'static str> {
+    let v = value.trim_start_matches("./").trim_end_matches('/');
+    if v.is_empty() || v == "." {
+        return Ok(());
+    }
+    confine::components(v).map(drop)
+}
 
 use crate::games::{GameConfig, GamesError, Target};
 use crate::paths::Paths;

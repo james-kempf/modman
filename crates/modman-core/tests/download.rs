@@ -208,6 +208,38 @@ async fn server_ignoring_range_restarts_from_zero() {
 }
 
 #[tokio::test]
+async fn unverifiable_part_refused_with_416_is_discarded_not_accepted() {
+    let body = payload(3_000);
+    let server = MockServer::start().await;
+    Mock::given(path("/f.zip"))
+        .and(header_exists("range"))
+        .respond_with(ResponseTemplate::new(416))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    Mock::given(path("/f.zip"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(body.clone()))
+        .with_priority(5)
+        .mount(&server)
+        .await;
+    let tmp = tempfile::tempdir().unwrap();
+    let dest = tmp.path().join("f.zip");
+    std::fs::write(Fetcher::part_path(&dest), b"stale-garbage").unwrap();
+    let got = fetcher()
+        .fetch(FetchRequest {
+            url: &format!("{}/f.zip", server.uri()),
+            dest: &dest,
+            md5: None,
+            sha256: None,
+            events: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read(&dest).unwrap(), body);
+    assert_eq!(got.sha256, sha_hex(&body));
+}
+
+#[tokio::test]
 async fn checksum_mismatch_retries_then_fails_without_leaving_files() {
     let server = MockServer::start().await;
     Mock::given(path("/f.zip"))

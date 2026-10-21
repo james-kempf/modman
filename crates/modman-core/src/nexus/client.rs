@@ -231,6 +231,26 @@ fn error_message(body: &str) -> String {
     }
 }
 
+/// Follows redirects only within one origin (scheme, host, port): the
+/// `apikey` header is a custom header, which reqwest would otherwise forward
+/// to any host a redirect names. A cross-origin redirect is returned as is
+/// (and reported as an HTTP error).
+fn same_origin_redirects() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|attempt| {
+        let same = attempt
+            .previous()
+            .last()
+            .is_some_and(|prev| prev.origin() == attempt.url().origin());
+        if !same {
+            attempt.stop()
+        } else if attempt.previous().len() > 10 {
+            attempt.error("too many redirects")
+        } else {
+            attempt.follow()
+        }
+    })
+}
+
 /// Nexus Mods API client.
 pub struct NexusClient {
     http: reqwest::Client,
@@ -260,6 +280,7 @@ impl NexusClient {
         install_crypto_provider();
         let http = reqwest::Client::builder()
             .timeout(cfg.timeout)
+            .redirect(same_origin_redirects())
             .build()
             .map_err(network_message)
             .map_err(NexusError::Network)?;

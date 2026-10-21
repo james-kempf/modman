@@ -220,13 +220,31 @@ fn deploy_and_purge_refused_while_game_process_runs() {
         .arg(&exe)
         .spawn()
         .unwrap();
+    // Wait until the probe the CLI uses actually sees the child, so the
+    // refusal below is not racing process start-up.
+    let game = modman_core::games::require_game(env.store().conn(), GAME).unwrap();
+    let probe = modman_core::deploy::ProcProbe::default();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut seen = false;
+    while std::time::Instant::now() < deadline {
+        if modman_core::deploy::GameProbe::is_running(&probe, &game) {
+            seen = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
     let res = std::panic::catch_unwind(|| {
-        env.run(&["deploy"])
-            .failure()
-            .stderr(contains("is running"));
-        env.run(&["-y", "purge"])
-            .failure()
-            .stderr(contains("is running"));
+        assert!(seen, "ProcProbe never saw the child process");
+        for args in [&["deploy"][..], &["-y", "purge"][..]] {
+            let out = env.cmd().args(args).output().unwrap();
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            assert!(
+                !out.status.success() && stderr.contains("is running"),
+                "{args:?}: status {:?}\nstdout:\n{}\nstderr:\n{stderr}",
+                out.status,
+                String::from_utf8_lossy(&out.stdout)
+            );
+        }
     });
     let _ = child.kill();
     let _ = child.wait();

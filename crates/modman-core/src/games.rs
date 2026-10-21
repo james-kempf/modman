@@ -431,7 +431,11 @@ pub fn apply_setting(
             let v = expand_tilde(value, home);
             g.folder = opt(v.trim_end_matches('/')).map(PathBuf::from);
         }
-        GameSetting::Subdir => g.subdir = opt(value).unwrap_or_else(|| ".".into()),
+        GameSetting::Subdir => {
+            crate::deploy::check_rel_dir(value)
+                .map_err(|m| invalid(format!("a relative folder ({m})")))?;
+            g.subdir = opt(value).unwrap_or_else(|| ".".into())
+        }
         GameSetting::Profile => {
             if !KNOWN_PROFILES.contains(&value) {
                 return Err(invalid(KNOWN_PROFILES.join("|")));
@@ -457,7 +461,11 @@ pub fn apply_setting(
         GameSetting::PluginsFile => {
             g.plugins_file = opt(&expand_tilde(value, home)).map(PathBuf::from)
         }
-        GameSetting::PaksDir => g.paks_dir = opt(value),
+        GameSetting::PaksDir => {
+            crate::deploy::check_rel_dir(value)
+                .map_err(|m| invalid(format!("a relative folder ({m})")))?;
+            g.paks_dir = opt(value)
+        }
         GameSetting::Name => g.name = value.to_string(),
     }
     save_game(conn, &g)?;
@@ -544,6 +552,34 @@ mod tests {
                 Err(GamesError::UnknownSetting(_))
             ));
         }
+    }
+
+    #[test]
+    fn subdir_and_paks_dir_settings_refuse_escaping_paths() {
+        let store = store_with("newgame");
+        let home = Path::new("/home/u");
+        for (key, bad) in [
+            (GameSetting::Subdir, "../escape"),
+            (GameSetting::Subdir, "/etc"),
+            (GameSetting::PaksDir, "Pal/../../x"),
+        ] {
+            assert!(
+                matches!(
+                    apply_setting(store.conn(), "newgame", key, bad, home),
+                    Err(GamesError::InvalidValue { .. })
+                ),
+                "{bad}"
+            );
+        }
+        let g = apply_setting(
+            store.conn(),
+            "newgame",
+            GameSetting::Subdir,
+            "./Data/",
+            home,
+        )
+        .unwrap();
+        assert_eq!(g.subdir, "./Data/");
     }
 
     #[test]

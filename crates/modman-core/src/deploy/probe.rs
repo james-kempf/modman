@@ -60,8 +60,14 @@ impl GameProbe for ProcProbe {
             return false;
         }
         let own = std::process::id().to_string();
-        let Ok(dir) = std::fs::read_dir(&self.proc_root) else {
-            return false;
+        let dir = match std::fs::read_dir(&self.proc_root) {
+            Ok(d) => d,
+            Err(e) => {
+                // Fail open (a missing /proc must not block deploys), but
+                // say so: the running-game guard is off.
+                tracing::warn!(proc = %self.proc_root.display(), error = %e, "cannot scan processes; not checking whether the game is running");
+                return false;
+            }
         };
         dir.flatten().any(|e| {
             let name = e.file_name();

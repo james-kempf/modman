@@ -169,6 +169,14 @@ pub fn parse_definition(text: &str, origin: &str) -> Result<GameDefinition, Game
             KNOWN_PROFILES.join(" ")
         )));
     }
+    for (key, value) in [
+        ("subdir", Some(&def.subdir)),
+        ("paks_dir", def.paks_dir.as_ref()),
+    ] {
+        if let Some(Err(m)) = value.map(|v| crate::deploy::check_rel_dir(v)) {
+            return Err(bad(format!("{key} '{}': {m}", value.expect("checked"))));
+        }
+    }
     if def.plugins.is_some() && def.profile != "bethesda" {
         return Err(bad(
             "[plugins] is only valid for the bethesda profile".into()
@@ -345,6 +353,16 @@ mod tests {
         .unwrap();
         let err = load_definitions(Some(dir.path())).unwrap_err().to_string();
         assert!(err.contains("bad.toml") && err.contains("nosuch"), "{err}");
+    }
+
+    #[test]
+    fn definition_with_escaping_subdir_or_paks_dir_is_rejected() {
+        let base = "domain = \"x\"\nname = \"X\"\nprofile = \"generic\"\n";
+        for extra in ["subdir = \"../escape\"\n", "paks_dir = \"/abs\"\n"] {
+            let err = parse_definition(&format!("{base}{extra}"), "x.toml").unwrap_err();
+            assert!(err.to_string().contains("x.toml"), "{err}");
+        }
+        assert!(parse_definition(&format!("{base}subdir = \"Data\"\n"), "x.toml").is_ok());
     }
 
     #[test]

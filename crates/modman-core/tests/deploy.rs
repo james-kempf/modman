@@ -850,3 +850,209 @@ fn missing_game_folder_is_a_typed_error() {
         Err(DeployError::TargetRootMissing(_))
     ));
 }
+
+// ── T10: confinement to the target root ─────────────────────────────────
+
+/// `<root>/dosdevices/z:` -> `<tmp>/outside` holding `victim.txt`.
+fn plant_escape_link(root: &Path, tmp: &Path) -> PathBuf {
+    let outside = tmp.join("outside");
+    write(&outside.join("victim.txt"), "safe", 0o644);
+    std::fs::create_dir_all(root.join("dosdevices")).unwrap();
+    std::os::unix::fs::symlink(&outside, root.join("dosdevices/z:")).unwrap();
+    outside
+}
+
+#[test]
+fn deploy_refuses_symlinked_folder_leading_outside_game_dir() {
+    let mut fx = Fx::new();
+    let outside = plant_escape_link(&fx.game_dir(), fx.tmp.path());
+    fx.add_mod("evil", 0, &[("dosdevices/z:/victim.txt", "pwned")]);
+    let before = snapshot(&fx.game_dir());
+    let err = fx.deploy().unwrap_err();
+    assert!(matches!(err, DeployError::PathConflict { .. }), "{err}");
+    assert_eq!(
+        std::fs::read_to_string(outside.join("victim.txt")).unwrap(),
+        "safe"
+    );
+    assert_eq!(snapshot(&fx.game_dir()), before);
+    assert!(!games::deployment_active(fx.store.conn(), GAME).unwrap());
+}
+
+#[test]
+fn deploy_refuses_symlinked_folder_leading_outside_proton_prefix() {
+    let mut fx = Fx::new();
+    let pfx = fx.tmp.path().join("pfx");
+    std::fs::create_dir_all(pfx.join("drive_c")).unwrap();
+    std::os::unix::fs::symlink("../drive_c", {
+        std::fs::create_dir_all(pfx.join("dosdevices")).unwrap();
+        pfx.join("dosdevices/c:")
+    })
+    .unwrap();
+    let outside = fx.tmp.path().join("outside");
+    write(&outside.join("victim.txt"), "safe", 0o644);
+    std::os::unix::fs::symlink(&outside, pfx.join("dosdevices/z:")).unwrap();
+    fx.game.prefix = Some(pfx.clone());
+    fx.game.target = games::Target::PrefixDir;
+    games::save_game(fx.store.conn(), &fx.game).unwrap();
+    fx.add_mod("evil", 0, &[("dosdevices/z:/victim.txt", "pwned")]);
+    assert!(matches!(fx.deploy(), Err(DeployError::PathConflict { .. })));
+    assert_eq!(
+        std::fs::read_to_string(outside.join("victim.txt")).unwrap(),
+        "safe"
+    );
+    assert!(!games::deployment_active(fx.store.conn(), GAME).unwrap());
+
+    // A link that stays inside the prefix is followed; the file lands at
+    // the real path and purge removes it.
+    fx.store.conn().execute("DELETE FROM mods", []).unwrap();
+    fx.add_mod("ok", 0, &[("dosdevices/c:/mod.ini", "ini")]);
+    fx.deploy().unwrap();
+    assert_eq!(
+        std::fs::read_to_string(pfx.join("drive_c/mod.ini")).unwrap(),
+        "ini"
+    );
+    assert_eq!(fx.methods().keys().collect::<Vec<_>>(), ["drive_c/mod.ini"]);
+    fx.purge().unwrap();
+    assert!(!pfx.join("drive_c/mod.ini").exists());
+}
+
+#[test]
+fn folder_swapped_for_outside_symlink_after_preflight_is_refused_at_placement() {
+    let mut fx = Fx::new();
+    let game = fx.game_dir();
+    let outside = fx.tmp.path().join("outside");
+    write(&outside.join("victim.txt"), "safe", 0o644);
+    std::fs::create_dir_all(game.join("sub")).unwrap();
+    let before = snapshot(&game);
+    // Sorted plan: a.txt is placed first; while placing it, sub/ becomes a
+    // symlink to the outside folder.
+    fx.add_mod("m", 0, &[("a.txt", "a"), ("sub/victim.txt", "pwned")]);
+    let (g, o) = (game.clone(), outside.clone());
+    fx.env.faults.deny = Some(Arc::new(move |_, p: &Path| {
+        if p.ends_with("a.txt") && !g.join("sub").is_symlink() {
+            std::fs::remove_dir(g.join("sub")).unwrap();
+            std::os::unix::fs::symlink(&o, g.join("sub")).unwrap();
+        }
+        false
+    }));
+    let err = fx.deploy().unwrap_err();
+    assert!(matches!(err, DeployError::PathConflict { .. }), "{err}");
+    assert_eq!(
+        std::fs::read_to_string(outside.join("victim.txt")).unwrap(),
+        "safe"
+    );
+    assert!(!game.join("a.txt").exists(), "rolled back");
+    std::fs::remove_file(game.join("sub")).unwrap();
+    std::fs::create_dir(game.join("sub")).unwrap();
+    assert_eq!(snapshot(&game), before);
+}
+
+#[test]
+fn subdir_with_parent_component_is_refused() {
+    let mut fx = Fx::new();
+    fx.game.subdir = "../escape".into();
+    fx.add_mod("m", 0, &[("x.txt", "x")]);
+    let err = fx.deploy().unwrap_err();
+    assert!(matches!(err, DeployError::PathConflict { .. }), "{err}");
+    let dry = deploy::deploy(
+        &mut fx.store,
+        &fx.game,
+        &fx.env,
+        &DeployOptions {
+            dry_run: true,
+            ..Default::default()
+        },
+    );
+    assert!(matches!(dry, Err(DeployError::PathConflict { .. })));
+    assert!(!fx.tmp.path().join("escape").exists());
+}
+
+// ── T10: byte-identical placements are undone, not mistaken for originals ─
+
+fn assert_original_exe(fx: &Fx) {
+    let m = std::fs::metadata(fx.game_dir().join("game.exe")).unwrap();
+    assert_eq!(fx.read("game.exe"), "orig-exe");
+    assert_eq!(m.permissions().mode() & 0o7777, 0o755);
+    assert_eq!(m.nlink(), 1, "no longer hardlinked to staging");
+}
+
+#[test]
+fn purge_restores_original_when_hardlinked_mod_file_is_byte_identical() {
+    let mut fx = Fx::new();
+    let before = snapshot(&fx.game_dir());
+    fx.add_mod("same", 0, &[("game.exe", "orig-exe")]);
+    fx.deploy().unwrap();
+    assert_eq!(fx.methods()["game.exe"], "hardlink");
+    let r = fx.purge().unwrap();
+    assert_eq!((r.removed, r.restored), (1, 1));
+    assert_original_exe(&fx);
+    assert_eq!(snapshot(&fx.game_dir()), before);
+}
+
+#[test]
+fn purge_restores_original_mode_when_copied_mod_file_is_byte_identical() {
+    let mut fx = Fx::new();
+    fx.add_mod("same", 0, &[("game.exe", "orig-exe")]);
+    let opts = fx.opts(MethodChoice::Only(Method::Copy));
+    deploy::deploy(&mut fx.store, &fx.game, &fx.env, &opts).unwrap();
+    let m = std::fs::metadata(fx.game_dir().join("game.exe")).unwrap();
+    assert_eq!(m.permissions().mode() & 0o7777, 0o644, "mod's mode placed");
+    fx.purge().unwrap();
+    assert_original_exe(&fx);
+}
+
+#[test]
+fn crash_rollback_restores_original_when_mod_file_is_byte_identical() {
+    let mut fx = Fx::new();
+    let before = snapshot(&fx.game_dir());
+    // game.exe is placed, then the "crash" hits before it is recorded.
+    fx.add_mod("same", 0, &[("game.exe", "orig-exe"), ("z.txt", "z")]);
+    fx.env.faults.crash_after_files = Some(1);
+    assert!(matches!(fx.deploy(), Err(DeployError::InjectedCrash)));
+    fx.env.faults = Faults::default();
+    fx.reopen();
+    deploy::recover(&mut fx.store, &fx.game, &fx.env)
+        .unwrap()
+        .unwrap();
+    assert_original_exe(&fx);
+    assert_eq!(snapshot(&fx.game_dir()), before);
+}
+
+#[test]
+fn recovery_sweeps_orphaned_backup_blobs_but_keeps_held_ones() {
+    let mut fx = Fx::new();
+    fx.three_mods();
+    let blob = |data: &[u8]| {
+        let sha = sha_hex(data);
+        let p = fx.env.backup_dir.join(&sha[..2]).join(&sha);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, data).unwrap();
+        (sha, p)
+    };
+    // Stored before a crash but never journaled.
+    let (_, orphan) = blob(b"orphan");
+    // Held by another game's deployment.
+    let (held_sha, held) = blob(b"held-elsewhere");
+    games::save_game(fx.store.conn(), &GameConfig::custom("othergame")).unwrap();
+    fx.store
+        .conn()
+        .execute(
+            "INSERT INTO backups (game, target, rel_path, sha256, store_path, size, mode, created_at)
+             VALUES ('othergame', 'game_dir', 'x', ?1, ?2, 14, 33188, 0)",
+            rusqlite::params![held_sha, held.to_string_lossy()],
+        )
+        .unwrap();
+    let incoming = fx.env.backup_dir.join(".incoming-99999");
+    std::fs::write(&incoming, "partial").unwrap();
+
+    fx.env.faults.crash_after_files = Some(2);
+    assert!(fx.deploy().is_err());
+    fx.env.faults = Faults::default();
+    fx.reopen();
+    deploy::recover(&mut fx.store, &fx.game, &fx.env)
+        .unwrap()
+        .unwrap();
+    assert!(!orphan.exists());
+    assert!(!incoming.exists());
+    assert!(held.exists());
+}
