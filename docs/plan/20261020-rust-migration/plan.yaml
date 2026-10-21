@@ -502,7 +502,7 @@ tasks:
     wave: 9
     depends_on: [T13]
     agent: gem-reviewer
-    status: pending
+    status: completed  # verdict warning, no HIGH; 3 MEDIUM + 5 LOW -> remediation task T13F (added by orchestrator)
     retries_used: 0
     acceptance_criteria:
       - "Verdict pass/fail per item: Exec/%u quoting prevents argument injection; key never in argv/logs/output; all deep-link/second-instance URLs parsed before action; CSP has no unsafe-eval/remote origins; capabilities least-privilege."
