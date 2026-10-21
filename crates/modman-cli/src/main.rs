@@ -7,6 +7,7 @@ mod context;
 mod logging;
 mod nexus;
 mod output;
+mod ui;
 
 use std::process::ExitCode;
 

@@ -4,6 +4,7 @@
 //! No UI code and no printing lives here. The CLI and the Tauri app are thin
 //! adapters over this crate. Milestones refer to `linux_mod_manager_tech_stack.md` §8.
 
+pub mod app; // M4: front-end-neutral orchestration (CLI + GUI)
 pub mod archive; // M3: zip / 7z / rar extraction
 pub mod autoupdate; // M7: systemd user timer, update + redeploy after system/game updates
 pub mod blocking; // sync adapter for async APIs (CLI)

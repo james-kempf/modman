@@ -92,7 +92,7 @@ pub fn normalize_domain(s: &str) -> Result<String, GamesError> {
 }
 
 /// A configured game (one row of `games`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct GameConfig {
     pub domain: String,
     pub name: String,

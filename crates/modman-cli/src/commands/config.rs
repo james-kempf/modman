@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! `config [key [value]]` (legacy `cmd_config` L3980-4014).
 
-use std::path::Path;
-
 use anyhow::Result;
 use clap::Args;
+use modman_core::app::views;
 use modman_core::config::{self, ConfigKey};
 
 use crate::context::Ctx;
@@ -38,9 +37,10 @@ pub fn run(ctx: &mut Ctx, args: ConfigArgs) -> Result<()> {
         println!("{}", config::get(&ctx.store, &ctx.paths, key)?);
         return Ok(());
     };
-    let old = config::get(&ctx.store, &ctx.paths, key)?;
-    let new = config::set(&ctx.store, &ctx.paths, key, &value)?;
-    if key == ConfigKey::DataDir && new != old && dir_has_entries(Path::new(&old)) {
+    let ui = ctx.ui();
+    let ch = views::config_set(&ctx.cx(&ui), key.name(), &value)?;
+    let new = ch.entry.value;
+    if let Some(old) = ch.old_data_left {
         out.warn(&format!(
             "Existing data in {old} is not moved automatically. Purge deployments first, then move it yourself:"
         ));
@@ -48,8 +48,4 @@ pub fn run(ctx: &mut Ctx, args: ConfigArgs) -> Result<()> {
     }
     out.success(&format!("{} = {new}", key.name()));
     Ok(())
-}
-
-fn dir_has_entries(p: &Path) -> bool {
-    std::fs::read_dir(p).is_ok_and(|mut d| d.next().is_some())
 }

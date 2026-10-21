@@ -132,6 +132,18 @@ impl Method {
     }
 }
 
+impl serde::Serialize for Method {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl serde::Serialize for MethodChoice {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
 /// Requested deploy method.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MethodChoice {
@@ -295,7 +307,7 @@ pub struct DeployOptions {
 }
 
 /// Result of [`deploy`].
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct DeployReport {
     pub dry_run: bool,
     pub method: MethodChoice,
@@ -319,7 +331,7 @@ pub struct DeployReport {
 
 /// Result of [`purge`] (legacy summary: removed, restored, missing, changed,
 /// kept).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct PurgeReport {
     pub nothing_deployed: bool,
     /// Deployed files deleted.
@@ -337,7 +349,8 @@ pub struct PurgeReport {
     pub plugins: Option<crate::loadorder::PluginStage>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RecoveryOutcome {
     /// An interrupted deploy was undone.
     RolledBack,
@@ -345,7 +358,7 @@ pub enum RecoveryOutcome {
     Resumed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct RecoveryReport {
     pub journal_id: i64,
     pub op: String,
@@ -353,13 +366,14 @@ pub struct RecoveryReport {
     pub undo: PurgeReport,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum VerifyKind {
     Missing,
     Modified,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct VerifyIssue {
     pub target: Target,
     pub rel_path: String,
@@ -367,7 +381,7 @@ pub struct VerifyIssue {
     pub kind: VerifyKind,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct VerifyReport {
     pub intact: usize,
     pub issues: Vec<VerifyIssue>,
@@ -376,7 +390,7 @@ pub struct VerifyReport {
 }
 
 /// Deployment state of one game.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct DeployStatus {
     pub active: bool,
     pub files: usize,

@@ -2,12 +2,13 @@
 //! `game list|add|use|remove|info|set|detect` (legacy `cmd_game` L4080-4171,
 //! `game_add_flow` L4019-4078).
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use clap::{Args, Subcommand};
-use modman_core::config::{expand_tilde, Config};
-use modman_core::games::{self, steam, GameConfig, GameSetting, Support, KNOWN_PROFILES};
+use modman_core::app::games::AddGame;
+use modman_core::config::Config;
+use modman_core::games::{self, Support};
 
 use crate::context::{games_hint, Ctx};
 
@@ -80,10 +81,6 @@ pub fn run(ctx: &mut Ctx, args: GameArgs) -> Result<()> {
     }
 }
 
-fn game_data_dir(ctx: &Ctx, domain: &str) -> Result<PathBuf> {
-    Ok(Config::load(&ctx.store, &ctx.paths)?.data_dir.join(domain))
-}
-
 fn list(ctx: &Ctx) -> Result<()> {
     let out = ctx.out;
     out.heading("Games");
@@ -124,155 +121,23 @@ fn list(ctx: &Ctx) -> Result<()> {
 }
 
 pub(crate) fn add(
-    ctx: &Ctx,
+    ctx: &mut Ctx,
     domain: &str,
     path: Option<String>,
     subdir: Option<String>,
     profile: Option<String>,
 ) -> Result<()> {
-    let out = ctx.out;
-    let domain = games::normalize_domain(domain)?;
-    let defs = ctx.definitions()?;
-    let def = games::find_definition(&defs, &domain);
-    let existing = games::get_game(ctx.store.conn(), &domain)?;
-    let mut g = match (&existing, def) {
-        (Some(g), _) => g.clone(),
-        (None, Some(d)) => GameConfig::from_definition(d),
-        (None, None) => GameConfig::custom(&domain),
-    };
-    // Logged in: Nexus must know the domain (legacy L4027-4034).
-    if let Some(nexus) = crate::nexus::connect(ctx, false)?.filter(|n| n.client.is_authenticated())
-    {
-        match nexus.run(nexus.client.game(&domain))? {
-            Ok(info) => {
-                if def.is_none() && existing.is_none() && !info.name.is_empty() {
-                    g.name = info.name.clone();
-                }
-                g.nexus_game_id = Some(info.id as i64);
-            }
-            Err(e) => bail!("Nexus does not know the game domain '{domain}': {e}"),
-        }
-    }
-    let mut profile = profile;
-    let mut subdir = subdir;
-    if def.is_none() {
-        out.info(&format!(
-            "No built-in preset for {} — using generic settings.",
-            g.name
-        ));
-        if profile.is_none() && ctx.is_interactive() {
-            profile = Some(ctx.ask(
-                &format!("Layout profile ({})", KNOWN_PROFILES.join(" ")),
-                "generic",
-            ));
-        }
-        if subdir.is_none() && ctx.is_interactive() {
-            subdir = Some(ctx.ask("Folder inside the game where mods go (. = game root)", "."));
-        }
-    }
-    if let Some(p) = profile {
-        g.profile = p;
-    }
-    if !KNOWN_PROFILES.contains(&g.profile.as_str()) {
-        bail!(
-            "Unknown profile '{}'. Choose one of: {}",
-            g.profile,
-            KNOWN_PROFILES.join(" ")
-        );
-    }
-    if let Some(s) = subdir.filter(|s| !s.is_empty()) {
-        g.subdir = s;
-    }
-
-    let libs = steam::steam_libraries(&ctx.paths.home);
-    let app = g.appid.and_then(|id| steam::find_app(&libs, id));
-    let path = match path {
-        Some(p) => p,
-        None => {
-            let mut found = None;
-            if let Some(app) = &app {
-                out.info(&format!(
-                    "Found {} in Steam: {}",
-                    g.name,
-                    app.install_dir.display()
-                ));
-                if !ctx.is_interactive() || ctx.confirm("Use this folder?", true) {
-                    found = Some(app.install_dir.display().to_string());
-                }
-            }
-            let fallback = g.folder.as_ref().map(|f| f.display().to_string());
-            match (found, fallback) {
-                (Some(p), _) => p,
-                (None, fallback) if ctx.is_interactive() => ctx.ask(
-                    &format!("Absolute path to the {} folder", g.name),
-                    fallback.as_deref().unwrap_or(""),
-                ),
-                (None, Some(p)) => p,
-                (None, None) => bail!(
-                    "Game folder not found automatically — pass it: modman game add {domain} <path>"
-                ),
-            }
-        }
-    };
-    let path = expand_tilde(&path, &ctx.paths.home);
-    let path = path.trim_end_matches('/');
-    if !path.starts_with('/') {
-        bail!("The game folder must be an absolute path.");
-    }
-    let folder = PathBuf::from(path);
-    if !folder.is_dir() {
-        out.warn(&format!("Folder does not exist yet: {}", folder.display()));
-    }
-    if let Some(app) = &app {
-        if same_dir(&folder, &app.install_dir) {
-            games::apply_steam_app(&mut g, app);
-        }
-    }
-    if g.prefix.is_none() {
-        if let Some(id) = g.appid {
-            g.prefix = steam::find_prefix(&libs, id, None);
-        }
-    }
-    g.folder = Some(folder);
-    games::save_game(ctx.store.conn(), &g)?;
-
-    let active = games::active_game(&ctx.store)?;
-    if active.is_none()
-        || active.as_deref() == Some(domain.as_str())
-        || ctx.confirm(&format!("Make {} the active game?", g.name), true)
-    {
-        games::set_active_game(&ctx.store, &domain)?;
-    }
-
-    out.success(&format!(
-        "Game {} ({domain}) configured.",
-        out.bold(&g.name)
-    ));
-    let folder = g.folder.as_deref().unwrap_or(Path::new(""));
-    println!("    Folder : {}", folder.display());
-    println!(
-        "    Mods go: {}   {}",
-        folder.join(&g.subdir).display(),
-        out.dim(&format!("(profile: {})", g.profile))
-    );
-    if let Some(p) = g.plugins_txt() {
-        println!("    Plugins: {}", p.display());
-    }
-    println!("    Data   : {}", game_data_dir(ctx, &domain)?.display());
-    if g.support(&defs) == Support::Experimental {
-        out.warn(&format!(
-            "{} support is experimental (not tested end to end).",
-            g.name
-        ));
-    }
+    let ui = ctx.ui();
+    modman_core::app::games::add_game(
+        &ctx.cx(&ui),
+        AddGame {
+            domain: domain.to_string(),
+            path,
+            subdir,
+            profile,
+        },
+    )?;
     Ok(())
-}
-
-fn same_dir(a: &Path, b: &Path) -> bool {
-    match (a.canonicalize(), b.canonicalize()) {
-        (Ok(a), Ok(b)) => a == b,
-        _ => a == b,
-    }
 }
 
 fn use_game(ctx: &Ctx, domain: &str) -> Result<()> {
@@ -284,25 +149,8 @@ fn use_game(ctx: &Ctx, domain: &str) -> Result<()> {
 }
 
 fn remove(ctx: &mut Ctx, domain: &str, delete_data: bool) -> Result<()> {
-    let domain = domain.to_ascii_lowercase();
-    let g = games::require_game(ctx.store.conn(), &domain).map_err(games_hint)?;
-    if games::deployment_active(ctx.store.conn(), &domain)? {
-        return Err(games_hint(games::GamesError::DeploymentActive(domain)));
-    }
-    let data = game_data_dir(ctx, &domain)?;
-    let question = if delete_data {
-        format!("Forget {}? This also DELETES {}", g.name, data.display())
-    } else {
-        format!("Forget {}?", g.name)
-    };
-    if !ctx.confirm(&question, false) {
-        return Ok(());
-    }
-    games::remove_game(&mut ctx.store, &domain).map_err(games_hint)?;
-    if delete_data && data.exists() {
-        std::fs::remove_dir_all(&data)?;
-    }
-    ctx.out.success(&format!("Removed {domain}."));
+    let ui = ctx.ui();
+    modman_core::app::games::remove(&mut ctx.cx(&ui), domain, delete_data)?;
     Ok(())
 }
 
@@ -341,19 +189,12 @@ fn info(ctx: &Ctx, domain: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn set(ctx: &Ctx, key: &str, value: &str) -> Result<()> {
-    let setting: GameSetting = key.parse()?;
+fn set(ctx: &mut Ctx, key: &str, value: &str) -> Result<()> {
+    // Validate the key before resolving the game (legacy order).
+    let _: modman_core::games::GameSetting = key.parse()?;
     let g = ctx.need_game()?;
-    let g = games::apply_setting(ctx.store.conn(), &g.domain, setting, value, &ctx.paths.home)
-        .map_err(games_hint)?;
-    if setting == GameSetting::Folder {
-        if let Some(f) = g.folder.as_ref().filter(|f| !f.is_dir()) {
-            ctx.out
-                .warn(&format!("Folder does not exist: {}", f.display()));
-        }
-    }
-    ctx.out
-        .success(&format!("{}: {} = {value}", g.domain, setting.name()));
+    let ui = ctx.ui();
+    modman_core::app::games::set_setting(&ctx.cx(&ui), &g.domain, key, value)?;
     Ok(())
 }
 

@@ -7,18 +7,13 @@
 
 use std::io::{BufRead, IsTerminal, Write};
 use std::process::{Command, Stdio};
-use std::sync::Arc;
 
 use anyhow::{bail, Result};
 use clap::Args;
+use modman_core::app::nexus as nx;
 use modman_core::games::{self, steam};
-use modman_core::nexus::{
-    keyring_opener, ApiKey, ApiKeyAuth, Backend, KeyStorage, NexusClient, ProbeOutcome,
-    PROBE_TIMEOUT,
-};
 
 use crate::context::Ctx;
-use crate::nexus::{self as nx, AUTH_BACKEND_KEY, PREMIUM_KEY, USER_KEY};
 
 #[derive(Args, Debug)]
 pub struct LoginArgs {
@@ -88,52 +83,14 @@ pub fn login(ctx: &mut Ctx, args: LoginArgs) -> Result<()> {
     if raw.is_empty() {
         bail!("API key cannot be empty.");
     }
-    let key = ApiKey::new(&raw)?;
-    drop(raw);
+    // Format check first, before anything is shown or sent.
+    drop(modman_core::nexus::ApiKey::new(&raw)?);
     out.info("Validating key...");
-    let shared = nx::shared_store(ctx)?;
-    let client = NexusClient::new(
-        nx::config()?,
-        Some(Arc::new(ApiKeyAuth::new(key.clone()))),
-        Some(shared.clone()),
-    )?;
-    let nexus = nx::Nexus { client, shared };
-    let acct = nexus
-        .run(nexus.client.validate())?
-        .map_err(|e| anyhow::anyhow!("Authentication failed: {e}"))?;
-
-    let storage = KeyStorage::open(&ctx.paths, keyring_opener(), PROBE_TIMEOUT)?;
-    let previous = ctx.store.setting(AUTH_BACKEND_KEY)?;
-    let backend = storage.save(&key)?;
-    ctx.store.set_setting(AUTH_BACKEND_KEY, backend.as_str())?;
-    ctx.store.set_setting(USER_KEY, &acct.name)?;
-    ctx.store
-        .set_setting(PREMIUM_KEY, if acct.is_premium { "true" } else { "false" })?;
-    if backend == Backend::File && previous.as_deref() != Some("file") {
-        let why = storage
-            .unavailable_reason()
-            .unwrap_or("the keyring refused the write");
-        out.warn(&format!(
-            "Secret Service keyring not available ({why}). The API key is stored in {} (readable only by you).",
-            storage.file_path().display()
-        ));
+    let r = nx::login(&ctx.paths, &ctx.store, &raw)?;
+    drop(raw);
+    for m in nx::login_msgs(&r) {
+        out.say(&m);
     }
-    out.success(&format!("Authenticated as {}", out.bold(&acct.name)));
-    if acct.is_premium {
-        out.success("Account tier: Premium — direct and parallel downloads available ✓");
-    } else {
-        out.warn(
-            "Account tier: Free — each file needs a click on \"Slow download\" on the website.",
-        );
-        out.warn("Run 'modman nxm register' so the browser can hand links to modman.");
-    }
-    out.success(&format!(
-        "API key saved ({}).",
-        match backend {
-            Backend::Keyring => "keyring".to_string(),
-            Backend::File => storage.file_path().display().to_string(),
-        }
-    ));
 
     if games::list_games(ctx.store.conn())?.is_empty() && ctx.is_interactive() {
         println!();
@@ -163,16 +120,9 @@ pub fn login(ctx: &mut Ctx, args: LoginArgs) -> Result<()> {
 }
 
 pub fn logout(ctx: &mut Ctx, _args: LogoutArgs) -> Result<()> {
-    let storage = match ctx.store.setting(AUTH_BACKEND_KEY)?.as_deref() {
-        Some("keyring") => KeyStorage::open(&ctx.paths, keyring_opener(), PROBE_TIMEOUT)?,
-        _ => KeyStorage::new(&ctx.paths, ProbeOutcome::Unavailable("logout".into())),
-    };
-    storage.clear()?;
-    for k in [AUTH_BACKEND_KEY, USER_KEY, PREMIUM_KEY] {
-        ctx.store.delete_setting(k)?;
-    }
+    let env_still_set = nx::logout(&ctx.paths, &ctx.store)?;
     ctx.out.success("API key removed.");
-    if std::env::var_os(modman_core::nexus::API_KEY_ENV).is_some() {
+    if env_still_set {
         ctx.out
             .warn("NEXUS_API_KEY is still set in the environment and will be used.");
     }

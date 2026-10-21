@@ -4,14 +4,11 @@
 
 use anyhow::{bail, Result};
 use clap::Args;
-use modman_core::config::Config;
-use modman_core::deploy::{
-    self, DeployEnv, DeployOptions, DeployStatus, Method, PurgeReport, RecoveryOutcome,
-    RecoveryReport, VerifyKind,
-};
-use modman_core::games::{self, GameConfig};
+use modman_core::app::deploy::{methods_summary, run_deploy, run_purge};
+use modman_core::deploy::{self, DeployStatus, VerifyKind};
+use modman_core::games;
 
-use crate::context::{games_hint, Ctx};
+use crate::context::Ctx;
 
 #[derive(Args, Debug)]
 pub struct DeployArgs {
@@ -35,143 +32,22 @@ pub struct StatusArgs {}
 /// Problems listed by `verify` (legacy L1980).
 const MAX_PROBLEMS: usize = 40;
 
-fn env_for(ctx: &Ctx, game: &GameConfig) -> Result<(DeployEnv, Config)> {
-    let cfg = Config::load(&ctx.store, &ctx.paths)?;
-    Ok((DeployEnv::new(&ctx.paths, &cfg.data_dir, &game.domain), cfg))
-}
-
-fn methods_summary(by: &std::collections::BTreeMap<Method, usize>) -> String {
-    by.iter()
-        .map(|(m, n)| format!("{n} {}", m.as_str()))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-fn report_recovery(ctx: &Ctx, rec: &Option<RecoveryReport>) {
-    if let Some(r) = rec {
-        let what = match r.outcome {
-            RecoveryOutcome::RolledBack => "rolled back",
-            RecoveryOutcome::Resumed => "finished",
-        };
-        ctx.out.warn(&format!(
-            "An interrupted {} was found and {what} (removed {}, restored {}).",
-            r.op, r.undo.removed, r.undo.restored
-        ));
-    }
-}
-
-fn purge_summary(ctx: &Ctx, r: &PurgeReport) {
-    ctx.out.success(&format!(
-        "Removed {}, restored {} original(s){}{}{}",
-        r.removed,
-        r.restored,
-        if r.missing > 0 {
-            format!(", {} already missing", r.missing)
-        } else {
-            String::new()
-        },
-        if r.changed > 0 {
-            format!(
-                ", {} changed since deploy (kept / moved to overwrite)",
-                r.changed
-            )
-        } else {
-            String::new()
-        },
-        if r.kept > 0 {
-            format!(", {} backup(s) kept (path occupied)", r.kept)
-        } else {
-            String::new()
-        },
-    ));
-}
-
 pub fn deploy(ctx: &mut Ctx, args: DeployArgs) -> Result<()> {
     let game = ctx.need_game()?;
-    let (env, cfg) = env_for(ctx, &game)?;
-    let method = deploy::resolve_method(args.method.as_deref(), &game, &cfg.deploy_method)?;
-    let opts = DeployOptions {
-        method,
-        dry_run: args.dry_run,
-        ..Default::default()
-    };
-    let r = deploy::deploy(&mut ctx.store, &game, &env, &opts)?;
-    let out = ctx.out;
-    report_recovery(ctx, &r.recovered);
-    for s in &r.skipped {
-        out.warn(&format!(
-            "Skipping {}: {} — run: modman reinstall '{}'",
-            s.uid, s.reason, s.uid
-        ));
-    }
-    if let Some(p) = &r.purged {
-        out.info(&format!(
-            "Removed the previous deployment ({} files, {} originals restored).",
-            p.removed, p.restored
-        ));
-    }
-    if r.placed == 0 {
-        super::plugins::report_stage(out, &r.plugins);
-        out.info("Nothing to deploy (no enabled mods with staged files).");
-        return Ok(());
-    }
-    if !r.conflicts.is_empty() {
-        out.info(&format!(
-            "{} file conflict(s); the later mod in the load order wins.",
-            r.conflicts.len()
-        ));
-    }
-    if r.dry_run {
-        out.info(&format!(
-            "Dry run: would deploy {} file(s) from {} mod(s) with method {}, back up {} game file(s), create {} folder(s). Nothing was changed.",
-            r.placed,
-            r.mods,
-            r.method.as_str(),
-            r.backed_up,
-            r.new_dirs
-        ));
-        return Ok(());
-    }
-    out.success(&format!(
-        "Deployed {} file(s) from {} mod(s) to {} ({}); backed up {} original(s).",
-        r.placed,
-        r.mods,
-        game.name,
-        methods_summary(&r.by_method),
-        r.backed_up
-    ));
-    super::plugins::report_stage(out, &r.plugins);
+    let ui = ctx.ui();
+    run_deploy(
+        &mut ctx.cx(&ui),
+        &game,
+        args.method.as_deref(),
+        args.dry_run,
+    )?;
     Ok(())
 }
 
 pub fn purge(ctx: &mut Ctx, _args: PurgeArgs) -> Result<()> {
     let game = ctx.need_game()?;
-    let (env, _) = env_for(ctx, &game)?;
-    if !games::deployment_active(ctx.store.conn(), &game.domain).map_err(games_hint)? {
-        ctx.out
-            .info(&format!("Nothing is deployed for {}.", game.name));
-        return Ok(());
-    }
-    if !ctx.confirm(
-        &format!(
-            "Remove deployed mods from {} and restore the original files?",
-            game.name
-        ),
-        true,
-    ) {
-        ctx.out.info("Cancelled.");
-        return Ok(());
-    }
-    let r = deploy::purge(&mut ctx.store, &game, &env)?;
-    report_recovery(ctx, &r.recovered.as_deref().cloned());
-    purge_summary(ctx, &r);
-    super::plugins::report_stage(ctx.out, &r.plugins);
-    if r.changed > 0 {
-        ctx.out.info(&format!(
-            "Changed files were kept in {}",
-            env.overwrite_dir.display()
-        ));
-    }
+    let ui = ctx.ui();
+    run_purge(&mut ctx.cx(&ui), &game)?;
     Ok(())
 }
 

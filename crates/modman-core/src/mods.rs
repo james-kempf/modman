@@ -80,7 +80,7 @@ pub(crate) fn io_err(path: &Path) -> impl FnOnce(std::io::Error) -> ModsError + 
 }
 
 /// One installed mod.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ModRecord {
     /// Row id (`mods.id`).
     pub id: i64,
@@ -360,7 +360,7 @@ impl OrderSpec {
 }
 
 /// Result of [`move_mod`]: 1-based positions and the mod count.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct Moved {
     pub from: usize,
     pub to: usize,
@@ -411,7 +411,7 @@ pub fn move_mod(
 }
 
 /// What [`remove_mods`] deleted.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Removed {
     pub mods: usize,
     pub archives: Vec<PathBuf>,

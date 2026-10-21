@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Per-run state shared by commands: paths, store, output and global flags.
 
-use std::io::{BufRead, IsTerminal, Write};
+use std::io::{BufRead, Write};
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
+use modman_core::app::{Cx, Ui};
 use modman_core::games::{self, GameConfig, GameDefinition, GamesError};
 use modman_core::paths::Paths;
 use modman_core::store::Store;
 
 use crate::output::Printer;
+use crate::ui::CliUi;
 
 pub struct Ctx {
     pub paths: Paths,
@@ -21,25 +23,32 @@ pub struct Ctx {
 }
 
 impl Ctx {
+    /// The terminal UI for core orchestration calls.
+    pub fn ui(&self) -> CliUi {
+        CliUi {
+            out: self.out,
+            yes: self.yes,
+        }
+    }
+
+    /// Core orchestration context over this run's paths and store.
+    pub fn cx<'a>(&'a mut self, ui: &'a CliUi) -> Cx<'a> {
+        Cx {
+            paths: &self.paths,
+            store: &mut self.store,
+            ui,
+            game: self.game.as_deref(),
+        }
+    }
+
     /// Prompts are allowed (legacy `is_interactive`, L87).
     pub fn is_interactive(&self) -> bool {
-        !self.yes && std::io::stdin().is_terminal()
+        self.ui().interactive()
     }
 
     /// Legacy `confirm`: yes with `-y`, the default without a tty.
     pub fn confirm(&self, question: &str, default_yes: bool) -> bool {
-        if self.yes {
-            return true;
-        }
-        if !std::io::stdin().is_terminal() {
-            return default_yes;
-        }
-        let hint = if default_yes { "[Y/n]" } else { "[y/N]" };
-        match read_line(&format!("{question} {hint} ")) {
-            Some(a) if a.is_empty() => default_yes,
-            Some(a) => matches!(a.to_ascii_lowercase().as_str(), "y" | "yes"),
-            None => default_yes,
-        }
+        self.ui().confirm(question, default_yes)
     }
 
     /// Asks for a value; empty input takes `default`.
@@ -74,21 +83,10 @@ impl Ctx {
 
 /// Adds the legacy "Run: ..." hints to game errors.
 pub fn games_hint(e: GamesError) -> anyhow::Error {
-    match e {
-        GamesError::NoActiveGame => {
-            anyhow!("No game selected. Run: modman game add <domain>  (or pass -g <domain>)")
-        }
-        GamesError::NotConfigured(d) => {
-            anyhow!("Game '{d}' is not set up. Run: modman game add {d}")
-        }
-        GamesError::DeploymentActive(d) => {
-            anyhow!("Mods are still deployed for {d}. Purge first: modman -g {d} purge")
-        }
-        other => other.into(),
-    }
+    modman_core::app::games_hint(e).into()
 }
 
-fn read_line(prompt: &str) -> Option<String> {
+pub(crate) fn read_line(prompt: &str) -> Option<String> {
     eprint!("{prompt}");
     let _ = std::io::stderr().flush();
     let mut s = String::new();

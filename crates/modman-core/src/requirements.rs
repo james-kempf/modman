@@ -188,7 +188,8 @@ fn nexus_url_id(url: &str, domain: &str) -> Option<String> {
 }
 
 /// Row status, in report order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ReqStatus {
     Missing,
     Disabled,
@@ -210,7 +211,7 @@ impl ReqStatus {
 }
 
 /// One requirement group (`deps --json` row).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ReqRow {
     pub status: ReqStatus,
     /// Ack key: `tool:<k>`, `nexus:<id>`, `nexus:<game>:<id>` or `url:<...>`.

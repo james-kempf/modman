@@ -12,7 +12,7 @@ use super::{io_err, DeployError};
 use crate::games::{GameConfig, Target};
 
 /// A mod taking part in a plan.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ModRef {
     pub id: i64,
     pub uid: String,
@@ -21,7 +21,7 @@ pub struct ModRef {
 }
 
 /// An enabled mod left out of the plan.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct SkippedMod {
     pub uid: String,
     pub reason: String,
@@ -43,7 +43,7 @@ pub struct PlanItem {
 }
 
 /// A path provided by more than one mod.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Conflict {
     pub rel_path: String,
     pub winner: ModRef,

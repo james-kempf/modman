@@ -18,7 +18,8 @@ use super::DownloadError;
 use crate::nexus::install_crypto_provider;
 
 /// Progress events, sent best-effort (a dropped receiver is ignored).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum DownloadEvent {
     Started {
         resumed_from: u64,

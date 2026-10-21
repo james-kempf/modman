@@ -6,15 +6,14 @@ use std::collections::BTreeMap;
 
 use anyhow::{bail, Result};
 use clap::{Args, Subcommand};
+use modman_core::app::{self, mods as appmods, staging_lock, updates as appup};
 use modman_core::config::Config;
 use modman_core::deploy;
-use modman_core::fomod::{FomodChoices, FomodMode};
+use modman_core::fomod::FomodChoices;
 use modman_core::games::GameConfig;
-use modman_core::mods::{self, InstallMeta, ModRecord, OrderSpec};
-use modman_core::nexus::{latest_file, refresh_requirements};
-use modman_core::requirements::{self, ReqRow, ReqStatus, Scope};
+use modman_core::mods;
+use modman_core::requirements::{self, ReqRow, Scope};
 
-use super::install::{after_change, install_archive, staging_lock};
 use crate::context::Ctx;
 use crate::nexus as nx;
 use crate::output::{human_size, json_str, trunc};
@@ -150,6 +149,19 @@ pub type CleanArgs = IgnoredArgs;
 fn changed_hint(ctx: &Ctx, game: &GameConfig) -> Result<bool> {
     let st = deploy::status(ctx.store.conn(), &game.domain)?;
     Ok(mods::changed_since(&ctx.store, &game.domain, st.last_deployed_at)? && st.active)
+}
+
+/// Shows the requirement report of `rows`.
+fn print_report(ctx: &Ctx, rows: &[ReqRow], problems: bool, title: &str) {
+    for m in appup::report_msgs(rows, problems, title) {
+        ctx.out.say(&m);
+    }
+}
+
+/// Updates the requirements cache when logged in; never fails.
+fn refresh_deps(ctx: &mut Ctx, game: &GameConfig, ids: &[u64], refresh: bool, quiet: bool) {
+    let ui = ctx.ui();
+    appup::refresh_deps(&ctx.cx(&ui), game, ids, refresh, quiet);
 }
 
 pub fn list(ctx: &mut Ctx, args: ListArgs) -> Result<()> {
@@ -375,17 +387,9 @@ fn toggle(ctx: &mut Ctx, args: ToggleArgs, enable: bool) -> Result<()> {
     }
     let game = ctx.need_game()?;
     let ids = ids_for(ctx, &game, &args)?;
-    mods::set_enabled(&mut ctx.store, &game.domain, &ids, enable)?;
-    let word = if enable { "Enabled" } else { "Disabled" };
-    if ids.len() <= 10 {
-        let all = mods::list_mods(ctx.store.conn(), &game.domain)?;
-        for m in all.iter().filter(|m| ids.contains(&m.id)) {
-            ctx.out.success(&format!("{word}: {}", m.uid));
-        }
-    } else {
-        ctx.out.success(&format!("{word} {} mods.", ids.len()));
-    }
-    after_change(ctx, &game)
+    let ui = ctx.ui();
+    appmods::set_enabled(&mut ctx.cx(&ui), &game, &ids, enable)?;
+    Ok(())
 }
 
 pub fn enable(ctx: &mut Ctx, args: EnableArgs) -> Result<()> {
@@ -398,51 +402,22 @@ pub fn disable(ctx: &mut Ctx, args: DisableArgs) -> Result<()> {
 
 pub fn uninstall(ctx: &mut Ctx, args: UninstallArgs) -> Result<()> {
     let game = ctx.need_game()?;
-    let out = ctx.out;
-    let all = mods::list_mods(ctx.store.conn(), &game.domain)?;
-    let mut targets: Vec<&ModRecord> = Vec::new();
-    for r in &args.refs {
-        let m = mods::resolve_in(&all, r)?;
-        if let Some(found) = all.iter().find(|x| x.id == m.id) {
-            if !targets.iter().any(|t| t.id == found.id) {
-                targets.push(found);
-            }
-        }
-    }
-    for t in &targets {
-        println!("  {} {}", out.yellow("−"), t.uid);
-    }
-    if !ctx.confirm(&format!("Uninstall {} mod(s)?", targets.len()), true) {
-        out.info("Cancelled.");
-        return Ok(());
-    }
-    let ids: Vec<i64> = targets.iter().map(|t| t.id).collect();
-    let cfg = Config::load(&ctx.store, &ctx.paths)?;
-    let dl = mods::downloads_dir(&cfg.data_dir, &game.domain);
-    let lock = staging_lock(ctx)?;
-    let r = mods::remove_mods(
-        &mut ctx.store,
-        &game.domain,
-        &ids,
-        args.delete_archive.then_some(dl.as_path()),
-    )?;
-    drop(lock);
-    for a in &r.archives {
-        out.info(&format!("Deleted archive {}", a.display()));
-    }
-    out.success(&format!("Uninstalled {} mod(s).", r.mods));
-    after_change(ctx, &game)
+    let ui = ctx.ui();
+    appmods::uninstall(&mut ctx.cx(&ui), &game, &args.refs, args.delete_archive)?;
+    Ok(())
 }
 
 pub fn order(ctx: &mut Ctx, args: OrderArgs) -> Result<()> {
     let game = ctx.need_game()?;
-    let spec = OrderSpec::parse(&args.spec, args.arg.as_deref())?;
-    let (m, mv) = mods::move_mod(&mut ctx.store, &game.domain, &args.reference, &spec)?;
-    ctx.out.success(&format!(
-        "{}: #{} → #{}  (of {})",
-        m.uid, mv.from, mv.to, mv.of
-    ));
-    after_change(ctx, &game)
+    let ui = ctx.ui();
+    appmods::move_mod(
+        &mut ctx.cx(&ui),
+        &game,
+        &args.reference,
+        &args.spec,
+        args.arg.as_deref(),
+    )?;
+    Ok(())
 }
 
 pub fn conflicts(ctx: &mut Ctx, args: ConflictsArgs) -> Result<()> {
@@ -515,179 +490,6 @@ pub fn conflicts(ctx: &mut Ctx, args: ConflictsArgs) -> Result<()> {
     Ok(())
 }
 
-/// Updates the requirements cache when logged in. Never fails the caller.
-fn refresh_deps(ctx: &Ctx, game: &GameConfig, ids: &[u64], refresh: bool, quiet: bool) {
-    let res = (|| -> Result<bool> {
-        let Some(nexus) = nx::connect(ctx, false)?.filter(|n| n.client.is_authenticated()) else {
-            return Ok(false);
-        };
-        let mut g = game.clone();
-        let gid = nx::game_id(ctx, &nexus, &mut g)?;
-        nexus.run(refresh_requirements(
-            &nexus.client,
-            &nexus.shared,
-            &g.domain,
-            gid,
-            ids,
-            refresh,
-        ))??;
-        Ok(true)
-    })();
-    match res {
-        Ok(true) => {}
-        Ok(false) if refresh && !quiet => ctx
-            .out
-            .warn("Not logged in; showing cached requirements only. Run: modman login"),
-        Ok(false) => {}
-        Err(e) if quiet => tracing::warn!("requirement lookup failed: {e:#}"),
-        Err(e) => ctx
-            .out
-            .warn(&format!("Could not update requirements: {e:#}")),
-    }
-}
-
-/// Legacy `deps_report` in `full` (every row) or `problems` mode.
-pub fn print_report(ctx: &Ctx, rows: &[ReqRow], problems: bool, title: &str) {
-    let out = ctx.out;
-    if rows.is_empty() {
-        if !problems {
-            println!();
-            out.info(&format!("{title}: none listed on Nexus."));
-        }
-        return;
-    }
-    let counts = requirements::counts(rows);
-    let n = |s: ReqStatus| counts.get(&s).copied().unwrap_or(0);
-    let (n_ok, n_ext) = (n(ReqStatus::Ok), n(ReqStatus::External));
-    let n_bad = n(ReqStatus::Missing) + n(ReqStatus::Disabled);
-    if problems && n_bad + n_ext == 0 {
-        if n_ok > 0 {
-            out.success(&format!(
-                "All {n_ok} requirement(s) of the installed mods are present."
-            ));
-        }
-        return;
-    }
-    out.heading(title);
-    for r in rows {
-        if problems && matches!(r.status, ReqStatus::Ok | ReqStatus::Gone) {
-            continue;
-        }
-        let name = out.bold(&r.name);
-        match r.status {
-            ReqStatus::Ok => println!("  {} {name}  {}", out.green("✓"), out.dim(&r.detail)),
-            ReqStatus::Missing => println!(
-                "  ✗ {name}  missing{}",
-                if r.detail.is_empty() {
-                    String::new()
-                } else {
-                    format!("  ({})", r.detail)
-                }
-            ),
-            ReqStatus::Disabled => println!(
-                "  {} {name}  {}",
-                out.yellow("✗"),
-                out.yellow("installed but disabled")
-            ),
-            ReqStatus::External => println!(
-                "  {} {name}  {}",
-                out.yellow("?"),
-                out.yellow("external — install it yourself")
-            ),
-            ReqStatus::Gone => println!("  {}", out.dim(&format!("· {}  ({})", r.name, r.detail))),
-        }
-        if matches!(r.status, ReqStatus::Ok | ReqStatus::Gone) {
-            continue;
-        }
-        if !r.by.is_empty() {
-            let label = if r.by.len() > 1 {
-                format!("needed by {} mods", r.by.len())
-            } else {
-                "needed by".into()
-            };
-            println!(
-                "      {}",
-                out.dim(&format!("{label}: {}", trunc(&r.by.join("; "), 100)))
-            );
-        }
-        if !r.hint.is_empty() {
-            println!("      → modman {}", r.hint);
-        }
-        for u in &r.urls {
-            println!("      → {u}");
-        }
-    }
-    if n_bad + n_ext > 0 {
-        println!();
-        if n_bad > 0 {
-            out.warn(&format!(
-                "{n_bad} requirement(s) missing — the mods that need them will not work."
-            ));
-        }
-        if n_ext > 0 {
-            out.info("External requirements cannot be checked automatically. Once installed: modman deps ack <name>");
-        }
-        if problems && n_ok > 0 {
-            println!(
-                "  {}",
-                out.dim(&format!(
-                    "{n_ok} other requirement(s) present — full list: modman deps"
-                ))
-            );
-        }
-    }
-}
-
-/// After an install: refresh and print the mod's requirements.
-pub fn requirements_after_install(ctx: &Ctx, game: &GameConfig, mod_row: i64) {
-    let Ok(Some(m)) = mods::get_mod(ctx.store.conn(), &game.domain, mod_row) else {
-        return;
-    };
-    let Some(mid) = m.nexus_mod_id else { return };
-    refresh_deps(ctx, game, &[mid], false, true);
-    if let Ok(rows) = requirements::analyze(
-        &ctx.store,
-        game,
-        &Scope {
-            mods: Some(vec![m.id]),
-        },
-    ) {
-        print_report(ctx, &rows, false, "Requirements");
-    }
-}
-
-/// After a collection install: refresh and print the problems among the
-/// collection's requirements, including its external resources (legacy
-/// L2547-2555).
-pub fn requirements_after_collection(ctx: &Ctx, game: &GameConfig, ids: &[i64]) {
-    if ids.is_empty() {
-        return;
-    }
-    let nexus_ids: Vec<u64> = mods::list_mods(ctx.store.conn(), &game.domain)
-        .unwrap_or_default()
-        .iter()
-        .filter(|m| ids.contains(&m.id))
-        .filter_map(|m| m.nexus_mod_id)
-        .collect();
-    if !nexus_ids.is_empty() {
-        refresh_deps(ctx, game, &nexus_ids, false, true);
-    }
-    if let Ok(rows) = requirements::analyze(
-        &ctx.store,
-        game,
-        &Scope {
-            mods: Some(ids.to_vec()),
-        },
-    ) {
-        print_report(
-            ctx,
-            &rows,
-            true,
-            "Requirements not included in the collection",
-        );
-    }
-}
-
 fn rows_json(rows: &[ReqRow]) -> String {
     let arr = |v: &[String]| {
         format!(
@@ -724,28 +526,13 @@ pub fn deps(ctx: &mut Ctx, args: DepsArgs) -> Result<()> {
     };
     let reference = words.join(" ");
     if let Some(sub) = sub {
-        if reference.is_empty() {
-            bail!("Usage: modman deps {sub} <requirement name>");
-        }
-        let ids: Vec<u64> = all.iter().filter_map(|m| m.nexus_mod_id).collect();
-        if !ids.is_empty() {
-            refresh_deps(ctx, &game, &ids, args.refresh, true);
-        }
-        let rows = requirements::analyze(&ctx.store, &game, &Scope::default())?;
-        let unack = sub == "unack";
-        let row = match requirements::find_ack_target(&rows, &reference, unack) {
-            Ok(r) => r,
-            Err(0) => bail!("No requirement matches '{reference}'. See: modman deps"),
-            Err(n) => {
-                bail!("'{reference}' matches {n} requirements — be more specific. See: modman deps")
-            }
-        };
-        if unack {
-            requirements::unack(ctx.store.conn(), &game.domain, &row.key)?;
-            out.success(&format!("{} will be checked again.", row.name));
-        } else {
-            requirements::ack(ctx.store.conn(), &game.domain, &row.key)?;
+        let ack = sub == "ack";
+        let ui = ctx.ui();
+        let row = appup::set_ack(&ctx.cx(&ui), &game, &reference, ack, args.refresh)?;
+        if ack {
             out.success(&format!("Marked {} as installed.", out.bold(&row.name)));
+        } else {
+            out.success(&format!("{} will be checked again.", row.name));
         }
         return Ok(());
     }
@@ -804,147 +591,22 @@ pub fn deps(ctx: &mut Ctx, args: DepsArgs) -> Result<()> {
 
 pub fn updates(ctx: &mut Ctx, args: UpdatesArgs) -> Result<()> {
     let game = ctx.need_game()?;
-    let out = ctx.out;
-    let nexus = nx::require(ctx)?;
-    out.heading(&format!("Update check — {}", game.name));
-    let all = mods::list_mods(ctx.store.conn(), &game.domain)?;
-    let mut ids: Vec<u64> = all.iter().filter_map(|m| m.nexus_mod_id).collect();
-    ids.sort_unstable();
-    ids.dedup();
-    if ids.is_empty() {
-        out.info("No Nexus mods installed.");
-        return Ok(());
-    }
-    let check = nexus.run(modman_core::nexus::check_updates(
-        &nexus.client,
-        &nexus.shared,
-        &game.domain,
-        &ids,
+    let ui = ctx.ui();
+    appup::run(
+        &mut ctx.cx(&ui),
+        &game,
+        args.install,
+        args.all,
         args.refresh,
-    ))??;
-    if check.stopped_early {
-        out.warn("Hourly API limit almost used up — stopping early (re-run later).");
-    }
-    out.info(&format!(
-        "Checked {} mods ({} refreshed from Nexus).",
-        ids.len(),
-        check.fetched
-    ));
-    let mut found = Vec::new();
-    for m in &all {
-        let (Some(mid), Some(fid)) = (m.nexus_mod_id, m.nexus_file_id) else {
-            continue;
-        };
-        let Some(files) = check.files.get(&mid) else {
-            continue;
-        };
-        if let Some(newer) = latest_file(files, fid) {
-            found.push((m.clone(), newer.clone()));
-        }
-    }
-    if found.is_empty() {
-        out.success("All mods are up to date.");
-        return Ok(());
-    }
-    println!();
-    let mut pinned = 0;
-    for (m, f) in &found {
-        let exact = m.update_policy.as_deref() == Some("exact");
-        pinned += usize::from(exact);
-        println!(
-            "  {} {:<40} {} → {}  {}{}",
-            out.yellow("↑"),
-            trunc(&m.name, 40),
-            m.version.as_deref().unwrap_or("?"),
-            out.green(f.version.as_deref().unwrap_or("?")),
-            out.dim(&trunc(&f.name, 40)),
-            if exact {
-                out.dim(" (pinned by collection)")
-            } else {
-                String::new()
-            }
-        );
-    }
-    println!();
-    out.info(&format!(
-        "{} update(s) available{}.",
-        found.len(),
-        if pinned > 0 {
-            format!(", {pinned} pinned by a collection (use --all to include)")
-        } else {
-            String::new()
-        }
-    ));
-    if !args.install {
-        out.info("Install them with: modman updates --install");
-        return Ok(());
-    }
-    let mut done = 0;
-    for (m, f) in &found {
-        if m.update_policy.as_deref() == Some("exact") && !args.all {
-            continue;
-        }
-        println!(
-            "\n  Updating {} {} → {}",
-            out.bold(&m.name),
-            m.version.as_deref().unwrap_or("?"),
-            f.version.as_deref().unwrap_or("?")
-        );
-        let mid = m.nexus_mod_id.unwrap_or_default();
-        let (archive, md5) = match nx::download_file(
-            ctx,
-            &nexus,
-            &game.domain,
-            mid,
-            f.file_id,
-            Some(f),
-            None,
-            None,
-        ) {
-            Ok(r) => r,
-            Err(e) => {
-                out.error(&format!("Download failed for {}: {e:#}", m.name));
-                continue;
-            }
-        };
-        let meta = InstallMeta {
-            name: Some(m.name.clone()),
-            version: f.version.clone(),
-            nexus_mod_id: Some(mid),
-            nexus_file_id: Some(f.file_id),
-            md5,
-            source: Some(m.source.clone()),
-            author: m.author.clone(),
-            category: m.category.clone(),
-            update_policy: m.update_policy.clone(),
-            variant: m.variant.clone(),
-            replaces: Some(m.id),
-            uid: None,
-            // Legacy L3800-3802: reuse the recorded FOMOD choices.
-            fomod_mode: FomodMode::Reuse,
-            fomod_choices: mods::recorded_fomod_choices(ctx.store.conn(), m.id)?,
-        };
-        let lock = staging_lock(ctx)?;
-        let r = install_archive(ctx, &game, &archive, &meta, false);
-        drop(lock);
-        match r {
-            Ok(o) => {
-                out.success(&format!("Updated → {}", o.uid));
-                done += 1;
-            }
-            Err(e) => out.error(&format!("Update of {} failed: {e:#}", m.name)),
-        }
-    }
-    println!();
-    out.success(&format!("{done} mod(s) updated."));
-    after_change(ctx, &game)
+    )?;
+    Ok(())
 }
 
 pub fn search(ctx: &mut Ctx, args: SearchArgs) -> Result<()> {
     let game = ctx.need_game()?;
     let out = ctx.out;
     let q = args.words.join(" ");
-    let nexus = nx::connect(ctx, false)?.ok_or_else(|| anyhow::anyhow!("no Nexus client"))?;
+    let nexus = nx::connect(ctx)?.ok_or_else(|| anyhow::anyhow!("no Nexus client"))?;
     let res = nexus.run(nexus.client.search(&game.domain, &q))??;
     let installed: Vec<u64> = mods::list_mods(ctx.store.conn(), &game.domain)?
         .iter()
@@ -1031,28 +693,12 @@ pub fn profile(ctx: &mut Ctx, args: ProfileArgs) -> Result<()> {
             }
         }
         ProfileCmd::Save { name } => {
-            if !mods::valid_profile_name(&name) {
-                return Err(mods::ModsError::InvalidProfileName(name).into());
-            }
-            let exists = mods::list_profiles(&ctx.store, &game.domain)?
-                .iter()
-                .any(|p| p.name == name);
-            if exists && !ctx.confirm(&format!("Overwrite profile '{name}'?"), true) {
-                return Ok(());
-            }
-            let n = mods::save_profile(&mut ctx.store, &game.domain, &name)?;
-            out.success(&format!("Saved profile '{name}' ({n} mods)."));
+            let ui = ctx.ui();
+            appmods::save_profile(&mut ctx.cx(&ui), &game, &name)?;
         }
         ProfileCmd::Load { name } => {
-            let r = mods::load_profile(&mut ctx.store, &game.domain, &name)?;
-            out.success(&format!("Loaded profile '{name}'."));
-            if r.missing > 0 {
-                out.warn(&format!(
-                    "{} mod(s) from the profile are no longer installed.",
-                    r.missing
-                ));
-            }
-            after_change(ctx, &game)?;
+            let ui = ctx.ui();
+            appmods::load_profile(&mut ctx.cx(&ui), &game, &name)?;
         }
         ProfileCmd::Delete { name } => {
             mods::delete_profile(&ctx.store, &game.domain, &name)?;
@@ -1063,15 +709,7 @@ pub fn profile(ctx: &mut Ctx, args: ProfileArgs) -> Result<()> {
 }
 
 /// First executable named `name` on `PATH`.
-pub fn which(name: &str) -> Option<std::path::PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
-    std::env::var_os("PATH").and_then(|p| {
-        std::env::split_paths(&p).map(|d| d.join(name)).find(|f| {
-            f.metadata()
-                .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-        })
-    })
-}
+pub use app::which;
 
 pub fn launch(ctx: &mut Ctx, _args: LaunchArgs) -> Result<()> {
     let game = ctx.need_game()?;
@@ -1089,16 +727,8 @@ pub fn launch(ctx: &mut Ctx, _args: LaunchArgs) -> Result<()> {
     if enabled && mods::changed_since(&ctx.store, &game.domain, st.last_deployed_at)? {
         out.warn("Mods changed since the last deploy.");
         if ctx.confirm("Deploy before launching?", true) {
-            let saved = ctx.game.replace(game.domain.clone());
-            let r = super::deploy::deploy(
-                ctx,
-                super::deploy::DeployArgs {
-                    dry_run: false,
-                    method: None,
-                },
-            );
-            ctx.game = saved;
-            r?;
+            let ui = ctx.ui();
+            app::deploy::run_deploy(&mut ctx.cx(&ui), &game, None, false)?;
         }
     }
     out.info(&format!("Launching {} (Steam app {appid})...", game.name));
@@ -1127,7 +757,7 @@ pub fn clean(ctx: &mut Ctx, _args: CleanArgs) -> Result<()> {
     let out = ctx.out;
     out.heading(&format!("Clean — {}", game.name));
     let cfg = Config::load(&ctx.store, &ctx.paths)?;
-    let lock = staging_lock(ctx)?;
+    let lock = staging_lock(&ctx.paths)?;
     let tmp = deploy::staging_root(&game, &cfg.data_dir).join(".tmp");
     let _ = std::fs::remove_dir_all(&tmp);
     let referenced: Vec<std::path::PathBuf> = mods::list_mods(ctx.store.conn(), &game.domain)?

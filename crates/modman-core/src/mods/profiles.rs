@@ -15,7 +15,7 @@ pub fn valid_profile_name(name: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ProfileSummary {
     pub name: String,
     pub mods: usize,
@@ -81,7 +81,7 @@ pub fn save_profile(store: &mut Store, game: &str, name: &str) -> Result<usize, 
     Ok(mods.len())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct ProfileLoad {
     /// Profile entries that are no longer installed.
     pub missing: usize,

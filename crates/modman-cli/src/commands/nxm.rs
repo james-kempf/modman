@@ -13,14 +13,12 @@ use std::sync::mpsc;
 
 use anyhow::{anyhow, bail, Result};
 use clap::Args;
-use modman_core::download::{self, DownloadStatus, NxmLink};
-use modman_core::games;
+use modman_core::app::nxm as app;
+use modman_core::download::NxmLink;
 use modman_core::ipc;
 
-use super::install::install_nexus;
 use super::mods::which;
 use crate::context::Ctx;
-use crate::nexus as nx;
 
 #[derive(Args, Debug)]
 pub struct NxmArgs {
@@ -291,18 +289,11 @@ fn forward_to_gui(url: &str) -> std::result::Result<(), String> {
 }
 
 fn handle(ctx: &mut Ctx, url: &str) -> Result<()> {
-    let link = match NxmLink::parse(url) {
-        Ok(l) => l,
-        Err(e) => {
-            notify("Unrecognised nxm link");
-            // The query may hold key/expires: never print it.
-            bail!(
-                "Unrecognised nxm link {}: {e}",
-                url.split('?').next().unwrap_or("")
-            );
-        }
-    };
-    tracing::info!("nxm link received: {}", link.redacted());
+    if let Err(e) = app::parse(url) {
+        notify("Unrecognised nxm link");
+        // The message never holds the query (key/expires).
+        return Err(e.into());
+    }
     match forward_to_gui(url) {
         Ok(()) => {
             ctx.out.success("Link handed to the running modman window.");
@@ -310,81 +301,41 @@ fn handle(ctx: &mut Ctx, url: &str) -> Result<()> {
         }
         Err(e) => tracing::debug!("no GUI to forward to: {e}"),
     }
-    let row = download::enqueue_nxm(&ctx.store, &link)?;
+    let accepted = app::accept(&ctx.store, url)?;
     let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
     if !interactive {
         // Background run: no prompts (optional mods default to none).
         ctx.yes = true;
     }
-    let m = match &link {
-        NxmLink::Collection {
-            game,
-            slug,
-            revision,
-        } => {
-            if !interactive {
-                notify(&format!("Installing collection {slug} ({game})…"));
-            }
-            let res = super::collection::install_link(ctx, game, slug, *revision, row);
-            if !interactive {
-                notify(&match &res {
-                    Ok(()) => {
-                        format!("Installed collection {slug}. Run 'modman deploy' to apply it.")
-                    }
-                    Err(_) => format!("Installing collection {slug} failed — see: modman log"),
-                });
-            }
-            return res;
-        }
-        NxmLink::Mod(m) => m.clone(),
+    let (start, ok, failed) = match &accepted.link {
+        NxmLink::Collection { game, slug, .. } => (
+            format!("Installing collection {slug} ({game})…"),
+            format!("Installed collection {slug}. Run 'modman deploy' to apply it."),
+            format!("Installing collection {slug} failed — see: modman log"),
+        ),
+        NxmLink::Mod(m) => (
+            format!("Installing mod {} ({})…", m.mod_id, m.game),
+            format!(
+                "Installed mod {}. Run 'modman deploy' to apply it.",
+                m.mod_id
+            ),
+            format!("Installing mod {} failed — see: modman log", m.mod_id),
+        ),
     };
     if !interactive {
-        notify(&format!("Installing mod {} ({})…", m.mod_id, m.game));
+        notify(&start);
     }
-    let res = (|| -> Result<bool> {
-        let game =
-            games::require_game(ctx.store.conn(), &m.game).map_err(crate::context::games_hint)?;
-        let nexus = nx::require(ctx)?;
-        let done = install_nexus(
-            ctx,
-            &nexus,
-            &game,
-            m.mod_id,
-            Some(m.file_id),
-            m.key.clone(),
-            None,
-            Some(row),
-        )?;
-        if done.is_some() {
-            super::install::after_change(ctx, &game)?;
-        }
-        Ok(done.is_some())
-    })();
-    match res {
-        Ok(installed) => {
-            if !interactive && installed {
-                notify(&format!(
-                    "Installed mod {}. Run 'modman deploy' to apply it.",
-                    m.mod_id
-                ));
-            }
-            Ok(())
-        }
-        Err(e) => {
-            let still_open = download::get(&ctx.store, row)
-                .is_ok_and(|d| !matches!(d.status, DownloadStatus::Done | DownloadStatus::Failed));
-            if still_open {
-                let _ = download::mark_failed(&ctx.store, row, &format!("{e:#}"));
-            }
-            if !interactive {
-                notify(&format!(
-                    "Installing mod {} failed — see: modman log",
-                    m.mod_id
-                ));
-            }
-            Err(e)
+    let ui = ctx.ui();
+    let res = app::process(&mut ctx.cx(&ui), &accepted);
+    if !interactive {
+        match &res {
+            // A collection link notifies on every outcome (legacy).
+            Ok(p) if p.installed || p.kind == "collection" => notify(&ok),
+            Ok(_) => {}
+            Err(_) => notify(&failed),
         }
     }
+    res.map(|_| ()).map_err(Into::into)
 }
 
 #[cfg(test)]

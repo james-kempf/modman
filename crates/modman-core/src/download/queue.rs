@@ -10,7 +10,8 @@ use super::{DownloadError, Fetched, NxmLink};
 use crate::nexus::NxmKey;
 use crate::store::{self, Store};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DownloadSource {
     Nxm,
     Nexus,
@@ -41,7 +42,8 @@ impl DownloadSource {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DownloadStatus {
     Queued,
     Downloading,
@@ -112,7 +114,7 @@ impl NewDownload {
 }
 
 /// One `downloads` row.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Download {
     pub id: i64,
     pub game: Option<String>,
@@ -122,6 +124,8 @@ pub struct Download {
     pub nexus_file_id: Option<u64>,
     pub collection_slug: Option<String>,
     pub collection_revision: Option<u64>,
+    /// Never serialized: holds the nxm `key`.
+    #[serde(skip)]
     pub nxm: Option<NxmKey>,
     pub file_name: Option<String>,
     pub dest_path: Option<String>,

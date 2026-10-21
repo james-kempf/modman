@@ -14,7 +14,7 @@ use crate::mods::{list_mods, remove_mods, ModRecord};
 use crate::store::{self, Store, StoreError};
 
 /// One installed collection.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct CollectionRecord {
     pub id: i64,
     pub game: String,
@@ -32,7 +32,7 @@ pub struct CollectionRecord {
 }
 
 /// [`list`] row.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct CollectionSummary {
     pub record: CollectionRecord,
     pub enabled: usize,
