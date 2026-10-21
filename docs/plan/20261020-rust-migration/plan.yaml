@@ -328,7 +328,7 @@ tasks:
     depends_on: [T08]
     agent: gem-implementer
     context_cluster: port-baseline
-    status: pending
+    status: completed  # ef60e01; all T10-1..12 fixed (T10-5 assigned to T07)
     retries_used: 0
     acceptance_criteria:
       - "Each high/critical T08 finding has a fix and a regression test that fails before and passes after."
