@@ -402,7 +402,7 @@ tasks:
     depends_on: [T09b]
     agent: gem-implementer
     context_cluster: port-baseline
-    status: pending
+    status: completed  # 0a4c235
     retries_used: 0
     acceptance_criteria:
       - "enable/disable tests write/remove unit files under temp XDG_CONFIG_HOME with OnUnitActiveSec from interval; systemctl behind a mockable runner."
