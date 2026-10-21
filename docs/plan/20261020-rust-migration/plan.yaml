@@ -1,5 +1,5 @@
 plan_id: 20261020-rust-migration
-status: in_progress
+status: completed
 tldr: |
   Rust rewrite of modman (M1-M7) in 11 waves; max 2 concurrent agents (orchestrator throttles waves with 3 tasks).
   W1 research (legacy audit + dependency spikes) -> GATE (libloot buildable?) -> W2 core foundation (deps, all migrations, errors, CLI skeleton)
@@ -551,13 +551,20 @@ tasks:
     agent: gem-implementer
     status: completed  # 4dda37c; vitest 110/110
 
+  - id: T17F
+    title: "Close T17 gate gaps (added by orchestrator)"
+    wave: 11
+    depends_on: [T17]
+    agent: gem-implementer
+    status: completed  # d7d14fd
+
   - id: T17
     title: "Parity and quality gate (sole checklist editor)"
     description: "Independent verification of the baseline: checklist coverage and update, workspace quality gates, CLI parity, bethesda end-to-end scenario, bundle build, T13R/T16 findings disposition, residual risks."
     wave: 11
     depends_on: [T13R, T15, T16]
     agent: gem-reviewer
-    status: pending
+    status: completed  # 989ecf2 (fail: G1,G2) -> T17F d7d14fd -> re-gate f96779e PASS
     retries_used: 0
     acceptance_criteria:
       - "feature_parity_checklist.md updated: every Port/Change/New row names its proving test (from implementer handoffs) or recorded verification; no Drop row implemented (grep evidence)."
