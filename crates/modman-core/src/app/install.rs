@@ -740,6 +740,30 @@ mod tests {
         }
     }
 
+    /// Catches: the `fomod` config key ignored when `--fomod` is absent
+    /// (legacy A2), or overriding an explicit flag.
+    #[test]
+    fn fomod_config_key_sets_install_mode_unless_flag_given() {
+        use crate::app::testing::Recorder;
+        use crate::config::{self, ConfigKey};
+        use crate::paths::Paths;
+        use crate::store::Store;
+        let home = tempfile::tempdir().unwrap();
+        let paths = Paths::for_home(home.path());
+        let mut store = Store::open_in_memory().unwrap();
+        let ui = Recorder::default();
+        let mode = |store: &mut Store, flag: Option<&str>| {
+            install_mode(&Cx::new(&paths, store, &ui), flag).unwrap()
+        };
+        assert_eq!(mode(&mut store, None), FomodMode::Auto);
+        for (value, want) in [("ask", FomodMode::Ask), ("default", FomodMode::Default)] {
+            config::set(&store, &paths, ConfigKey::Fomod, value).unwrap();
+            assert_eq!(mode(&mut store, None), want);
+        }
+        assert_eq!(mode(&mut store, Some("none")), FomodMode::None);
+        assert!(install_mode(&Cx::new(&paths, &mut store, &ui), Some("bogus")).is_err());
+    }
+
     #[test]
     fn file_rows_default_to_the_primary_file() {
         let files = [

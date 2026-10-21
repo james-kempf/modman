@@ -339,6 +339,29 @@ fn game_add_checks_domain_on_nexus_when_logged_in() {
 
 // ── nxm register / unregister / status ──────────────────────
 
+/// Catches: `nxm register --help` registering the handler (or unregister
+/// removing it) instead of printing help.
+#[test]
+fn nxm_subcommand_help_prints_help_and_changes_nothing() {
+    let env = Env::new();
+    let home = env.home();
+    let desktop = home.join(".local/share/applications/modman-nxm.desktop");
+    let mime = home.join(".config/mimeapps.list");
+    for sub in ["register", "status"] {
+        for flag in ["--help", "-h"] {
+            env.run(&["nxm", sub, flag])
+                .success()
+                .stdout(contains("Usage: modman nxm"));
+        }
+    }
+    assert!(!desktop.exists() && !mime.exists());
+    env.run(&["nxm", "register"]).success();
+    env.run(&["nxm", "unregister", "--help"])
+        .success()
+        .stdout(contains("Usage: modman nxm"));
+    assert!(desktop.exists());
+}
+
 #[test]
 fn nxm_register_writes_desktop_entry_and_mimeapps_then_unregister_removes_both() {
     let env = Env::new();

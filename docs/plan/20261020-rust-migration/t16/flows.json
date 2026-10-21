@@ -5,15 +5,18 @@
  },
  {
   "name": "K overview: Purge -> confirm dialog, focus on No, inert background",
-  "ok": false,
-  "error": "focus not restored to Purge after Esc, got BODY",
-  "focus": "button:overview"
+  "ok": true,
+  "info": [
+   "right",
+   "right",
+   "right"
+  ]
  },
  {
   "name": "K overview: Purge confirmed with Yes",
   "ok": true,
   "info": {
-   "focus": "BODY",
+   "focus": "button:Purge",
    "notices": []
   }
  },
@@ -21,7 +24,7 @@
   "name": "K overview: Deploy",
   "ok": true,
   "info": {
-   "focus": "BODY",
+   "focus": "button:Deploy",
    "notices": [
     "Deployed 20 files from 2 mods"
    ]
@@ -56,8 +59,6 @@
     "Profiles": true
    },
    "notices": [
-    "Deployed 20 files from 2 mods",
-    "Changes are not in the game yet.",
     "Changes are not in the game yet.",
     "Save profile: no mock for profile_save"
    ]
@@ -67,7 +68,6 @@
   "name": "K install: type target, Enter -> FOMOD wizard, choose 1K, Next, confirm Yes",
   "ok": true,
   "info": [
-   "Changes are not in the game yet.",
    "Save profile: no mock for profile_save",
    "Changes are not in the game yet.",
    "Installed Demo Mod 266 (3 files)"
@@ -77,21 +77,19 @@
   "name": "K install: Esc in FOMOD wizard cancels the job",
   "ok": true,
   "info": {
-   "f": "BODY",
+   "f": "input:Mod id, Nexus URL, collection URL or archive path",
    "notices": [
-    "Save profile: no mock for profile_save",
     "Changes are not in the game yet.",
     "Installed Demo Mod 266 (3 files)",
     "Install: cancelled"
    ],
-   "focus": "button:install"
+   "focus": "input:Mod id, Nexus URL, collection URL or archive path"
   }
  },
  {
   "name": "K install: nxm paste box + search",
   "ok": true,
   "info": [
-   "Changes are not in the game yet.",
    "Installed Demo Mod 266 (3 files)",
    "Install: cancelled",
    "Queued mod link nxm://skyrimspecialedition/mods/266/files/1"
@@ -103,7 +101,6 @@
   "info": {
    "dialog": null,
    "notices": [
-    "Installed Demo Mod 266 (3 files)",
     "Install: cancelled",
     "Queued mod link nxm://skyrimspecialedition/mods/266/files/1",
     "Look up: no mock for collection_info"
@@ -120,7 +117,6 @@
     "I have it"
    ],
    "notices": [
-    "Installed Demo Mod 266 (3 files)",
     "Install: cancelled",
     "Queued mod link nxm://skyrimspecialedition/mods/266/files/1",
     "Look up: no mock for collection_info"
@@ -133,7 +129,6 @@
   "info": {
    "afterDown": "button:Dismiss notice",
    "notices": [
-    "Installed Demo Mod 266 (3 files)",
     "Install: cancelled",
     "Queued mod link nxm://skyrimspecialedition/mods/266/files/1",
     "Look up: no mock for collection_info"
@@ -151,7 +146,7 @@
   "info": {
    "path": [
     "down",
-    "down"
+    "up"
    ],
    "state": "true"
   }
@@ -162,7 +157,6 @@
   "info": {
    "focus": "button:Save",
    "notices": [
-    "Queued mod link nxm://skyrimspecialedition/mods/266/files/1",
     "Look up: no mock for collection_info",
     "Signed in as demo (Premium); key stored in the keyring",
     "autoupdate-interval = 02"
@@ -180,15 +174,16 @@
  },
  {
   "name": "K settings (signed out): Auto-update toggle reachable by arrows",
-  "ok": false,
-  "error": "navTo: [role=switch] unreachable by key arrows from 6",
-  "focus": "input:Nexus API key"
+  "ok": true,
+  "info": [
+   "down",
+   "up"
+  ]
  },
  {
   "name": "K settings (signed out): Down from Keyboard button stays in content",
-  "ok": false,
-  "error": "Down from 'Keyboard' jumped to tab rail button:settings",
-  "focus": "button:settings"
+  "ok": true,
+  "info": "input:deploy-method hardlink, reflink, symlink, copy or auto"
  },
  {
   "name": "G rail: D-pad down/up + RB/LB",
@@ -208,8 +203,6 @@
   "ok": true,
   "info": [
    "Changes are not in the game yet.",
-   "Changes are not in the game yet.",
-   "Changes are not in the game yet.",
    "Installed Demo Mod 266 (3 files)"
   ]
  },
@@ -218,28 +211,25 @@
   "ok": true,
   "info": [
    "Changes are not in the game yet.",
-   "Changes are not in the game yet.",
-   "Installed Demo Mod 266 (3 files)",
    "Install: cancelled"
   ]
  },
  {
   "name": "G settings: A on API key opens OSK, type, Show/Hide masked, Done, Sign in",
-  "ok": false,
-  "error": "focus after OSK Done: BODY",
-  "focus": "button:settings"
+  "ok": true,
+  "info": {
+   "out": "••••▏",
+   "txt": "Nexus Mods accountChange keySign outSigned in as demo PremiumKey from keyring · 20000/day"
+  }
  },
  {
   "name": "G settings: Sign in after OSK (continues after focus recovery)",
-  "ok": false,
-  "error": "navTo: [data-goal] unreachable by pad arrows from 13",
-  "focus": "input:Nexus API key"
+  "ok": true,
+  "info": "already signed in"
  },
  {
   "name": "G settings: B on OSK cancels without typing",
-  "ok": false,
-  "error": "goal: nothing named Change key",
-  "focus": "input:Nexus API key"
+  "ok": true
  },
  {
   "name": "G logs",
@@ -254,27 +244,13 @@
   "name": "G settings (fresh): OSK entry, Done, Sign in, by pad only",
   "ok": true,
   "info": {
-   "focusAfterDone": "BODY",
+   "focusAfterDone": "input:Nexus API key",
    "keyCleared": true
   }
  },
  {
   "name": "focus lost to <body> after dialog/job",
-  "ok": false,
-  "info": [
-   "Overview: Purge confirm closed with Esc",
-   "Overview: Purge confirm answered Yes",
-   "Overview: Deploy job finished (button busy-disabled)",
-   "Install: confirm answered Yes (keyboard)",
-   "Install: FOMOD cancelled with Esc",
-   "Settings: Sign in via Enter (keyboard)",
-   "Settings: Auto-update toggle job finished",
-   "Install: OSK Done (gamepad)",
-   "Install: confirm answered A (gamepad)",
-   "Install: OSK Done (gamepad, 2nd)",
-   "Install: FOMOD cancelled with B",
-   "Settings: OSK Done (gamepad)",
-   "Settings (fresh): OSK Done (gamepad)"
-  ]
+  "ok": true,
+  "info": []
  }
 ]

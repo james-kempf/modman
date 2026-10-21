@@ -383,7 +383,7 @@ pub fn login_msgs(r: &LoginResult) -> Vec<Msg> {
     v.push(Msg::success("Authenticated as ").b(&r.user));
     if r.premium {
         v.push(Msg::success(
-            "Account tier: Premium — direct and parallel downloads available ✓",
+            "Account tier: Premium — direct downloads available ✓",
         ));
     } else {
         v.push(Msg::warn(

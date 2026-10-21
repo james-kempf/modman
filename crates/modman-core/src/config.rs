@@ -81,7 +81,7 @@ impl ConfigKey {
         match self {
             ConfigKey::DataDir => "where downloads and per-game data live",
             ConfigKey::DeployMethod => "auto|hardlink|reflink|symlink|copy",
-            ConfigKey::Jobs => "parallel downloads, Premium",
+            ConfigKey::Jobs => "reserved; downloads run one at a time",
             ConfigKey::Cdn => "preferred download server",
             ConfigKey::Adult => "show adult-only collections",
             ConfigKey::AutoDeploy => "deploy after every change",

@@ -56,6 +56,41 @@ impl PluginsFiles {
         self.game_data.join("plugins.txt.orig")
     }
 
+    /// Marker: plugins.txt did not exist before modman first wrote it.
+    pub fn absent_path(&self) -> PathBuf {
+        self.game_data.join("plugins.txt.absent")
+    }
+
+    /// Records the pre-deploy state once: a byte copy of the file, or the
+    /// absent marker. Later deploys see modman's own file and must not
+    /// record it as the original.
+    fn record_original(&self, raw: Option<&[u8]>) -> Result<(), LoadOrderError> {
+        let (orig, absent) = (self.orig_path(), self.absent_path());
+        if orig.exists() || absent.exists() {
+            return Ok(());
+        }
+        fs::create_dir_all(&self.game_data).map_err(io_err(&self.game_data))?;
+        match raw {
+            Some(raw) => fs::write(&orig, raw).map_err(io_err(&orig)),
+            None => fs::write(&absent, b"").map_err(io_err(&absent)),
+        }
+    }
+
+    /// Drops all bookkeeping after a purge. The managed list goes first: a
+    /// leftover backup makes the next purge redo the (idempotent) restore,
+    /// while a leftover managed list without the backup would rewrite the
+    /// restored file.
+    fn clear(&self) -> Result<(), LoadOrderError> {
+        for p in [self.managed_path(), self.absent_path(), self.orig_path()] {
+            match fs::remove_file(&p) {
+                Ok(()) => {}
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(io_err(&p)(e)),
+            }
+        }
+        Ok(())
+    }
+
     fn read_managed(&self) -> Result<Vec<String>, LoadOrderError> {
         let p = self.managed_path();
         match fs::read(&p) {
@@ -217,6 +252,11 @@ fn write_atomic(c: &Confined, full: &Path, lines: &[Vec<u8>]) -> Result<(), Load
         body.extend_from_slice(l);
         body.extend_from_slice(b"\r\n");
     }
+    write_bytes_atomic(c, full, &body)
+}
+
+/// [`write_atomic`] for exact bytes (restoring the pre-deploy original).
+fn write_bytes_atomic(c: &Confined, full: &Path, body: &[u8]) -> Result<(), LoadOrderError> {
     let name = c
         .path
         .file_name()
@@ -231,7 +271,7 @@ fn write_atomic(c: &Confined, full: &Path, lines: &[Vec<u8>]) -> Result<(), Load
         .custom_flags(libc_nofollow())
         .open(&tmp)
         .map_err(io_err(full))?;
-    f.write_all(&body).map_err(io_err(full))?;
+    f.write_all(body).map_err(io_err(full))?;
     f.sync_all().map_err(io_err(full))?;
     drop(f);
     fs::rename(&tmp, &c.path).map_err(io_err(full))
@@ -363,7 +403,8 @@ fn sort_added(
 /// enabled mods not listed yet (masters first, then LOOT/rules order) and
 /// records them in `plugins.managed`. User lines are kept verbatim; comment
 /// lines are replaced by modman's header (legacy L2081-2099). The original
-/// is copied to `plugins.txt.orig` once.
+/// is copied to `plugins.txt.orig` once (or `plugins.txt.absent` marks that
+/// there was none).
 ///
 /// Crash safety: `plugins.managed` lists old and new entries before the
 /// rename and only the new ones after, so an interruption never turns a
@@ -444,13 +485,7 @@ pub fn update_plugins(
         report.sorted_by = Some(how);
     }
 
-    if let Some(raw) = &raw {
-        let orig = files.orig_path();
-        if !orig.exists() {
-            fs::create_dir_all(&files.game_data).map_err(io_err(&files.game_data))?;
-            fs::write(&orig, raw).map_err(io_err(&orig))?;
-        }
-    }
+    files.record_original(raw.as_deref())?;
     let mut pending = old_managed.clone();
     pending.extend(added.iter().cloned());
     files.write_managed(&pending)?;
@@ -472,15 +507,32 @@ pub fn update_plugins(
     Ok(PluginStage::Updated(report))
 }
 
+/// Entry lines (comments and blank lines skipped), bytes as written.
+fn entries(raw: &[u8]) -> Vec<Vec<u8>> {
+    split_lines(raw)
+        .into_iter()
+        .filter(|l| is_entry(l))
+        .collect()
+}
+
 /// On purge: removes every line whose name is in `plugins.managed` (any
-/// `*`), keeps all other lines including comments, then empties
-/// `plugins.managed` (legacy L2103-2120).
+/// `*`; legacy L2103-2120). When the remaining entries equal those before
+/// the first deploy, the file is put back byte for byte: the backup is
+/// restored, or the file deleted when there was none. Otherwise the user
+/// changed it meanwhile and the rewrite (other lines kept) stays. The
+/// bookkeeping files are removed afterwards.
 pub fn remove_managed(
     game: &GameConfig,
     files: &PluginsFiles,
 ) -> Result<PluginStage, LoadOrderError> {
     let managed = files.read_managed()?;
-    if managed.is_empty() {
+    let orig = match fs::read(files.orig_path()) {
+        Ok(b) => Some(b),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+        Err(e) => return Err(io_err(&files.orig_path())(e)),
+    };
+    let absent = orig.is_none() && files.absent_path().exists();
+    if managed.is_empty() && orig.is_none() && !absent {
         let stage = if plugins_applies(game) {
             PluginStage::Updated(PluginsReport {
                 path: locate(game).map(|l| l.2).unwrap_or_default(),
@@ -526,10 +578,26 @@ pub fn remove_managed(
                 kept.push(line);
             }
         }
-        write_atomic(&c, &full, &kept)?;
-        report.written = true;
+        let left: Vec<Vec<u8>> = kept.iter().filter(|l| is_entry(l)).cloned().collect();
+        match &orig {
+            Some(o) if left == entries(o) => {
+                if raw != *o {
+                    write_bytes_atomic(&c, &full, o)?;
+                    report.written = true;
+                }
+            }
+            None if absent && left.is_empty() => {
+                // unlink never follows a symlink at the final name.
+                fs::remove_file(&c.path).map_err(io_err(&full))?;
+                report.written = true;
+            }
+            _ => {
+                write_atomic(&c, &full, &kept)?;
+                report.written = true;
+            }
+        }
     }
-    files.write_managed(&[])?;
+    files.clear()?;
     Ok(PluginStage::Updated(report))
 }
 

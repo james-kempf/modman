@@ -29,13 +29,29 @@ pub struct NxmArgs {
 }
 
 pub fn run(ctx: &mut Ctx, args: NxmArgs) -> Result<()> {
-    match args.args.first().map(String::as_str) {
+    let sub = args.args.first().map(String::as_str);
+    // Trailing args swallow `--help`; a subcommand must not run with it.
+    if matches!(sub, Some("register" | "unregister" | "status"))
+        && args.args[1..].iter().any(|a| a == "--help" || a == "-h")
+    {
+        return print_help();
+    }
+    match sub {
         None | Some("status") => status(ctx),
         Some("register") => register(ctx),
         Some("unregister") => unregister(ctx),
         Some(u) if u.get(..6).is_some_and(|p| p.eq_ignore_ascii_case("nxm://")) => handle(ctx, u),
         Some(_) => bail!("Usage: modman nxm register | unregister | status | <nxm://link>"),
     }
+}
+
+fn print_help() -> Result<()> {
+    use clap::CommandFactory;
+    match crate::cli::Cli::command().try_get_matches_from(["modman", "nxm", "--help"]) {
+        Err(e) => e.print()?,
+        Ok(_) => bail!("Usage: modman nxm register | unregister | status | <nxm://link>"),
+    }
+    Ok(())
 }
 
 fn xdg_dir(var: &str, home: &Path, default: &str) -> PathBuf {

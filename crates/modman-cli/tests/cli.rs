@@ -185,8 +185,21 @@ fn every_legacy_alias_resolves_to_its_command() {
     }
 }
 
+/// Catches: `deploy -n` rejected (legacy L1738-1747 accepts `-n|--dry-run`).
 #[test]
-fn later_milestone_commands_report_not_yet_implemented() {
+fn deploy_short_n_is_dry_run() {
+    let env = Env::new();
+    env.run(&["deploy", "--help"])
+        .success()
+        .stdout(contains("-n, --dry-run"));
+    // Parses: fails on the missing game, not on the flag.
+    env.run(&["deploy", "-n"])
+        .failure()
+        .stderr(contains("No game selected").and(contains("unexpected argument").not()));
+}
+
+#[test]
+fn former_stub_commands_are_implemented_and_bare_nxm_link_is_routed() {
     let env = Env::new();
     // Collections arrived with M5: list needs a game, not a milestone.
     env.run(&["collection", "list"])

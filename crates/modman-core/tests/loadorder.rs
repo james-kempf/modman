@@ -263,10 +263,80 @@ fn purge_removes_only_managed_entries() {
     ] {
         assert!(text.contains(keep), "{keep:?} missing in {text:?}");
     }
+    // User edits win over the backup: the rewrite stays, bookkeeping goes.
+    assert!(!fx.files().managed_path().exists());
+    assert!(!fx.files().orig_path().exists());
+}
+
+fn sha256(path: &Path) -> Vec<u8> {
+    use sha2::Digest;
+    sha2::Sha256::digest(std::fs::read(path).unwrap()).to_vec()
+}
+
+/// Catches: purge leaving modman's header rewrite behind (the prefix must
+/// be byte-identical to before the first deploy), or keeping bookkeeping.
+#[test]
+fn purge_restores_original_plugins_txt_byte_identical() {
+    let mut fx = Fx::sse();
+    let pf = fx.plugins_txt();
+    // LF endings, a comment and no final newline: all differ from a rewrite.
+    write(&pf, b"# user comment\n*User.esp\nDisabled.esp");
+    let before = sha256(&pf);
+    fx.add_mod("one", 0, &[("ModA.esp", esp(&["Skyrim.esm"]))]);
+    fx.deploy();
+    fx.deploy();
+    assert_ne!(sha256(&pf), before);
+
+    let r = fx.purge();
     assert_eq!(
-        std::fs::read_to_string(fx.files().managed_path()).unwrap(),
-        ""
+        match &r.plugins {
+            Some(PluginStage::Updated(rep)) => rep.removed.clone(),
+            other => panic!("{other:?}"),
+        },
+        ["ModA.esp"]
     );
+    assert_eq!(sha256(&pf), before);
+    assert!(!fx.files().orig_path().exists());
+    assert!(!fx.files().managed_path().exists());
+    assert!(!fx.files().absent_path().exists());
+}
+
+/// Catches: purge leaving a header-only plugins.txt that did not exist
+/// before the first deploy, or a redeploy backing up modman's own file as
+/// the "original".
+#[test]
+fn purge_deletes_plugins_txt_modman_created() {
+    let mut fx = Fx::sse();
+    let pf = fx.plugins_txt();
+    fx.add_mod("one", 0, &[("ModA.esp", esp(&["Skyrim.esm"]))]);
+    fx.deploy();
+    assert!(pf.exists());
+    fx.deploy();
+    assert!(!fx.files().orig_path().exists());
+
+    fx.purge();
+    assert!(std::fs::symlink_metadata(&pf).is_err(), "plugins.txt left");
+    assert!(!fx.files().managed_path().exists());
+    assert!(!fx.files().absent_path().exists());
+}
+
+/// Catches: deleting a plugins.txt the user added entries to after modman
+/// created it.
+#[test]
+fn purge_keeps_user_entries_in_modman_created_plugins_txt() {
+    let mut fx = Fx::sse();
+    let pf = fx.plugins_txt();
+    fx.add_mod("one", 0, &[("ModA.esp", esp(&["Skyrim.esm"]))]);
+    fx.deploy();
+    let mut t = std::fs::read(&pf).unwrap();
+    t.extend_from_slice(b"*Later.esp\r\n");
+    write(&pf, &t);
+
+    fx.purge();
+    let text = std::fs::read_to_string(&pf).unwrap();
+    assert!(text.contains("*Later.esp\r\n"), "{text:?}");
+    assert!(!text.contains("ModA.esp"));
+    assert!(!fx.files().absent_path().exists());
 }
 
 /// Catches: LOOT not consulted (mod priority order kept), or masters placed

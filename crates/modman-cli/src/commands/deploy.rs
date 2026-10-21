@@ -13,7 +13,7 @@ use crate::context::Ctx;
 #[derive(Args, Debug)]
 pub struct DeployArgs {
     /// Show what would be deployed and backed up; change nothing.
-    #[arg(long)]
+    #[arg(short = 'n', long)]
     pub dry_run: bool,
     /// Deploy method for this run: auto, hardlink, reflink, symlink or copy.
     #[arg(long, value_name = "METHOD")]
