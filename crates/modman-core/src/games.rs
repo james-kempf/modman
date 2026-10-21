@@ -239,8 +239,30 @@ pub fn list_games(conn: &Connection) -> Result<Vec<GameConfig>, GamesError> {
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-/// Inserts or replaces a game row (dependent rows are kept).
+/// Checks the game-relative folders (`subdir`, `paks_dir`): they are
+/// joined onto the game folder, so `..` or an absolute path would point
+/// deploys and probes outside it.
+pub fn check_game_dirs(g: &GameConfig) -> Result<(), GamesError> {
+    let dirs = [
+        (GameSetting::Subdir, Some(g.subdir.as_str())),
+        (GameSetting::PaksDir, g.paks_dir.as_deref()),
+    ];
+    for (key, value) in dirs {
+        if let Some(v) = value {
+            crate::deploy::check_rel_dir(v).map_err(|m| GamesError::InvalidValue {
+                key: key.name(),
+                value: v.to_string(),
+                expected: format!("a relative folder ({m})"),
+            })?;
+        }
+    }
+    Ok(())
+}
+
+/// Inserts or replaces a game row (dependent rows are kept). Refuses
+/// folders that fail [`check_game_dirs`].
 pub fn save_game(conn: &Connection, g: &GameConfig) -> Result<(), GamesError> {
+    check_game_dirs(g)?;
     conn.execute(
         &format!(
             "INSERT INTO games ({GAME_COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
@@ -508,6 +530,27 @@ pub fn apply_steam_app(g: &mut GameConfig, app: &steam::SteamApp) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn save_game_refuses_folders_outside_the_game() {
+        let store = Store::open_in_memory().unwrap();
+        for bad in ["../../x", "/etc", "Data/../../x"] {
+            let mut g = GameConfig::custom("foo");
+            g.subdir = bad.into();
+            let e = save_game(store.conn(), &g).unwrap_err();
+            assert!(
+                matches!(e, GamesError::InvalidValue { key: "subdir", .. }),
+                "{bad}: {e}"
+            );
+            let mut g = GameConfig::custom("foo");
+            g.paks_dir = Some(bad.into());
+            assert!(save_game(store.conn(), &g).is_err(), "paks {bad}");
+        }
+        assert!(get_game(store.conn(), "foo").unwrap().is_none());
+        let mut g = GameConfig::custom("foo");
+        g.subdir = "./Data/".into();
+        save_game(store.conn(), &g).unwrap();
+    }
 
     fn store_with(domain: &str) -> Store {
         let store = Store::open_in_memory().unwrap();

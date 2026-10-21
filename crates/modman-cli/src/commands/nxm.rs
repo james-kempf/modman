@@ -13,6 +13,7 @@ use std::sync::mpsc;
 
 use anyhow::{anyhow, bail, Result};
 use clap::Args;
+use modman_core::app::actions;
 use modman_core::app::nxm as app;
 use modman_core::download::NxmLink;
 use modman_core::ipc;
@@ -132,7 +133,28 @@ fn default_handler(text: &str) -> Option<String> {
     None
 }
 
+/// `path`, or the file a symlink at `path` points to (so writing keeps a
+/// dotfiles-managed link intact).
+fn link_target(path: &Path) -> PathBuf {
+    let mut p = path.to_path_buf();
+    // Bounded: a symlink loop leaves the last link in place.
+    for _ in 0..40 {
+        match std::fs::read_link(&p) {
+            Ok(t) => {
+                p = match p.parent() {
+                    Some(dir) if t.is_relative() => dir.join(t),
+                    _ => t,
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    p
+}
+
+/// Atomic replace of the file `path` names, through symlinks.
 fn write_atomic(path: &Path, text: &str) -> Result<()> {
+    let path = &link_target(path);
     let dir = path
         .parent()
         .ok_or_else(|| anyhow!("{} has no parent", path.display()))?;
@@ -153,12 +175,13 @@ fn refresh_desktop_db(dir: &Path) {
     }
 }
 
-/// `$APPIMAGE` under AppImage (current_exe points into a temporary mount).
+/// `$APPIMAGE` when this process runs from the AppImage mount
+/// (current_exe points into a temporary mount), else this binary.
 fn program_path() -> Result<String> {
-    if let Some(a) = std::env::var_os("APPIMAGE").filter(|a| !a.is_empty()) {
-        return Ok(PathBuf::from(a).display().to_string());
-    }
     let exe = std::env::current_exe()?;
+    if let Some(a) = actions::running_appimage(&exe) {
+        return Ok(a.display().to_string());
+    }
     let exe = exe.canonicalize().unwrap_or(exe);
     exe.to_str()
         .map(str::to_string)
@@ -372,6 +395,25 @@ mod tests {
             "modman-nxm.desktop",
         );
         assert_eq!(t, "[D]\nb=other.desktop;\nc=x;\n");
+    }
+
+    #[test]
+    fn writing_through_a_symlinked_mimeapps_keeps_the_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("dotfiles/mimeapps.list");
+        std::fs::create_dir_all(real.parent().unwrap()).unwrap();
+        std::fs::write(&real, "[Default Applications]\n").unwrap();
+        let link = dir.path().join("mimeapps.list");
+        std::os::unix::fs::symlink("dotfiles/mimeapps.list", &link).unwrap();
+        write_atomic(&link, "new\n").unwrap();
+        assert!(std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), "new\n");
+        let plain = dir.path().join("plain.list");
+        write_atomic(&plain, "x\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&plain).unwrap(), "x\n");
     }
 
     #[test]

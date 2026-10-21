@@ -35,14 +35,34 @@ pub fn accept(store: &Store, url: &str) -> R<Accepted> {
     Ok(Accepted { link, row })
 }
 
+/// Longest part of a rejected link echoed back.
+const ECHO_CHARS: usize = 200;
+
+/// A rejected link for a message: no query, control characters escaped,
+/// at most [`ECHO_CHARS`] characters.
+fn echo(url: &str) -> String {
+    let url = redact_url(url.trim());
+    let mut out: String = url
+        .chars()
+        .take(ECHO_CHARS)
+        .flat_map(|c| -> Box<dyn Iterator<Item = char>> {
+            if c.is_control() {
+                Box::new(c.escape_default())
+            } else {
+                Box::new(std::iter::once(c))
+            }
+        })
+        .collect();
+    if url.chars().nth(ECHO_CHARS).is_some() {
+        out.push('…');
+    }
+    out
+}
+
 /// [`NxmLink::parse`] with a message that never echoes the query.
 pub fn parse(url: &str) -> R<NxmLink> {
-    NxmLink::parse(url).map_err(|e| {
-        AppError::Msg(format!(
-            "Unrecognised nxm link {}: {e}",
-            redact_url(url.trim())
-        ))
-    })
+    NxmLink::parse(url)
+        .map_err(|e| AppError::Msg(format!("Unrecognised nxm link {}: {e}", echo(url))))
 }
 
 /// What processing a link did.
@@ -178,6 +198,19 @@ mod tests {
             assert!(!e.contains("SECRET"), "{e}");
         }
         assert_eq!(rows(&store), 0);
+    }
+
+    #[test]
+    fn rejections_echo_a_short_escaped_link() {
+        let long = format!("nxm://x/{}", "a".repeat(5000));
+        let e = parse(&long).unwrap_err().to_string();
+        assert!(e.len() < 400 && e.contains('…'), "{e}");
+        let e = parse("nxm://x/\u{1b}[31mred\nnext\u{7}?key=SECRET")
+            .unwrap_err()
+            .to_string();
+        assert!(!e.chars().any(|c| c.is_control()), "{e:?}");
+        assert!(e.contains("\\u{1b}[31mred\\nnext"), "{e}");
+        assert!(!e.contains("SECRET"));
     }
 
     #[test]

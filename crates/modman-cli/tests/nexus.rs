@@ -398,21 +398,37 @@ fn nxm_register_writes_desktop_entry_and_mimeapps_then_unregister_removes_both()
         .stderr(contains("Usage: modman nxm"));
 }
 
-#[test]
-fn nxm_register_uses_appimage_path() {
+fn registered_entry(appdir: &str) -> String {
     let mut env = Env::new();
     env.extra_env
         .push(("APPIMAGE".into(), "/opt/My Apps/modman.AppImage".into()));
+    env.extra_env.push(("APPDIR".into(), appdir.into()));
     env.run(&["nxm", "register"]).success();
-    let text = std::fs::read_to_string(
+    std::fs::read_to_string(
         env.home()
             .join(".local/share/applications/modman-nxm.desktop"),
     )
-    .unwrap();
+    .unwrap()
+}
+
+#[test]
+fn nxm_register_uses_appimage_path() {
+    // The CLI runs from the AppImage mount ($APPDIR holds the binary).
+    let appdir = std::path::Path::new(env!("CARGO_BIN_EXE_modman"))
+        .parent()
+        .unwrap();
+    let text = registered_entry(&appdir.to_string_lossy());
     assert!(
         text.contains("\nExec=\"/opt/My Apps/modman.AppImage\" nxm %u\n"),
         "{text}"
     );
+}
+
+#[test]
+fn nxm_register_ignores_an_inherited_appimage_variable() {
+    let text = registered_entry("/tmp/.mount_elsewhere");
+    assert!(!text.contains("AppImage"), "{text}");
+    assert!(text.contains("modman\" nxm %u\n"), "{text}");
 }
 
 // ── nxm <url> ───────────────────────────────────────────────

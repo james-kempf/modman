@@ -120,15 +120,61 @@ impl Actions for AppActions<'_, '_> {
     }
 }
 
-/// The program the timer runs: `$APPIMAGE` when running from an AppImage,
-/// else `program` (the CLI binary).
-pub fn timer_exec(program: &Path) -> PathBuf {
-    match std::env::var_os("APPIMAGE").filter(|v| !v.is_empty()) {
-        Some(p) => PathBuf::from(p),
-        None => program
-            .canonicalize()
-            .unwrap_or_else(|_| program.to_path_buf()),
+fn canonical(p: &Path) -> PathBuf {
+    p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
+}
+
+fn env_path(var: &str) -> Option<PathBuf> {
+    std::env::var_os(var)
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+}
+
+/// `appimage` when `exe` really runs from that AppImage's mount (`appdir`);
+/// an inherited `$APPIMAGE` alone (e.g. a terminal opened from the app)
+/// does not count.
+pub fn appimage_of(exe: &Path, appimage: Option<&Path>, appdir: Option<&Path>) -> Option<PathBuf> {
+    let (image, dir) = (appimage?, appdir?);
+    canonical(exe)
+        .starts_with(canonical(dir))
+        .then(|| image.to_path_buf())
+}
+
+/// [`appimage_of`] for this process (`$APPIMAGE`, `$APPDIR`).
+pub fn running_appimage(exe: &Path) -> Option<PathBuf> {
+    appimage_of(
+        exe,
+        env_path("APPIMAGE").as_deref(),
+        env_path("APPDIR").as_deref(),
+    )
+}
+
+/// The program the timer runs, which must be the CLI: `$APPIMAGE` only
+/// when `program` is this very process (the CLI) running from the
+/// AppImage, else `program` (the resolved CLI binary).
+pub fn timer_exec_for(
+    program: &Path,
+    exe: &Path,
+    appimage: Option<&Path>,
+    appdir: Option<&Path>,
+) -> PathBuf {
+    let program = canonical(program);
+    let is_self = program == canonical(exe);
+    match appimage_of(exe, appimage, appdir) {
+        Some(image) if is_self => image,
+        _ => program,
     }
+}
+
+/// [`timer_exec_for`] for this process.
+pub fn timer_exec(program: &Path) -> PathBuf {
+    let exe = std::env::current_exe().unwrap_or_else(|_| program.to_path_buf());
+    timer_exec_for(
+        program,
+        &exe,
+        env_path("APPIMAGE").as_deref(),
+        env_path("APPDIR").as_deref(),
+    )
 }
 
 /// The `modman` CLI next to `gui_exe`, else on `PATH` (the GUI enables the
@@ -218,5 +264,43 @@ mod tests {
         std::fs::write(&cli, "").unwrap();
         let found = cli_binary(&dir.path().join("modman-desktop")).unwrap();
         assert_eq!(found, cli);
+    }
+
+    #[test]
+    fn the_gui_in_an_appimage_schedules_the_cli_not_the_image() {
+        let mount = tempfile::tempdir().unwrap();
+        let bin = mount.path().join("usr/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let (gui, cli) = (bin.join("modman-desktop"), bin.join("modman"));
+        std::fs::write(&gui, "").unwrap();
+        std::fs::write(&cli, "").unwrap();
+        let image = Path::new("/home/u/Apps/modman.AppImage");
+        let exec = timer_exec_for(&cli, &gui, Some(image), Some(mount.path()));
+        assert_eq!(exec, cli.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn the_cli_in_an_appimage_schedules_the_image() {
+        let mount = tempfile::tempdir().unwrap();
+        let cli = mount.path().join("modman");
+        std::fs::write(&cli, "").unwrap();
+        let image = Path::new("/home/u/Apps/modman.AppImage");
+        let exec = timer_exec_for(&cli, &cli, Some(image), Some(mount.path()));
+        assert_eq!(exec, image);
+    }
+
+    #[test]
+    fn an_inherited_appimage_variable_is_ignored() {
+        let (mount, elsewhere) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let cli = elsewhere.path().join("modman");
+        std::fs::write(&cli, "").unwrap();
+        let image = Path::new("/home/u/Apps/modman.AppImage");
+        let canon = cli.canonicalize().unwrap();
+        assert_eq!(
+            timer_exec_for(&cli, &cli, Some(image), Some(mount.path())),
+            canon
+        );
+        assert_eq!(timer_exec_for(&cli, &cli, Some(image), None), canon);
+        assert_eq!(appimage_of(&cli, Some(image), Some(mount.path())), None);
     }
 }

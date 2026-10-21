@@ -62,19 +62,45 @@ fn enable_status_disable_manage_user_timer_units() {
         .stdout(contains("was not enabled"));
 }
 
-#[test]
-fn appimage_path_is_used_for_exec_start() {
-    let mut env = env();
-    env.extra_env
-        .push(("APPIMAGE".into(), "/opt/apps/modman.AppImage".into()));
+fn service_after_enable(env: &Env) -> String {
     env.run(&["autoupdate", "enable"]).success();
-    let service = std::fs::read_to_string(
+    std::fs::read_to_string(
         env.home()
             .join(".config/systemd/user/modman-autoupdate.service"),
     )
-    .unwrap();
+    .unwrap()
+}
+
+#[test]
+fn appimage_path_is_used_for_exec_start() {
+    let mut env = env();
+    // The CLI runs from the AppImage mount ($APPDIR holds the binary).
+    let appdir = std::path::Path::new(env!("CARGO_BIN_EXE_modman"))
+        .parent()
+        .unwrap();
+    env.extra_env
+        .push(("APPIMAGE".into(), "/opt/apps/modman.AppImage".into()));
+    env.extra_env
+        .push(("APPDIR".into(), appdir.to_string_lossy().into_owned()));
+    let service = service_after_enable(&env);
     assert!(
-        service.contains("ExecStart=\"/opt/apps/modman.AppImage\" --no-color -y autoupdate run")
+        service.contains("ExecStart=\"/opt/apps/modman.AppImage\" --no-color -y autoupdate run"),
+        "{service}"
+    );
+}
+
+#[test]
+fn an_inherited_appimage_variable_does_not_replace_the_cli() {
+    let mut env = env();
+    env.extra_env
+        .push(("APPIMAGE".into(), "/opt/apps/modman.AppImage".into()));
+    env.extra_env
+        .push(("APPDIR".into(), "/tmp/.mount_elsewhere".into()));
+    let service = service_after_enable(&env);
+    assert!(!service.contains("AppImage"), "{service}");
+    assert!(
+        service.contains("modman\" --no-color -y autoupdate run"),
+        "{service}"
     );
 }
 

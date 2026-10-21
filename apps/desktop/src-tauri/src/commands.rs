@@ -112,12 +112,14 @@ pub struct ReadyInfo {
 
 /// Call once the event listeners are registered: returns the start-up
 /// auto-update check and starts processing queued nxm links (they may
-/// raise prompts).
+/// raise prompts). Prompts still open (the webview was reloaded) are
+/// emitted again.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn app_ready(app: AppHandle, state: St<'_>) -> CmdResult<ReadyInfo> {
     let (inner, sink) = (state.0.clone(), sink(&app));
     blocking(move || {
         let check = crate::startup::startup_check(&inner, &LiveHost::new(&inner.paths.home));
+        inner.prompts.reemit(&*sink);
         let queued = inner.mark_ready(sink)?;
         Ok(ReadyInfo {
             startup_check: check,

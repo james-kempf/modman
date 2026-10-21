@@ -5,6 +5,7 @@
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use md5::Md5;
@@ -61,11 +62,41 @@ pub struct Fetched {
 
 const PROGRESS_STEP: u64 = 256 * 1024;
 
-#[derive(Debug, Clone)]
+/// Decides whether a redirect target URL may be followed.
+pub type RedirectCheck = Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
+/// Redirect hops followed at most (reqwest's default).
+const MAX_REDIRECTS: usize = 10;
+
+#[derive(Clone)]
 pub struct Fetcher {
     http: reqwest::Client,
     attempts: u32,
     retry_step: Duration,
+    max_bytes: Option<u64>,
+}
+
+impl std::fmt::Debug for Fetcher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Fetcher")
+            .field("attempts", &self.attempts)
+            .field("retry_step", &self.retry_step)
+            .field("max_bytes", &self.max_bytes)
+            .finish_non_exhaustive()
+    }
+}
+
+fn too_large(max: u64) -> DownloadError {
+    DownloadError::Network(format!("the file is larger than the {max}-byte limit"))
+}
+
+fn client(redirect: reqwest::redirect::Policy) -> Result<reqwest::Client, DownloadError> {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(30))
+        .read_timeout(Duration::from_secs(60))
+        .redirect(redirect)
+        .build()
+        .map_err(|e| DownloadError::Network(net(e)))
 }
 
 fn net(e: reqwest::Error) -> String {
@@ -165,16 +196,36 @@ fn disposition_name(v: &str) -> Option<String> {
 impl Fetcher {
     pub fn new() -> Result<Self, DownloadError> {
         install_crypto_provider();
-        let http = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(30))
-            .read_timeout(Duration::from_secs(60))
-            .build()
-            .map_err(|e| DownloadError::Network(net(e)))?;
         Ok(Self {
-            http,
+            http: client(reqwest::redirect::Policy::limited(MAX_REDIRECTS))?,
             attempts: 3,
             retry_step: Duration::from_secs(2),
+            max_bytes: None,
         })
+    }
+
+    /// Refuses bodies larger than `max` bytes: an announced length is
+    /// checked first, and a stream that grows past it is aborted and its
+    /// `.part` deleted.
+    pub fn with_max_bytes(mut self, max: u64) -> Self {
+        self.max_bytes = Some(max);
+        self
+    }
+
+    /// Follows a redirect only when `allow` accepts its target URL (each
+    /// hop is checked); a refused hop fails the download.
+    pub fn with_redirect_check(mut self, allow: RedirectCheck) -> Result<Self, DownloadError> {
+        let policy = reqwest::redirect::Policy::custom(move |a| {
+            if a.previous().len() >= MAX_REDIRECTS {
+                a.error("too many redirects")
+            } else if allow(a.url().as_str()) {
+                a.follow()
+            } else {
+                a.error("redirect target not allowed")
+            }
+        });
+        self.http = client(policy)?;
+        Ok(self)
     }
 
     /// Attempts per download and the back-off step (waits `step * attempt`).
@@ -281,10 +332,14 @@ impl Fetcher {
         if have > 0 {
             rq = rq.header(RANGE, format!("bytes={have}-"));
         }
-        let resp = rq
-            .send()
-            .await
-            .map_err(|e| Attempt::Retry(DownloadError::Network(net(e))))?;
+        let resp = rq.send().await.map_err(|e| {
+            if e.is_redirect() {
+                // The URL may carry signed parameters: never echo it.
+                Attempt::Fatal(DownloadError::BadUrl("redirect refused".into()))
+            } else {
+                Attempt::Retry(DownloadError::Network(net(e)))
+            }
+        })?;
         let status = resp.status();
         if status == StatusCode::RANGE_NOT_SATISFIABLE && have > 0 {
             // The part is complete or garbage. A checksum (verify) or the
@@ -339,6 +394,12 @@ impl Fetcher {
             // 200: the server ignored Range; restart from zero.
             (0, resp.content_length())
         };
+        if let (Some(max), Some(t)) = (self.max_bytes, total) {
+            if t > max {
+                let _ = tokio::fs::remove_file(part).await;
+                return Err(Attempt::Fatal(too_large(max)));
+            }
+        }
         let mut file = tokio::fs::OpenOptions::new()
             .create(true)
             .write(true)
@@ -354,13 +415,19 @@ impl Fetcher {
         let mut done = start;
         let mut last_emit = done;
         let mut resp = resp;
+        let mut oversize = false;
         let result = loop {
             match resp.chunk().await {
                 Ok(Some(bytes)) => {
+                    let next = done + bytes.len() as u64;
+                    if let Some(max) = self.max_bytes.filter(|m| next > *m) {
+                        oversize = true;
+                        break Err(Attempt::Fatal(too_large(max)));
+                    }
                     if let Err(e) = file.write_all(&bytes).await {
                         break Err(Attempt::Fatal(DownloadError::io(part)(e)));
                     }
-                    done += bytes.len() as u64;
+                    done = next;
                     if done - last_emit >= PROGRESS_STEP {
                         last_emit = done;
                         emit(DownloadEvent::Progress { done, total });
@@ -377,6 +444,9 @@ impl Fetcher {
             .await
             .map_err(|e| Attempt::Fatal(DownloadError::io(part)(e)))?;
         drop(file);
+        if oversize {
+            let _ = tokio::fs::remove_file(part).await;
+        }
         if done != last_emit {
             emit(DownloadEvent::Progress { done, total });
         }
@@ -437,6 +507,121 @@ enum Attempt {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::AsyncReadExt;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn req<'a>(url: &'a str, dest: &'a Path) -> FetchRequest<'a> {
+        FetchRequest {
+            url,
+            dest,
+            md5: None,
+            sha256: None,
+            events: None,
+        }
+    }
+
+    /// Streams `chunks` x 64 KiB without a Content-Length.
+    async fn unbounded_server(chunks: usize) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = sock.read(&mut buf).await;
+            let _ = sock
+                .write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n")
+                .await;
+            let chunk = vec![7u8; 64 * 1024];
+            for _ in 0..chunks {
+                if sock.write_all(&chunk).await.is_err() {
+                    return;
+                }
+            }
+        });
+        format!("http://{addr}/big")
+    }
+
+    #[tokio::test]
+    async fn an_oversize_stream_is_aborted_and_its_part_deleted() {
+        let url = unbounded_server(64).await;
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("f");
+        let f = Fetcher::new()
+            .unwrap()
+            .with_retry(3, Duration::ZERO)
+            .with_max_bytes(100_000);
+        let e = f.fetch(req(&url, &dest)).await.unwrap_err();
+        assert!(e.to_string().contains("100000-byte limit"), "{e}");
+        assert!(!Fetcher::part_path(&dest).exists());
+        assert!(!dest.exists());
+    }
+
+    #[tokio::test]
+    async fn an_announced_oversize_body_is_refused_before_download() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![1u8; 2048]))
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("f");
+        let f = Fetcher::new().unwrap().with_max_bytes(1024);
+        let url = format!("{}/x", server.uri());
+        let e = f.fetch(req(&url, &dest)).await.unwrap_err();
+        assert!(e.to_string().contains("limit"), "{e}");
+        assert!(!Fetcher::part_path(&dest).exists());
+        // Fatal: no retry.
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+        // Within the limit it still works.
+        let ok = Fetcher::new().unwrap().with_max_bytes(2048);
+        assert_eq!(ok.fetch(req(&url, &dest)).await.unwrap().size, 2048);
+    }
+
+    #[tokio::test]
+    async fn a_redirect_to_a_refused_host_is_not_followed() {
+        let (good, evil) = (MockServer::start().await, MockServer::start().await);
+        Mock::given(path("/evil"))
+            .respond_with(
+                ResponseTemplate::new(302).insert_header("Location", format!("{}/x", evil.uri())),
+            )
+            .mount(&good)
+            .await;
+        Mock::given(path("/ok"))
+            .respond_with(
+                ResponseTemplate::new(302).insert_header("Location", format!("{}/x", good.uri())),
+            )
+            .mount(&good)
+            .await;
+        Mock::given(path("/x"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"data".to_vec()))
+            .mount(&good)
+            .await;
+        Mock::given(path("/x"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"evil".to_vec()))
+            .mount(&evil)
+            .await;
+        let prefix = format!("{}/", good.uri());
+        let f = Fetcher::new()
+            .unwrap()
+            .with_retry(3, Duration::ZERO)
+            .with_redirect_check(Arc::new(move |u: &str| u.starts_with(&prefix)))
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("f");
+        let e = f
+            .fetch(req(&format!("{}/evil", good.uri()), &dest))
+            .await
+            .unwrap_err();
+        assert!(matches!(e, DownloadError::BadUrl(_)), "{e}");
+        assert!(evil.received_requests().await.unwrap().is_empty());
+        assert!(!dest.exists());
+        let ok = f
+            .fetch(req(&format!("{}/ok", good.uri()), &dest))
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(ok.path).unwrap(), b"data");
+    }
 
     #[test]
     fn names_from_uri() {

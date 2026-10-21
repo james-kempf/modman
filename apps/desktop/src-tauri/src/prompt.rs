@@ -2,7 +2,8 @@
 //! Blocking question/answer bridge between a job thread and the webview.
 //! The job emits a [`events::PROMPT`] event and waits; the webview replies
 //! with the `prompt_answer` command. Closing the window cancels every
-//! pending prompt so no job thread waits forever.
+//! pending prompt so no job thread waits forever. A reloaded webview gets
+//! the open questions again from [`Prompts::reemit`] (on `app_ready`).
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -95,11 +96,16 @@ pub struct PromptEvent {
     pub prompt: PromptKind,
 }
 
+struct Pending {
+    tx: Sender<Answer>,
+    event: PromptEvent,
+}
+
 /// Pending prompts by id.
 #[derive(Default)]
 pub struct Prompts {
     next: AtomicU64,
-    pending: Mutex<HashMap<u64, Sender<Answer>>>,
+    pending: Mutex<HashMap<u64, Pending>>,
     closed: AtomicBool,
 }
 
@@ -112,8 +118,15 @@ impl Prompts {
         }
         let id = self.next.fetch_add(1, Ordering::SeqCst) + 1;
         let (tx, rx) = channel();
-        self.lock().insert(id, tx);
-        events::emit(sink, events::PROMPT, &PromptEvent { id, job, prompt });
+        let event = PromptEvent { id, job, prompt };
+        self.lock().insert(
+            id,
+            Pending {
+                tx,
+                event: event.clone(),
+            },
+        );
+        events::emit(sink, events::PROMPT, &event);
         let answer = rx.recv().ok();
         if self.lock().remove(&id).is_some() || answer.is_none() {
             events::emit(sink, events::PROMPT_CLOSED, &events::PromptClosed { id });
@@ -124,7 +137,7 @@ impl Prompts {
     /// Delivers an answer; `false` when no prompt `id` is waiting.
     pub fn answer(&self, id: u64, answer: Answer) -> bool {
         match self.lock().remove(&id) {
-            Some(tx) => tx.send(answer).is_ok(),
+            Some(p) => p.tx.send(answer).is_ok(),
             None => false,
         }
     }
@@ -139,7 +152,18 @@ impl Prompts {
         self.lock().len()
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<u64, Sender<Answer>>> {
+    /// Emits every still-open prompt again, oldest first (the webview was
+    /// reloaded and lost them). Returns how many.
+    pub fn reemit(&self, sink: &dyn Sink) -> usize {
+        let mut open: Vec<PromptEvent> = self.lock().values().map(|p| p.event.clone()).collect();
+        open.sort_by_key(|e| e.id);
+        for e in &open {
+            events::emit(sink, events::PROMPT, e);
+        }
+        open.len()
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<u64, Pending>> {
         self.pending.lock().unwrap_or_else(|p| p.into_inner())
     }
 }
@@ -215,6 +239,32 @@ mod tests {
             },
         );
         assert_eq!(r, None);
+    }
+
+    #[test]
+    fn open_prompts_are_emitted_again_after_a_reload() {
+        let p = Arc::new(Prompts::default());
+        let sink = Arc::new(Recorder::default());
+        let (p2, s2) = (p.clone(), sink.clone());
+        let t = std::thread::spawn(move || {
+            p2.ask(
+                &*s2,
+                Some(3),
+                PromptKind::Text {
+                    question: "Folder?".into(),
+                    default: ".".into(),
+                },
+            )
+        });
+        wait_for_prompt(&p);
+        let reloaded = Recorder::default();
+        assert_eq!(p.reemit(&reloaded), 1);
+        let ev = &reloaded.named(events::PROMPT)[0];
+        assert_eq!(ev, &sink.named(events::PROMPT)[0]);
+        let id = ev["id"].as_u64().unwrap();
+        assert!(p.answer(id, Answer::Text { value: "x".into() }));
+        assert_eq!(t.join().unwrap(), Some(Answer::Text { value: "x".into() }));
+        assert_eq!(p.reemit(&reloaded), 0);
     }
 
     #[test]

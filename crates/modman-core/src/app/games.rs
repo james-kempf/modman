@@ -85,6 +85,8 @@ pub fn add_game(cx: &Cx<'_>, req: AddGame) -> R<GameConfig> {
     if let Some(s) = subdir.filter(|s| !s.is_empty()) {
         g.subdir = s;
     }
+    // Before any folder question; save_game checks again.
+    games::check_game_dirs(&g)?;
 
     let libs = steam::steam_libraries(&cx.paths.home);
     let app = g.appid.and_then(|id| steam::find_app(&libs, id));
@@ -327,5 +329,56 @@ mod tests {
         assert!(views[0].active);
         assert_eq!(views[0].support, Support::Experimental);
         assert!(ui.texts().iter().any(|t| t.contains("experimental")));
+    }
+
+    #[test]
+    fn add_rejects_a_subdir_outside_the_game_folder() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = Paths::for_home(home.path());
+        let mut store = Store::open_in_memory().unwrap();
+        let ui = Recorder::default();
+        let cx = Cx::new(&paths, &mut store, &ui);
+        for bad in ["../../x", "/etc"] {
+            let e = add_game(
+                &cx,
+                AddGame {
+                    domain: "foo".into(),
+                    path: Some("/g".into()),
+                    subdir: Some(bad.into()),
+                    profile: Some("generic".into()),
+                },
+            )
+            .unwrap_err();
+            assert!(e.to_string().contains("subdir"), "{bad}: {e}");
+        }
+        assert!(games::get_game(cx.store.conn(), "foo").unwrap().is_none());
+    }
+
+    /// Answers every text question with a traversal.
+    struct Traversal;
+    impl crate::app::Ui for Traversal {
+        fn say(&self, _msg: Msg) {}
+        fn ask(&self, _q: &str, _d: &str) -> Option<String> {
+            Some("../../x".into())
+        }
+    }
+
+    #[test]
+    fn add_rejects_a_traversal_typed_at_the_subdir_question() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = Paths::for_home(home.path());
+        let mut store = Store::open_in_memory().unwrap();
+        let cx = Cx::new(&paths, &mut store, &Traversal);
+        let e = add_game(
+            &cx,
+            AddGame {
+                domain: "foo".into(),
+                path: Some("/g".into()),
+                profile: Some("generic".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert!(e.to_string().contains("subdir"), "{e}");
     }
 }
