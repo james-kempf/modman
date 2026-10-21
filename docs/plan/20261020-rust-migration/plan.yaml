@@ -483,7 +483,7 @@ tasks:
     wave: 9
     depends_on: [T13]
     agent: gem-devops
-    status: pending
+    status: completed  # 1f0342c; 3 Rust-side findings -> T15F (added by orchestrator)
     retries_used: 0
     acceptance_criteria:
       - "Files exist: packaging/flatpak/<id>.yml, packaging/aur/PKGBUILD, packaging/rpm/modman.spec, .github/workflows/ci.yml, deny.toml; tauri.conf.json bundle targets include appimage, deb, rpm."
@@ -518,6 +518,13 @@ tasks:
     depends_on: [T13R]
     agent: gem-implementer
     status: completed  # fbfbc5c; 3 MEDIUM + 5 LOW fixed, 468 tests
+
+  - id: T15F
+    title: "Rust follow-ups from packaging (added by orchestrator)"
+    wave: 10
+    depends_on: [T15]
+    agent: gem-implementer
+    status: in_progress
 
   - id: T16
     title: "GUI E2E and controller-navigation verification at 1280x800"
