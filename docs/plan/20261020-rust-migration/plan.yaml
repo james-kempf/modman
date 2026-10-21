@@ -512,6 +512,13 @@ tasks:
         - "Read-only; no code edits."
       high_risk_signals: [security_sensitive]
 
+  - id: T13F
+    title: "Remediate T13R findings (added by orchestrator)"
+    wave: 9
+    depends_on: [T13R]
+    agent: gem-implementer
+    status: completed  # fbfbc5c; 3 MEDIUM + 5 LOW fixed, 468 tests
+
   - id: T16
     title: "GUI E2E and controller-navigation verification at 1280x800"
     description: "Drive the frontend at 1280x800 (vite dev server with mocked IPC, plus a smoke run of the real Tauri window via `npm run tauri dev`): keyboard-only flows, emulated gamepad, FOMOD wizard, API key OSK path, deploy/purge actions, focus visibility, a11y."
