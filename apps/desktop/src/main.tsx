@@ -1,26 +1,31 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Placeholder shell until the T14 views land: shows the backend version.
-import React, { useEffect, useState } from "react";
-import ReactDOM from "react-dom/client";
-import { appInfo } from "./ipc";
+// Entry: pick the transport (Tauri, or the demo backend under plain
+// `vite dev`), register event listeners + app_ready once, then render.
 
-function App() {
-  const [version, setVersion] = useState("...");
-  useEffect(() => {
-    appInfo()
-      .then((i) => setVersion(i.version))
-      .catch(() => setVersion("unavailable"));
-  }, []);
-  return (
-    <main>
-      <h1>modman</h1>
-      <p>core {version}</p>
-    </main>
+import { QueryClientProvider } from "@tanstack/react-query";
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { App } from "./app/App";
+import { startBridge } from "./app/bridge";
+import { makeQueryClient } from "./app/queries";
+import "./index.css";
+import { setTransport } from "./ipc/transport";
+
+async function main() {
+  if (!("__TAURI_INTERNALS__" in window)) {
+    const { createDemoBackend } = await import("./mock/demo");
+    setTransport(createDemoBackend());
+  }
+  const qc = makeQueryClient();
+  // Outside React so StrictMode's double effects cannot call app_ready twice.
+  void startBridge(qc);
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <QueryClientProvider client={qc}>
+        <App />
+      </QueryClientProvider>
+    </StrictMode>,
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
+void main();

@@ -8,7 +8,10 @@
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "types": ["vite/client"]
   },
-  "include": ["src"]
+  "include": ["src", "vite.config.ts", "vitest.config.ts"]
 }

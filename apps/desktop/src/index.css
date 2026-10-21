@@ -1,0 +1,76 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* System fonts only: the CSP allows no remote origins. */
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Noto Sans", "Cantarell", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Noto Sans Mono", ui-monospace, monospace;
+
+  --color-accent-200: oklch(0.9 0.08 165);
+  --color-accent-300: oklch(0.84 0.11 165);
+  --color-accent-400: oklch(0.78 0.12 165);
+  --color-accent-500: oklch(0.7 0.12 165);
+  --color-accent-600: oklch(0.58 0.11 165);
+  --color-accent-950: oklch(0.24 0.04 165);
+
+  --color-ink: oklch(0.155 0.004 286);
+  --color-ink-2: oklch(0.185 0.005 286);
+  --color-ink-3: oklch(0.225 0.006 286);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-ink font-sans text-base text-zinc-200 antialiased;
+  }
+  /*
+   * Focus ring on :focus, not only :focus-visible: spatial navigation driven
+   * by the gamepad moves focus without a key event, and WebKit would then
+   * hide a :focus-visible ring.
+   */
+  :focus {
+    outline: 3px solid var(--color-accent-400);
+    outline-offset: 2px;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: oklch(0.32 0.006 286) transparent;
+  }
+  button {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+  progress {
+    @apply h-2 w-full overflow-hidden rounded-full;
+    appearance: none;
+    background: var(--color-ink-3);
+  }
+  progress::-webkit-progress-bar {
+    background: var(--color-ink-3);
+  }
+  progress::-webkit-progress-value {
+    background: var(--color-accent-500);
+  }
+  progress::-moz-progress-bar {
+    background: var(--color-accent-500);
+  }
+}
+
+@layer components {
+  .surface {
+    @apply rounded-2xl border border-white/[0.07] bg-ink-2;
+  }
+  .eyebrow {
+    @apply font-mono text-xs tracking-[0.14em] text-zinc-500 uppercase;
+  }
+  .input {
+    @apply min-h-12 w-full rounded-xl border border-white/10 bg-ink px-4 text-base text-zinc-100 placeholder:text-zinc-600 focus:border-accent-500;
+  }
+}
