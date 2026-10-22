@@ -8,7 +8,15 @@ import { useState } from "react";
 import { useActiveGame } from "../app/queries";
 import { useBusy, useRun } from "../app/run";
 import { useUi } from "../app/store";
-import { Badge, Button, Card, Empty, Segmented, TextField, Toggle, ViewHeader, bytes, when } from "../components/ui";
+import {
+  ArrowsClockwiseIcon,
+  BooksIcon,
+  DownloadSimpleIcon,
+  MagnifyingGlassIcon,
+  TrashIcon,
+  WarningIcon,
+} from "@phosphor-icons/react";
+import { Badge, Button, Card, Empty, Segmented, TextField, Toggle, ViewHeader, bytes, monogram, when } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import type { CollectionInfo, CollectionResult } from "../ipc/types";
 
@@ -31,13 +39,19 @@ export function Collections() {
   const { game } = useActiveGame();
   return (
     <div className="grid gap-6">
-      <ViewHeader title="Collections" />
+      <ViewHeader
+        title="Collections"
+        eyebrow={game?.name}
+        description="A collection installs a curated set of mods with the curator's installer choices and load order."
+      />
       {!game ? (
-        <Empty>No active game.</Empty>
+        <Empty icon={<BooksIcon size={28} weight="duotone" />} title="No active game">
+          Add one on the Overview.
+        </Empty>
       ) : (
         <>
-          <Installed game={game.domain} />
           <Lookup />
+          <Installed game={game.domain} />
         </>
       )}
     </div>
@@ -50,42 +64,71 @@ function Installed({ game }: { game: string }) {
   const notify = useUi((s) => s.notify);
   const list = q.data ?? [];
   return (
-    <Card title="Installed collections">
+    <section aria-labelledby="installed-collections" className="grid gap-5">
+      <h2 id="installed-collections" className="eyebrow px-1">
+        Installed collections
+      </h2>
       {!list.length ? (
-        <Empty>No collections installed.</Empty>
+        <Empty icon={<BooksIcon size={28} weight="duotone" />} title="No collections installed">
+          Paste a collection link above. modman downloads every file, replays the curator&apos;s FOMOD choices and applies the
+          load-order rules.
+        </Empty>
       ) : (
-        <ul className="grid gap-2">
+        <ul className="stagger grid gap-5">
           {list.map(({ record: c, enabled }) => (
-            <li key={c.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-white/[0.06] p-3">
-              <span className="min-w-0 flex-1">
-                <span className="flex flex-wrap items-center gap-2 text-zinc-100">
-                  {c.name ?? c.slug} <Badge>rev {c.revision}</Badge>
-                  {c.failed.length > 0 && <Badge tone="rose">{c.failed.length} failed</Badge>}
-                </span>
-                <span className="block text-sm text-zinc-500">
-                  {c.author && `by ${c.author} · `}
-                  {enabled}/{c.mods.length} enabled · installed {when(c.installed_at)}
-                </span>
-              </span>
-              <Button
-                onClick={async () => {
-                  const r = await run("Update collection", () => ipc.collectionUpdate({ reference: c.slug }));
-                  if (r) notify(r.failed.length ? "warn" : "success", collectionText(r));
-                }}
-              >
-                Update
-              </Button>
-              <Button tone="danger" onClick={() => run("Remove collection", () => ipc.collectionRemove(c.slug, false))}>
-                Remove
-              </Button>
-              <Button tone="danger" onClick={() => run("Remove collection", () => ipc.collectionRemove(c.slug, true))}>
-                Remove, keep mods
-              </Button>
+            <li key={c.id} className="panel grid gap-6 p-6 md:grid-cols-[auto_1fr_auto] md:items-center md:p-8">
+              <Monogram name={c.name ?? c.slug} />
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="truncate text-xl font-medium tracking-tight text-zinc-50">{c.name ?? c.slug}</h3>
+                  <Badge>rev {c.revision}</Badge>
+                </div>
+                <p className="mt-1 text-[13.5px] text-zinc-400">
+                  {c.author && `by ${c.author} · `}installed {when(c.installed_at)}
+                </p>
+                <div className="mt-4 flex items-center gap-3">
+                  <progress aria-label={`${c.name ?? c.slug} enabled mods`} className="w-40" max={c.mods.length || 1} value={enabled} />
+                  <span className="font-mono text-[12px] text-zinc-400">
+                    {enabled}/{c.mods.length} enabled
+                  </span>
+                </div>
+                {c.failed.length > 0 && (
+                  <div className="mt-4 rounded-xl border border-amber-400/15 bg-amber-400/[0.05] px-3.5 py-2.5 text-[13px] text-amber-200">
+                    <div className="flex items-center gap-2 font-medium">
+                      <WarningIcon aria-hidden size={14} /> {c.failed.length} failed
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2 md:flex-col md:items-stretch">
+                <Button
+                  size="sm"
+                  tone="primary"
+                  icon={<ArrowsClockwiseIcon aria-hidden size={14} />}
+                  onClick={async () => {
+                    const r = await run("Update collection", () => ipc.collectionUpdate({ reference: c.slug }));
+                    if (r) notify(r.failed.length ? "warn" : "success", collectionText(r));
+                  }}
+                >
+                  Update
+                </Button>
+                <Button
+                  size="sm"
+                  tone="danger"
+                  icon={<TrashIcon aria-hidden size={14} />}
+                  onClick={() => run("Remove collection", () => ipc.collectionRemove(c.slug, false))}
+                >
+                  Remove
+                </Button>
+                <Button size="sm" tone="ghost" onClick={() => run("Remove collection", () => ipc.collectionRemove(c.slug, true))}>
+                  Remove, keep mods
+                </Button>
+              </div>
             </li>
           ))}
         </ul>
       )}
-    </Card>
+    </section>
   );
 }
 
@@ -121,37 +164,60 @@ function Lookup() {
           className="min-w-72 flex-1"
           placeholder="https://next.nexusmods.com/skyrimspecialedition/collections/…"
         />
-        <Button type="submit" busy={looking} disabled={!ref.trim()}>
+        <Button type="submit" busy={looking} disabled={!ref.trim()} icon={<MagnifyingGlassIcon aria-hidden size={16} />}>
           Look up
         </Button>
       </form>
       {info && (
-        <div className="mt-5 grid gap-4 rounded-xl border border-white/10 p-4">
-          <div>
-            <h3 className="text-lg text-zinc-100">
-              {info.revision.name} <span className="text-zinc-400">by {info.revision.author}</span>
-            </h3>
-            <p className="text-sm text-zinc-500">
-              Revision {info.revision.number} · {info.revision.mod_count} mods ({info.revision.optional_count} optional) ·{" "}
-              {bytes(info.revision.total_size)} · {info.revision.game_name}
-            </p>
-            {info.installed && (
-              <p className="mt-1 text-sm text-amber-300">
-                Installed at revision {info.installed.revision}
-                {info.update_available ? `; revision ${info.update_available} is available` : ""}.
+        <div className="mt-6 grid animate-rise gap-5 rounded-3xl border border-white/[0.06] bg-ink p-6">
+          <div className="flex flex-wrap items-start gap-5">
+            <Monogram name={info.revision.name} />
+            <div className="min-w-0 flex-1">
+              <h3 className="text-xl font-medium tracking-tight text-zinc-50">
+                {info.revision.name} <span className="text-[15px] font-normal text-zinc-400">by {info.revision.author}</span>
+              </h3>
+              <p className="mt-1 font-mono text-[12px] text-dim">
+                Revision {info.revision.number} · {info.revision.mod_count} mods ({info.revision.optional_count} optional) ·{" "}
+                {bytes(info.revision.total_size)} · {info.revision.game_name}
               </p>
-            )}
-            {info.revision.summary && <p className="mt-2 text-zinc-300">{info.revision.summary}</p>}
+              {info.installed && (
+                <p className="mt-2 text-[13.5px] text-amber-300">
+                  Installed at revision {info.installed.revision}
+                  {info.update_available ? `; revision ${info.update_available} is available` : ""}.
+                </p>
+              )}
+              {info.revision.summary && <p className="mt-3 text-[14.5px] leading-relaxed text-zinc-300">{info.revision.summary}</p>}
+            </div>
           </div>
           <Segmented label="Optional mods" value={optional} options={OPTIONAL} onChange={setOptional} />
           <div className="flex flex-wrap items-center gap-3">
             <Toggle label="Deploy when done" checked={deploy} onChange={setDeploy} />
-            <Button tone="primary" busy={installing} onClick={install} className="ml-auto">
+            <Button
+              tone="primary"
+              busy={installing}
+              onClick={install}
+              className="ml-auto"
+              icon={<DownloadSimpleIcon aria-hidden size={16} />}
+            >
               {info.installed ? "Install this revision" : "Install collection"}
             </Button>
           </div>
         </div>
       )}
     </Card>
+  );
+}
+
+/** Legacy collection monogram (gradient tile with initials). */
+function Monogram({ name }: { name: string }) {
+  const m = monogram(name);
+  return (
+    <div
+      aria-hidden
+      className={`relative grid size-20 shrink-0 place-items-center overflow-hidden rounded-3xl text-xl font-semibold tracking-tight text-white/85 ${m.cls}`}
+    >
+      <span className="absolute inset-0 rounded-3xl shadow-[inset_0_1px_0_rgb(255_255_255/0.15)]" />
+      {m.initials}
+    </div>
   );
 }

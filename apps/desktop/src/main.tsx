@@ -8,6 +8,9 @@ import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
 import { startBridge } from "./app/bridge";
 import { makeQueryClient } from "./app/queries";
+// Bundled fonts (no remote origins under the CSP).
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
 import "./index.css";
 import { setTransport } from "./ipc/transport";
 

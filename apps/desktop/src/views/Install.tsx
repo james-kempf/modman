@@ -9,7 +9,21 @@ import { useActiveGame } from "../app/queries";
 import { useBusy, useRun } from "../app/run";
 import { useUi } from "../app/store";
 import { readClipboard } from "../components/Osk";
-import { Badge, Button, Card, Empty, Segmented, TextField, Thumb, Toggle, ViewHeader, bytes } from "../components/ui";
+import {
+  CheckIcon,
+  ClipboardTextIcon,
+  DownloadSimpleIcon,
+  LinkIcon,
+  MagnifyingGlassIcon,
+  ThumbsUpIcon,
+} from "@phosphor-icons/react";
+import { Badge, Button, Card, Empty, Segmented, StatusDot, TextField, Thumb, Toggle, ViewHeader, bytes, cx } from "../components/ui";
+
+/** 12345 -> "12.3K" (legacy `compact`). */
+function compact(n: number | null): string {
+  if (n === null) return "0";
+  return Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(n);
+}
 import * as ipc from "../ipc/commands";
 import type { InstallResult, SearchView } from "../ipc/types";
 
@@ -33,13 +47,18 @@ export function installedText(r: InstallResult): string {
 }
 
 export function Install() {
+  const { game } = useActiveGame();
   return (
     <div className="grid gap-6">
-      <ViewHeader title="Install" />
-      <div className="grid gap-6 xl:grid-cols-2">
+      <ViewHeader
+        title="Install"
+        eyebrow={game?.name}
+        description="Install by ID or link, paste a Mod Manager Download link, or search Nexus Mods. Installers with options open as a wizard."
+      />
+      <section className="stagger grid gap-6 lg:grid-cols-[1fr_1fr]">
         <InstallCard />
         <NxmCard />
-      </div>
+      </section>
       <SearchCard />
       <DownloadsCard />
     </div>
@@ -62,7 +81,7 @@ function InstallCard() {
     }
   };
   return (
-    <Card title="Install a mod">
+    <Card title="Direct install">
       <form
         className="grid gap-4"
         onSubmit={(e) => {
@@ -80,7 +99,14 @@ function InstallCard() {
         <Segmented label="FOMOD" value={fomod} options={FOMOD} onChange={setFomod} />
         <div className="flex flex-wrap items-center gap-3">
           <Toggle label="Deploy after install" checked={deploy} onChange={setDeploy} />
-          <Button type="submit" tone="primary" busy={busy} disabled={!target.trim()} className="ml-auto">
+          <Button
+            type="submit"
+            tone="primary"
+            busy={busy}
+            disabled={!target.trim()}
+            className="ml-auto"
+            icon={<DownloadSimpleIcon aria-hidden size={16} />}
+          >
             Install
           </Button>
         </div>
@@ -103,8 +129,8 @@ function NxmCard() {
     }
   };
   return (
-    <Card title="Paste an nxm:// link">
-      <p className="mb-4 text-sm text-zinc-400">
+    <Card title="Mod Manager Download link">
+      <p className="mb-5 text-[14px] leading-relaxed text-zinc-400">
         From the "Mod Manager Download" button on Nexus. Links clicked in a browser arrive here by themselves.
       </p>
       <form
@@ -117,6 +143,7 @@ function NxmCard() {
         <TextField label="nxm link" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="nxm://…" />
         <div className="flex flex-wrap gap-3">
           <Button
+            icon={<ClipboardTextIcon aria-hidden size={16} />}
             onClick={async () => {
               const t = await readClipboard();
               if (t === null) notify("warn", "Clipboard not readable here; paste into the field with Ctrl+V.");
@@ -125,7 +152,14 @@ function NxmCard() {
           >
             Paste
           </Button>
-          <Button type="submit" tone="primary" busy={busy} disabled={!url.trim()} className="ml-auto">
+          <Button
+            type="submit"
+            tone="primary"
+            busy={busy}
+            disabled={!url.trim()}
+            className="ml-auto"
+            icon={<LinkIcon aria-hidden size={16} />}
+          >
             Download
           </Button>
         </div>
@@ -150,37 +184,80 @@ function SearchCard() {
           if (query.trim()) setResult((await run("Search", () => ipc.search(query.trim()))) ?? null);
         }}
       >
-        <TextField label="Search" value={query} onChange={(e) => setQuery(e.target.value)} className="min-w-72 flex-1" />
-        <Button type="submit" busy={searching} disabled={!query.trim()}>
+        <TextField
+          label="Search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className="min-w-72 flex-1"
+          placeholder={game ? `Search ${game.name} mods` : "Search mods"}
+        />
+        <Button type="submit" busy={searching} disabled={!query.trim()} icon={<MagnifyingGlassIcon aria-hidden size={16} />}>
           Search
         </Button>
       </form>
+      <p className="mt-3 text-[12.5px] text-dim">
+        {result ? `${result.total.toLocaleString()} results, best matches first` : "Matches mod names, most relevant first."}
+      </p>
       {result && (
-        <ul className="mt-5 grid gap-2" aria-label="Search results">
-          {!result.mods.length && <Empty>No matches.</Empty>}
-          {result.mods.map((m) => (
-            <li key={m.modId ?? m.name} className="flex flex-wrap items-center gap-3 rounded-xl border border-white/[0.06] p-3">
-              {game && <Thumb game={game.domain} modId={m.modId} />}
-              <span className="min-w-0 flex-1">
-                <span className="block text-zinc-100">{m.name}</span>
-                <span className="block truncate text-sm text-zinc-500">
-                  {m.author} · {m.downloads ?? 0} downloads · {m.summary}
-                </span>
-              </span>
-              {m.installed ? (
-                <Badge tone="accent">Installed</Badge>
-              ) : (
-                <Button
-                  tone="primary"
-                  disabled={m.modId === null}
-                  onClick={async () => {
-                    const r = await run("Install", () => ipc.install({ target: String(m.modId), fomod: "ask" }));
-                    if (r) notify("success", installedText(r));
-                  }}
-                >
-                  Install
-                </Button>
+        <ul className="stagger mt-6 grid gap-4 md:grid-cols-2" aria-label="Search results">
+          {!result.mods.length && (
+            <li className="md:col-span-2">
+              <Empty>No mods found. Try fewer words, or the mod&apos;s exact name.</Empty>
+            </li>
+          )}
+          {result.mods.map((m, i) => (
+            <li
+              key={m.modId ?? m.name}
+              className={cx("flex gap-4 rounded-3xl border border-white/[0.05] bg-ink p-4", i % 5 === 0 && "md:col-span-2")}
+            >
+              {game && (
+                <Thumb
+                  game={game.domain}
+                  modId={m.modId}
+                  name={m.name ?? ""}
+                  className={cx("rounded-2xl", i % 5 === 0 ? "h-28 w-44" : "size-24")}
+                />
               )}
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span className="block truncate text-[15.5px] font-medium text-zinc-100">{m.name}</span>
+                <span className="block truncate font-mono text-[11.5px] text-dim">
+                  {m.version ? `v${m.version.replace(/^v/i, "")} · ` : ""}
+                  {m.author}
+                  {m.category ? ` · ${m.category}` : ""}
+                </span>
+                {m.summary && <p className="mt-2 line-clamp-2 text-[13px] leading-relaxed text-zinc-400">{m.summary}</p>}
+                <div className="mt-auto flex items-center gap-4 pt-3">
+                  <span className="flex items-center gap-1.5 font-mono text-[11.5px] text-dim">
+                    <DownloadSimpleIcon aria-hidden size={13} />
+                    {compact(m.downloads)}
+                    <span className="sr-only">downloads</span>
+                  </span>
+                  <span className="flex items-center gap-1.5 font-mono text-[11.5px] text-dim">
+                    <ThumbsUpIcon aria-hidden size={13} />
+                    {compact(m.endorsements)}
+                    <span className="sr-only">endorsements</span>
+                  </span>
+                  <span className="ml-auto">
+                    {m.installed ? (
+                      <span className="flex min-h-11 items-center gap-1.5 px-2 text-[13px] text-accent-300">
+                        <CheckIcon aria-hidden size={14} weight="bold" /> Installed
+                      </span>
+                    ) : (
+                      <Button
+                        size="sm"
+                        tone="primary"
+                        disabled={m.modId === null}
+                        onClick={async () => {
+                          const r = await run("Install", () => ipc.install({ target: String(m.modId), fomod: "ask" }));
+                          if (r) notify("success", installedText(r));
+                        }}
+                      >
+                        Install
+                      </Button>
+                    )}
+                  </span>
+                </div>
+              </div>
             </li>
           ))}
         </ul>
@@ -199,12 +276,15 @@ function DownloadsCard() {
       {!rows.length && !liveOnly.length ? (
         <Empty>No downloads.</Empty>
       ) : (
-        <ul className="grid gap-2" aria-label="Downloads">
+        <ul className="rows" aria-label="Downloads">
           {liveOnly.map((d) => (
-            <li key={d.name} tabIndex={0} className="rounded-xl border border-white/[0.06] p-3">
-              <span className="block text-zinc-100">{d.name}</span>
+            <li key={d.name} tabIndex={0} className="grid gap-2 rounded-lg py-3">
+              <span className="flex items-center gap-2.5 text-[14.5px] text-zinc-100">
+                <StatusDot live />
+                {d.name}
+              </span>
               <progress aria-label={`${d.name} progress`} max={d.total ?? 1} value={d.total ? d.done : undefined} />
-              <span className="text-sm text-zinc-500">
+              <span className="font-mono text-[11.5px] text-dim">
                 {bytes(d.done)} / {bytes(d.total)}
                 {d.last.type === "retrying" && ` · retrying (${d.last.reason})`}
               </span>
@@ -215,15 +295,15 @@ function DownloadsCard() {
             const done = l?.done ?? r.bytes_done;
             const total = l?.total ?? r.size;
             return (
-              <li key={r.id} tabIndex={0} className="rounded-xl border border-white/[0.06] p-3">
+              <li key={r.id} tabIndex={0} className="grid gap-2 rounded-lg py-3">
                 <span className="flex flex-wrap items-center gap-2">
-                  <span className="min-w-0 flex-1 truncate text-zinc-100">
+                  <span className="min-w-0 flex-1 truncate text-[14.5px] text-zinc-100">
                     {r.file_name ?? (r.nexus_mod_id ? `mod ${r.nexus_mod_id}` : r.collection_slug ?? `#${r.id}`)}
                   </span>
                   <Badge tone={r.status === "failed" ? "rose" : r.status === "done" ? "accent" : "zinc"}>{r.status}</Badge>
                 </span>
                 {r.status === "downloading" && <progress aria-label="progress" max={total ?? 1} value={total ? done : undefined} />}
-                <span className="text-sm text-zinc-500">
+                <span className="font-mono text-[11.5px] text-dim">
                   {bytes(done)} / {bytes(total)} · {r.source}
                   {r.error && ` · ${r.error}`}
                 </span>

@@ -8,14 +8,15 @@ import { useAccount } from "../app/queries";
 import { useBusy, useRun } from "../app/run";
 import { useUi } from "../app/store";
 import { readClipboard } from "../components/Osk";
-import { Badge, Button, Card, Empty, Toggle, ViewHeader, when } from "../components/ui";
+import { ClipboardTextIcon, FloppyDiskIcon, KeyIcon, KeyboardIcon, SignOutIcon } from "@phosphor-icons/react";
+import { Badge, Button, Empty, Fact, Row, Section, StatusDot, Toggle, ViewHeader, when } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import type { ConfigEntry, RunLogEntry } from "../ipc/types";
 
 export function Settings() {
   return (
-    <div className="grid gap-6">
-      <ViewHeader title="Settings" />
+    <div className="grid gap-14">
+      <ViewHeader title="Settings" description="Changes are saved by modman as soon as you make them." />
       <AccountCard />
       <AutoUpdateCard />
       <ConfigCard />
@@ -32,40 +33,48 @@ function AccountCard() {
   const a = q.data;
   const signedIn = !!a?.key_source;
   return (
-    <Card
+    <Section
       title="Nexus Mods account"
-      actions={
-        signedIn && (
-          <>
-            <Button onClick={() => setChanging((c) => !c)}>{changing ? "Keep current key" : "Change key"}</Button>
-            <Button
-              tone="danger"
-              onClick={async () => {
-                const envStill = await run("Sign out", () => ipc.logout());
-                if (envStill) notify("warn", "NEXUS_API_KEY is still set in the environment.");
-              }}
-            >
-              Sign out
-            </Button>
-          </>
-        )
-      }
+      intro="modman signs in with your personal API key. It is kept in the system keyring, or the modman config file when there is none."
     >
       {signedIn ? (
-        <p className="mb-4 text-zinc-300">
-          Signed in{a?.user && ` as ${a.user}`} {a?.premium ? <Badge tone="accent">Premium</Badge> : <Badge>Free</Badge>}
-          <span className="block text-sm text-zinc-500">
-            Key from {a?.key_source}
-            {a?.quota && ` · ${a.quota}`}
-          </span>
-        </p>
+        <Row
+          title={
+            <span className="flex flex-wrap items-center gap-2">
+              Signed in{a?.user && ` as ${a.user}`} {a?.premium ? <Badge tone="accent">Premium</Badge> : <Badge>Free</Badge>}
+            </span>
+          }
+          desc={
+            <>
+              Key from {a?.key_source}
+              {a?.quota && ` · ${a.quota}`}
+            </>
+          }
+        >
+          <Button size="sm" onClick={() => setChanging((c) => !c)}>
+            {changing ? "Keep current key" : "Change key"}
+          </Button>
+          <Button
+            size="sm"
+            tone="danger"
+            icon={<SignOutIcon aria-hidden size={15} />}
+            onClick={async () => {
+              const envStill = await run("Sign out", () => ipc.logout());
+              if (envStill) notify("warn", "NEXUS_API_KEY is still set in the environment.");
+            }}
+          >
+            Sign out
+          </Button>
+        </Row>
       ) : (
-        <p className="mb-4 text-zinc-400">
-          Not signed in. Get a personal API key at nexusmods.com → Site preferences → API keys.
-        </p>
+        <Row title="Not signed in" desc="Get a personal API key at nexusmods.com → Site preferences → API keys." />
       )}
-      {(!signedIn || changing) && <ApiKeyEntry onDone={() => setChanging(false)} />}
-    </Card>
+      {(!signedIn || changing) && (
+        <div className="px-6 py-5">
+          <ApiKeyEntry onDone={() => setChanging(false)} />
+        </div>
+      )}
+    </Section>
   );
 }
 
@@ -101,7 +110,7 @@ export function ApiKeyEntry({ onDone }: { onDone?: () => void }) {
         void submit();
       }}
     >
-      <label htmlFor="nexus-api-key" className="text-sm text-zinc-400">
+      <label htmlFor="nexus-api-key" className="text-[13px] font-medium text-zinc-300">
         Nexus API key
       </label>
       <input
@@ -118,6 +127,7 @@ export function ApiKeyEntry({ onDone }: { onDone?: () => void }) {
       />
       <div className="flex flex-wrap gap-3">
         <Button
+          icon={<ClipboardTextIcon aria-hidden size={16} />}
           onClick={async () => {
             const t = await readClipboard();
             if (t === null) {
@@ -128,8 +138,20 @@ export function ApiKeyEntry({ onDone }: { onDone?: () => void }) {
         >
           Paste
         </Button>
-        <Button onClick={() => input.current && openOsk({ input: input.current, label: "Nexus API key" })}>Keyboard</Button>
-        <Button type="submit" tone="primary" busy={busy} disabled={!key.trim()} className="ml-auto">
+        <Button
+          icon={<KeyboardIcon aria-hidden size={16} />}
+          onClick={() => input.current && openOsk({ input: input.current, label: "Nexus API key" })}
+        >
+          Keyboard
+        </Button>
+        <Button
+          type="submit"
+          tone="primary"
+          busy={busy}
+          disabled={!key.trim()}
+          className="ml-auto"
+          icon={<KeyIcon aria-hidden size={16} />}
+        >
           Sign in
         </Button>
       </div>
@@ -144,50 +166,46 @@ function AutoUpdateCard() {
   const s = q.data;
   const on = !!s?.timer.installed;
   return (
-    <Card
-      title="Automatic updates"
-      actions={
+    <Section
+      title="Auto-update"
+      intro="After an OS update or a Steam update of a game, modman installs mod updates and redeploys every game that has mods deployed. It waits while a game is running."
+    >
+      <Row
+        title="Automatic updates"
+        desc={
+          <>
+            A systemd user timer runs modman every {s?.interval_hours || 1} h: after a system or game update it updates mods
+            {s?.collections ? " and collections" : ""} and redeploys, skipping games that are running or updating.
+          </>
+        }
+      >
         <Toggle
           label={on ? "Auto-update on" : "Auto-update off"}
           checked={on}
           disabled={!s || busy}
           onChange={(v) => run<unknown>("Auto-update", () => (v ? ipc.autoupdateEnable() : ipc.autoupdateDisable()))}
         />
-      }
-    >
-      <p className="text-sm text-zinc-400">
-        A systemd user timer runs modman every {s?.interval_hours || 1} h: after a system or game update it updates mods
-        {s?.collections ? " and collections" : ""} and redeploys, skipping games that are running or updating.
-      </p>
+      </Row>
       {s && (
-        <dl className="mt-4 grid grid-cols-2 gap-4 text-sm md:grid-cols-4">
-          <div>
-            <dt className="text-zinc-500">Timer</dt>
-            <dd className="text-zinc-200">{s.timer.installed ? (s.timer.active ?? "installed") : "not installed"}</dd>
-          </div>
-          <div>
-            <dt className="text-zinc-500">Next run</dt>
-            <dd className="text-zinc-200">{s.timer.next_elapse ?? "–"}</dd>
-          </div>
-          <div>
-            <dt className="text-zinc-500">Last system change</dt>
-            <dd className="text-zinc-200">{when(s.last_system_change)}</dd>
-          </div>
-          <div>
-            <dt className="text-zinc-500">Games</dt>
-            <dd className="text-zinc-200">
-              {s.games.map((g) => (
-                <span key={g.domain} className="block">
-                  {g.name}: {g.last_failed ? "last run failed" : `ok ${when(g.last_ok)}`}
-                </span>
-              ))}
-            </dd>
-          </div>
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-4 px-6 py-5 md:grid-cols-4">
+          <Fact k="Timer" v={s.timer.installed ? (s.timer.active ?? "installed") : "not installed"} />
+          <Fact k="Next run" v={s.timer.next_elapse ?? "–"} />
+          <Fact k="Last system change" v={when(s.last_system_change)} />
+          <Fact
+            k="Games"
+            v={s.games.map((g) => (
+              <span key={g.domain} className="block">
+                {g.name}: {g.last_failed ? "last run failed" : `ok ${when(g.last_ok)}`}
+              </span>
+            ))}
+          />
         </dl>
       )}
-      <h3 className="eyebrow mt-6 mb-2">Last runs</h3>
-      <RunLog runs={s?.runs ?? []} />
-    </Card>
+      <div className="px-6 py-5">
+        <h3 className="eyebrow mb-3">Last runs</h3>
+        <RunLog runs={s?.runs ?? []} />
+      </div>
+    </Section>
   );
 }
 
@@ -198,17 +216,18 @@ export function RunLog({ runs }: { runs: RunLogEntry[] }) {
   return (
     <ul aria-label="Auto-update runs" className="grid gap-2">
       {runs.map((r) => (
-        <li key={r.id} tabIndex={0} className="rounded-xl border border-white/[0.06] p-3 text-sm">
+        <li key={r.id} tabIndex={0} className="grid gap-1 rounded-2xl border border-white/[0.05] bg-ink px-4 py-3 text-[13px]">
           <span className="flex flex-wrap items-center gap-2">
+            <StatusDot tone={OUTCOME[r.outcome]} />
             <span className="text-zinc-200">{when(r.started_at)}</span>
-            <span className="text-zinc-400">{r.game ?? "all games"}</span>
+            <span className="font-mono text-[11.5px] text-zinc-400">{r.game ?? "all games"}</span>
             <Badge tone={OUTCOME[r.outcome]}>{r.outcome}</Badge>
             {r.forced && <Badge>forced</Badge>}
             {r.dry_run && <Badge>dry run</Badge>}
           </span>
           {r.summary && <span className="block text-zinc-300">{r.summary}</span>}
-          {r.reasons.length > 0 && <span className="block text-zinc-500">why: {r.reasons.join(", ")}</span>}
-          {r.actions.length > 0 && <span className="block text-zinc-500">did: {r.actions.join(", ")}</span>}
+          {r.reasons.length > 0 && <span className="block text-dim">why: {r.reasons.join(", ")}</span>}
+          {r.actions.length > 0 && <span className="block text-dim">did: {r.actions.join(", ")}</span>}
         </li>
       ))}
     </ul>
@@ -218,13 +237,13 @@ export function RunLog({ runs }: { runs: RunLogEntry[] }) {
 function ConfigCard() {
   const q = useQuery({ queryKey: ["config"], queryFn: ipc.configList });
   return (
-    <Card title="Configuration">
-      <ul className="grid gap-3">
+    <Section title="Configuration" intro="modman's config keys, as on the command line (modman config).">
+      <ul className="rows">
         {q.data?.map((e) => (
           <ConfigRow key={e.key} entry={e} />
         ))}
       </ul>
-    </Card>
+    </Section>
   );
 }
 
@@ -234,7 +253,7 @@ function ConfigRow({ entry }: { entry: ConfigEntry }) {
   const [value, setValue] = useState(entry.value);
   const id = `config-${entry.key}`;
   return (
-    <li>
+    <li className="px-6 py-5">
       <form
         className="flex flex-wrap items-end gap-3"
         onSubmit={async (e) => {
@@ -246,13 +265,13 @@ function ConfigRow({ entry }: { entry: ConfigEntry }) {
           }
         }}
       >
-        <div className="grid min-w-72 flex-1 gap-1">
-          <label htmlFor={id} className="text-sm text-zinc-300">
-            <span className="font-mono">{entry.key}</span> <span className="text-zinc-500">{entry.description}</span>
+        <div className="grid min-w-72 flex-1 gap-2">
+          <label htmlFor={id} className="text-[13px] text-zinc-300">
+            <span className="font-mono text-zinc-100">{entry.key}</span> <span className="text-dim">{entry.description}</span>
           </label>
           <input id={id} className="input font-mono" value={value} onChange={(e) => setValue(e.target.value)} />
         </div>
-        <Button type="submit" disabled={value === entry.value}>
+        <Button type="submit" disabled={value === entry.value} icon={<FloppyDiskIcon aria-hidden size={15} />}>
           Save
         </Button>
       </form>
@@ -265,8 +284,8 @@ function AppInfoCard() {
   const i = q.data;
   if (!i) return null;
   return (
-    <Card title="About">
-      <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-2 font-mono text-sm text-zinc-400">
+    <Section title="About">
+      <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 px-6 py-5 font-mono text-[12px] leading-relaxed text-zinc-400">
         {(
           [
             ["modman", i.version],
@@ -277,11 +296,11 @@ function AppInfoCard() {
           ] as const
         ).map(([k, v]) => (
           <div key={k} className="contents">
-            <dt>{k}</dt>
+            <dt className="text-dim">{k}</dt>
             <dd className="break-all">{v}</dd>
           </div>
         ))}
       </dl>
-    </Card>
+    </Section>
   );
 }

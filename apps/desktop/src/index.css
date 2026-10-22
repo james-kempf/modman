@@ -1,11 +1,18 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-/* System fonts only: the CSP allows no remote origins. */
+/*
+ * Visual language of the legacy web UI (Geist, zinc neutrals, one emerald
+ * accent, soft surfaces, glass overlays). Fonts are bundled through
+ * @fontsource-variable (imported in main.tsx): the CSP allows no remote
+ * origins. Motion is CSS only (no inline styles under style-src 'self').
+ */
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", "Noto Sans", "Cantarell", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", "Noto Sans Mono", ui-monospace, monospace;
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "SFMono-Regular", monospace;
 
+  /* One accent: a desaturated emerald. Neutrals are zinc throughout. */
+  --color-accent-50: oklch(0.97 0.03 165);
   --color-accent-200: oklch(0.9 0.08 165);
   --color-accent-300: oklch(0.84 0.11 165);
   --color-accent-400: oklch(0.78 0.12 165);
@@ -16,6 +23,48 @@
   --color-ink: oklch(0.155 0.004 286);
   --color-ink-2: oklch(0.185 0.005 286);
   --color-ink-3: oklch(0.225 0.006 286);
+  /* Legacy used zinc-500 for secondary text; this keeps that look at >= 4.5:1 on ink-3. */
+  --color-dim: oklch(0.66 0.012 286);
+
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --animate-shimmer: shimmer 1.6s var(--ease-spring) infinite;
+  --animate-breathe: breathe 2.8s ease-in-out infinite;
+  --animate-bar: bar 0.9s ease-in-out infinite;
+  /* Page and list entrances: short enough that switching tabs feels instant (legacy 9ae14f4). */
+  --animate-rise: rise 0.14s var(--ease-spring) both;
+  --animate-fade: fade 0.12s ease-out both;
+  --animate-pop: pop 0.2s var(--ease-spring) both;
+  --animate-island: island 0.24s var(--ease-spring) both;
+
+  @keyframes shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(200%); }
+  }
+  @keyframes breathe {
+    0%, 100% { transform: scale(1); opacity: 0.55; }
+    50% { transform: scale(2.1); opacity: 0; }
+  }
+  @keyframes bar {
+    0%, 100% { transform: scaleY(0.35); }
+    50% { transform: scaleY(1); }
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes pop {
+    from { opacity: 0; transform: translateY(16px) scale(0.97); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes island {
+    from { opacity: 0; transform: translateY(24px); }
+    to { opacity: 1; transform: none; }
+  }
 }
 
 @layer base {
@@ -25,7 +74,22 @@
     height: 100%;
   }
   body {
-    @apply bg-ink font-sans text-base text-zinc-200 antialiased;
+    @apply bg-ink font-sans text-zinc-200 antialiased;
+    font-feature-settings: "ss01", "cv11";
+  }
+  /* Fixed, non-scrolling grain (legacy .grain) as a pseudo-element: no extra DOM node. */
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 60;
+    opacity: 0.035;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--color-accent-400) 35%, transparent);
   }
   /*
    * Focus ring on :focus, not only :focus-visible: spatial navigation driven
@@ -46,32 +110,90 @@
   button:disabled,
   button[aria-disabled="true"] {
     cursor: not-allowed;
-    opacity: 0.5;
+    opacity: 0.45;
   }
   progress {
-    @apply h-2 w-full overflow-hidden rounded-full;
+    @apply h-1.5 w-full overflow-hidden rounded-full;
     appearance: none;
-    background: var(--color-ink-3);
+    background: rgb(255 255 255 / 0.06);
   }
   progress::-webkit-progress-bar {
-    background: var(--color-ink-3);
+    background: rgb(255 255 255 / 0.06);
   }
   progress::-webkit-progress-value {
-    background: var(--color-accent-500);
+    background: var(--color-accent-400);
+    border-radius: 9999px;
+    transition: width 0.3s var(--ease-spring);
   }
   progress::-moz-progress-bar {
-    background: var(--color-accent-500);
+    background: var(--color-accent-400);
+    border-radius: 9999px;
   }
 }
 
 @layer components {
   .surface {
-    @apply rounded-2xl border border-white/[0.07] bg-ink-2;
+    @apply rounded-3xl border border-white/[0.06] bg-ink-2;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.035),
+      0 24px 48px -28px rgb(0 0 0 / 0.55);
+  }
+  /* The large legacy panels (hero, install, collections). */
+  .panel {
+    @apply rounded-[2rem] border border-white/[0.06] bg-ink-2;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.035);
+  }
+  .glass {
+    @apply border border-white/10 bg-zinc-900/85 backdrop-blur-xl;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.08),
+      0 20px 50px -20px rgb(0 0 0 / 0.7);
   }
   .eyebrow {
-    @apply font-mono text-xs tracking-[0.14em] text-zinc-500 uppercase;
+    @apply font-mono text-[11px] tracking-[0.14em] text-dim uppercase;
   }
   .input {
-    @apply min-h-12 w-full rounded-xl border border-white/10 bg-ink px-4 text-base text-zinc-100 placeholder:text-zinc-600 focus:border-accent-500;
+    @apply min-h-12 w-full rounded-xl border border-white/[0.08] bg-ink px-3.5 text-[15px] text-zinc-100 transition-colors duration-200 placeholder:text-zinc-500 focus:border-accent-500/60 focus:bg-ink-3;
+  }
+  /* Row list inside a surface (Settings, lists). */
+  .rows > * + * {
+    @apply border-t border-white/[0.05];
+  }
+  /* Staggered list entrance (legacy: 15 ms per item, capped). */
+  .stagger > * {
+    animation: var(--animate-rise);
+  }
+  .stagger > :nth-child(2) { animation-delay: 15ms; }
+  .stagger > :nth-child(3) { animation-delay: 30ms; }
+  .stagger > :nth-child(4) { animation-delay: 45ms; }
+  .stagger > :nth-child(5) { animation-delay: 60ms; }
+  .stagger > :nth-child(6) { animation-delay: 75ms; }
+  .stagger > :nth-child(7) { animation-delay: 90ms; }
+  .stagger > :nth-child(n + 8) { animation-delay: 105ms; }
+
+  /* Deterministic monogram backgrounds (legacy computed a hue inline; the CSP forbids that). */
+  .mono-0 { background: linear-gradient(135deg, oklch(0.4 0.06 20), oklch(0.24 0.03 60)); }
+  .mono-1 { background: linear-gradient(135deg, oklch(0.4 0.06 65), oklch(0.24 0.03 105)); }
+  .mono-2 { background: linear-gradient(135deg, oklch(0.4 0.06 110), oklch(0.24 0.03 150)); }
+  .mono-3 { background: linear-gradient(135deg, oklch(0.4 0.06 155), oklch(0.24 0.03 195)); }
+  .mono-4 { background: linear-gradient(135deg, oklch(0.4 0.06 200), oklch(0.24 0.03 240)); }
+  .mono-5 { background: linear-gradient(135deg, oklch(0.4 0.06 245), oklch(0.24 0.03 285)); }
+  .mono-6 { background: linear-gradient(135deg, oklch(0.4 0.06 290), oklch(0.24 0.03 330)); }
+  .mono-7 { background: linear-gradient(135deg, oklch(0.4 0.06 335), oklch(0.24 0.03 15)); }
+
+  /* Hero glow (legacy: blurred accent disc in the top-right corner). */
+  .glow {
+    @apply pointer-events-none absolute -top-24 -right-24 size-80 rounded-full bg-accent-500/[0.07] blur-3xl;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
   }
 }

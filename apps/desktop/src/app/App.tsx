@@ -1,11 +1,31 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Shell: tab rail (7 views), active-game header, the current view, notices,
-// prompt dialogs and the on-screen keyboard. Installs keyboard + gamepad nav.
+// Shell in the legacy layout: left sidebar (brand + active game header, the
+// tab rail with icons, account), the current view, and a bottom stack with
+// notices and the job island. Prompt dialogs and the on-screen keyboard sit
+// on top. Installs keyboard + gamepad nav.
 
-import { useEffect, type JSX } from "react";
+import {
+  BooksIcon,
+  CheckCircleIcon,
+  CheckIcon,
+  DownloadSimpleIcon,
+  GearSixIcon,
+  InfoIcon,
+  PuzzlePieceIcon,
+  RocketLaunchIcon,
+  SquaresFourIcon,
+  StackIcon,
+  TerminalWindowIcon,
+  WarningIcon,
+  XCircleIcon,
+  XIcon,
+} from "@phosphor-icons/react";
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState, type JSX, type ReactNode } from "react";
 import { OskHost } from "../components/Osk";
 import { PromptHost } from "../components/PromptDialog";
-import { Button, SupportBadge, cx } from "../components/ui";
+import { Button, IconButton, StatusDot, SupportBadge, cx, type DotTone } from "../components/ui";
+import * as ipc from "../ipc/commands";
 import { installKeyboardNav, performNav } from "../nav/actions";
 import { startGamepadLoop } from "../nav/gamepad";
 import { installFocusRecovery } from "../nav/spatial";
@@ -16,9 +36,9 @@ import { Mods } from "../views/Mods";
 import { Overview } from "../views/Overview";
 import { Requirements } from "../views/Requirements";
 import { Settings } from "../views/Settings";
-import { useActiveGame } from "./queries";
+import { useAccount, useActiveGame } from "./queries";
 import { useBusy, useDeploy } from "./run";
-import { VIEWS, useUi, type ViewId } from "./store";
+import { VIEWS, useUi, type JobEntry, type NoticeTone, type ViewId } from "./store";
 
 const VIEW: Record<ViewId, () => JSX.Element> = {
   overview: Overview,
@@ -30,11 +50,24 @@ const VIEW: Record<ViewId, () => JSX.Element> = {
   settings: Settings,
 };
 
+const ICON: Record<ViewId, ReactNode> = {
+  overview: <SquaresFourIcon aria-hidden size={20} weight="duotone" />,
+  mods: <StackIcon aria-hidden size={20} weight="duotone" />,
+  install: <DownloadSimpleIcon aria-hidden size={20} weight="duotone" />,
+  collections: <BooksIcon aria-hidden size={20} weight="duotone" />,
+  requirements: <PuzzlePieceIcon aria-hidden size={20} weight="duotone" />,
+  activity: <TerminalWindowIcon aria-hidden size={20} weight="duotone" />,
+  settings: <GearSixIcon aria-hidden size={20} weight="duotone" />,
+};
+
 /**
- * Bottom padding + scroll-padding for the fixed notice stack (~82px per
- * notice + 24px offset), so a control scrolled into view is not under it.
+ * Bottom padding + scroll-padding for the fixed bottom stack (~82px per
+ * notice or island + 24px offset), so a control scrolled into view is not under it.
  */
-const NOTICE_ROOM = ["pb-24", "pb-28 scroll-pb-28", "pb-48 scroll-pb-48", "pb-72 scroll-pb-72"];
+const STACK_ROOM = ["pb-24", "pb-28 scroll-pb-28", "pb-48 scroll-pb-48", "pb-72 scroll-pb-72", "pb-96 scroll-pb-96"];
+
+/** How long a finished job stays in the island (legacy: 5 s). */
+const ISLAND_LINGER = 5000;
 
 export function App() {
   const view = useUi((s) => s.view);
@@ -54,22 +87,106 @@ export function App() {
   }, []);
 
   const noticeCount = useUi((s) => s.notices.length);
+  const island = useIslandJob();
   const View = VIEW[view];
+  const stack = noticeCount + (island ? 1 : 0);
   return (
     <>
       <div inert={modal} className="flex h-full">
-        <TabRail />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <GameHeader />
-          <main className={cx("min-h-0 flex-1 overflow-y-auto px-8 pt-6", NOTICE_ROOM[noticeCount] ?? NOTICE_ROOM[3])}>
+        <Sidebar />
+        <main className={cx("min-h-0 min-w-0 flex-1 overflow-y-auto", STACK_ROOM[stack] ?? STACK_ROOM[4])}>
+          {/* key: each view enters with the short legacy fade/rise. */}
+          <div key={view} className="mx-auto w-full max-w-[1400px] animate-rise px-10 pt-10">
             <View />
-          </main>
-        </div>
-        <Notices />
+          </div>
+        </main>
+        <BottomStack island={island} />
       </div>
       <PromptHost />
       <OskHost />
     </>
+  );
+}
+
+function Brand() {
+  const info = useQuery({ queryKey: ["appinfo"], queryFn: ipc.appInfo });
+  return (
+    <div className="flex items-center gap-3">
+      <svg viewBox="0 0 32 32" className="size-8 shrink-0" aria-hidden>
+        <rect width="32" height="32" rx="9" className="fill-ink-3" />
+        <path
+          d="M8 22V10l8 7 8-7v12"
+          fill="none"
+          className="stroke-accent-400"
+          strokeWidth="2.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+      <div className="leading-tight">
+        <div className="text-[15px] font-semibold tracking-tight text-zinc-50">modman</div>
+        <div className="font-mono text-[10.5px] text-dim">v{info.data?.version ?? "…"}</div>
+      </div>
+    </div>
+  );
+}
+
+function Sidebar() {
+  return (
+    <aside aria-label="Sidebar" className="flex h-full w-[268px] shrink-0 flex-col border-r border-white/[0.05] bg-ink">
+      <GameHeader />
+      <TabRail />
+      <AccountFooter />
+    </aside>
+  );
+}
+
+/** Brand + active game (the legacy sidebar's game list, reduced to the active one; switch games on Overview). */
+function GameHeader() {
+  const { game, isLoading } = useActiveGame();
+  const needsDeploy = useUi((s) => s.needsDeploy);
+  const progress = useUi((s) => s.deployProgress);
+  const deploy = useDeploy();
+  const busy = useBusy("Deploy");
+  const d = game?.deploy;
+  const tone: DotTone = !d?.active ? "zinc" : d.interrupted ? "rose" : needsDeploy ? "amber" : "accent";
+  return (
+    <header className="grid gap-6 px-6 pt-7 pb-5">
+      <Brand />
+      <div className="grid gap-2">
+        <div className="eyebrow">Game</div>
+        {game ? (
+          <>
+            <div className="flex items-center gap-3">
+              <StatusDot tone={tone} live={!!d?.active} />
+              <span className="min-w-0 flex-1 truncate text-[14.5px] text-zinc-50">{game.name}</span>
+              <span className="font-mono text-[11px] text-dim">{game.mod_count}</span>
+            </div>
+            <SupportBadge support={game.support} />
+            {progress && (
+              <span className="grid gap-1.5 pt-1 font-mono text-[11px] text-dim">
+                <progress aria-label="Deploy progress" max={progress.total || 1} value={progress.done} />
+                deploying {progress.done}/{progress.total}
+              </span>
+            )}
+            {needsDeploy && !progress && (
+              <Button
+                tone="primary"
+                size="sm"
+                className="mt-1 w-full"
+                busy={busy}
+                icon={<RocketLaunchIcon aria-hidden size={16} weight="duotone" />}
+                onClick={deploy}
+              >
+                Deploy changes
+              </Button>
+            )}
+          </>
+        ) : (
+          <span className="text-[14px] text-zinc-400">{isLoading ? "Loading…" : "No game selected"}</span>
+        )}
+      </div>
+    </header>
   );
 }
 
@@ -79,97 +196,196 @@ function TabRail() {
   const running = useUi((s) => Object.values(s.jobs).filter((j) => j.state === "started").length);
   const prompts = useUi((s) => s.prompts.length);
   return (
-    <nav aria-label="Views" data-nav-rail className="flex w-56 shrink-0 flex-col gap-1 border-r border-white/[0.06] bg-ink-2 p-3">
-      <div className="px-3 pt-2 pb-4 text-xl font-semibold tracking-tight text-zinc-50">modman</div>
-      {VIEWS.map((v) => (
-        <button
-          key={v.id}
-          type="button"
-          data-tab={v.id}
-          aria-current={v.id === view ? "page" : undefined}
-          onClick={() => setView(v.id)}
-          className={cx(
-            "flex min-h-12 items-center justify-between rounded-xl px-4 text-left text-base",
-            v.id === view ? "bg-accent-950 text-accent-200" : "text-zinc-300 hover:bg-white/5",
-          )}
-        >
-          {v.label}
-          {v.id === "activity" && running + prompts > 0 && (
-            <span className="rounded-full bg-accent-500 px-2 text-sm text-ink">{running + prompts}</span>
-          )}
-        </button>
-      ))}
-      <p className="mt-auto px-3 text-xs leading-relaxed text-zinc-500">
-        LB/RB or PgUp/PgDn switch tabs · A/Enter select · B/Esc back
-      </p>
+    <nav aria-label="Views" data-nav-rail className="grid gap-0.5 px-4">
+      {VIEWS.map((v) => {
+        const on = v.id === view;
+        return (
+          <button
+            key={v.id}
+            type="button"
+            data-tab={v.id}
+            aria-current={on ? "page" : undefined}
+            onClick={() => setView(v.id)}
+            className={cx(
+              "flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-[14.5px] transition-colors duration-150",
+              on ? "bg-white/[0.07] text-zinc-50" : "text-zinc-400 hover:bg-white/[0.03] hover:text-zinc-200",
+            )}
+          >
+            <span className={cx("transition-colors duration-150", on && "text-accent-300")}>{ICON[v.id]}</span>
+            <span className="flex-1">{v.label}</span>
+            {v.id === "activity" && running + prompts > 0 && (
+              <span className="rounded-full bg-accent-400 px-2 font-mono text-[11px] font-semibold text-accent-950">
+                {running + prompts}
+              </span>
+            )}
+          </button>
+        );
+      })}
     </nav>
   );
 }
 
-function GameHeader() {
-  const { game, isLoading } = useActiveGame();
-  const needsDeploy = useUi((s) => s.needsDeploy);
-  const progress = useUi((s) => s.deployProgress);
-  const deploy = useDeploy();
-  const busy = useBusy("Deploy");
+function AccountFooter() {
+  const a = useAccount().data;
+  const signedIn = !!a?.key_source;
   return (
-    <header className="flex min-h-16 flex-wrap items-center gap-3 border-b border-white/[0.06] px-8 py-3">
-      {game ? (
-        <>
-          <span className="text-lg font-medium text-zinc-100">{game.name}</span>
-          <SupportBadge support={game.support} />
-          {progress && (
-            <span className="flex w-56 items-center gap-2 text-sm text-zinc-400">
-              <progress aria-label="Deploy progress" max={progress.total || 1} value={progress.done} />
-              {progress.done}/{progress.total}
-            </span>
-          )}
-          {needsDeploy && !progress && (
-            <Button tone="primary" className="ml-auto" busy={busy} onClick={deploy}>
-              Deploy changes
-            </Button>
-          )}
-        </>
+    <div className="mt-auto grid gap-4 border-t border-white/[0.05] px-6 py-5">
+      {signedIn ? (
+        <div className="flex items-center gap-3">
+          <div
+            aria-hidden
+            className="grid size-9 place-items-center rounded-xl bg-gradient-to-br from-accent-600/50 to-ink-3 font-mono text-[12px] font-semibold text-accent-50"
+          >
+            {(a?.user ?? "?").slice(0, 2).toUpperCase()}
+          </div>
+          <div className="min-w-0 leading-tight">
+            <div className="truncate text-[13.5px] text-zinc-200">{a?.user ?? "Signed in"}</div>
+            <div className="font-mono text-[10.5px] text-dim">{a?.premium ? "Premium" : "Free account"}</div>
+          </div>
+        </div>
       ) : (
-        <span className="text-zinc-400">{isLoading ? "Loading…" : "No game selected"}</span>
+        <p className="text-[13px] text-zinc-400">Not signed in to Nexus Mods. See Settings.</p>
       )}
-    </header>
+      <p className="font-mono text-[10.5px] leading-relaxed text-dim">LB/RB or PgUp/PgDn switch tabs · A/Enter select · B/Esc back</p>
+    </div>
   );
 }
 
-const NOTICE_TONE = {
-  info: "border-white/10",
-  success: "border-accent-500/40",
-  warn: "border-amber-400/40",
-  error: "border-rose-400/50",
-} as const;
+/** The job shown in the island: the newest running one, else one that finished in the last few seconds. */
+function useIslandJob(): JobEntry | null {
+  const jobs = useUi((s) => s.jobs);
+  const [, tick] = useState(0);
+  const list = Object.values(jobs).sort((a, b) => b.id - a.id);
+  const job = list.find((j) => j.state === "started") ?? list[0] ?? null;
+  const left = job?.finishedAt ? ISLAND_LINGER - (Date.now() - job.finishedAt) : 0;
+  useEffect(() => {
+    if (!job?.finishedAt || left <= 0) return;
+    const t = setTimeout(() => tick((n) => n + 1), left + 20);
+    return () => clearTimeout(t);
+  }, [job?.id, job?.finishedAt, left]);
+  if (!job) return null;
+  return job.state === "started" || left > 0 ? job : null;
+}
 
-function Notices() {
+const NOTICE_TONE: Record<NoticeTone, { border: string; icon: ReactNode }> = {
+  info: { border: "border-white/10", icon: <InfoIcon aria-hidden size={18} weight="duotone" className="text-zinc-300" /> },
+  success: {
+    border: "border-accent-400/25",
+    icon: <CheckCircleIcon aria-hidden size={18} weight="duotone" className="text-accent-300" />,
+  },
+  warn: { border: "border-amber-400/30", icon: <WarningIcon aria-hidden size={18} weight="duotone" className="text-amber-300" /> },
+  error: { border: "border-rose-400/40", icon: <XCircleIcon aria-hidden size={18} weight="duotone" className="text-rose-300" /> },
+};
+
+/** Fixed bottom stack centred under the content (legacy JobIsland position): notices, then the job island. */
+function BottomStack({ island }: { island: JobEntry | null }) {
   const notices = useUi((s) => s.notices);
   const dismiss = useUi((s) => s.dismiss);
   const deploy = useDeploy();
-  if (!notices.length) return null;
+  if (!notices.length && !island) return null;
   return (
-    <aside aria-label="Notices" aria-live="polite" className="fixed right-6 bottom-6 z-40 grid w-[26rem] gap-2">
-      {notices.map((n) => (
-        <div key={n.id} role={n.tone === "error" ? "alert" : "status"} className={cx("surface flex items-center gap-3 border p-3 pl-4", NOTICE_TONE[n.tone])}>
-          <p className="min-w-0 flex-1 text-sm break-words text-zinc-200">{n.text}</p>
-          {n.deploy && (
-            <Button
-              tone="primary"
-              onClick={() => {
-                dismiss(n.id);
-                void deploy();
-              }}
+    <div className="pointer-events-none fixed inset-y-auto right-0 bottom-5 left-[268px] z-40 flex flex-col items-center gap-2 px-6">
+      {notices.length > 0 && (
+        <aside aria-label="Notices" aria-live="polite" className="grid w-full max-w-xl gap-2">
+          {notices.map((n) => (
+            <div
+              key={n.id}
+              role={n.tone === "error" ? "alert" : "status"}
+              className={cx(
+                "glass pointer-events-auto flex animate-island items-center gap-3 rounded-2xl py-2 pr-2 pl-4",
+                NOTICE_TONE[n.tone].border,
+              )}
             >
-              Deploy now
-            </Button>
-          )}
-          <Button tone="ghost" aria-label="Dismiss notice" onClick={() => dismiss(n.id)}>
-            ✕
-          </Button>
-        </div>
-      ))}
-    </aside>
+              {NOTICE_TONE[n.tone].icon}
+              <p className="min-w-0 flex-1 text-[13.5px] break-words text-zinc-100">{n.text}</p>
+              {n.deploy && (
+                <Button
+                  tone="primary"
+                  size="sm"
+                  onClick={() => {
+                    dismiss(n.id);
+                    void deploy();
+                  }}
+                >
+                  Deploy now
+                </Button>
+              )}
+              <IconButton label="Dismiss notice" onClick={() => dismiss(n.id)}>
+                <XIcon aria-hidden size={16} />
+              </IconButton>
+            </div>
+          ))}
+        </aside>
+      )}
+      {island && (
+        <aside aria-label="Job status" className="flex w-full justify-center">
+          <JobIsland job={island} />
+        </aside>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Legacy dynamic-island status pill: the running job and its latest line,
+ * then "Finished"/"Failed" for a few seconds. Status only (not focusable):
+ * the full output is in Activity.
+ */
+function JobIsland({ job }: { job: JobEntry }) {
+  const last = useUi((s) => {
+    for (let i = s.activity.length - 1; i >= 0; i--) {
+      const a = s.activity[i];
+      if (a.job === job.id && a.text.trim()) return a.text.trim();
+    }
+    return null;
+  });
+  const progress = useUi((s) => (s.deployProgress?.job === job.id ? s.deployProgress : null));
+  const queued = useUi((s) => Object.values(s.jobs).filter((j) => j.state === "started" && j.id !== job.id).length);
+  const running = job.state === "started";
+  const failed = job.state === "failed";
+  return (
+    <div
+      role="status"
+      aria-label="Current job"
+      className="glass pointer-events-auto relative flex min-h-14 w-full max-w-xl animate-island items-center gap-3 overflow-hidden rounded-full py-2 pr-5 pl-2.5"
+    >
+      {running && (
+        <span aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden rounded-full">
+          <span className="absolute inset-y-0 w-1/2 animate-shimmer bg-gradient-to-r from-transparent via-accent-400/[0.08] to-transparent" />
+        </span>
+      )}
+      <span
+        aria-hidden
+        className={cx(
+          "relative grid size-9 shrink-0 place-items-center rounded-full",
+          failed ? "bg-rose-400/15 text-rose-300" : "bg-accent-400/15 text-accent-300",
+        )}
+      >
+        {running ? (
+          <span className="flex gap-[3px]">
+            <span className="h-3.5 w-[3px] animate-bar rounded-full bg-current" />
+            <span className="h-3.5 w-[3px] animate-bar rounded-full bg-current [animation-delay:150ms]" />
+            <span className="h-3.5 w-[3px] animate-bar rounded-full bg-current [animation-delay:300ms]" />
+          </span>
+        ) : failed ? (
+          <WarningIcon size={17} weight="bold" />
+        ) : (
+          <CheckIcon size={17} weight="bold" />
+        )}
+      </span>
+      <span className="relative min-w-0 flex-1">
+        <span className="block truncate text-[13.5px] font-medium text-zinc-100 capitalize">{job.kind}</span>
+        <span className="block truncate font-mono text-[11px] text-dim">
+          {running
+            ? progress
+              ? `deploying ${progress.done}/${progress.total}`
+              : (last ?? "Starting…")
+            : failed
+              ? `Failed${job.error ? `: ${job.error}` : ""} · see Activity`
+              : "Finished"}
+        </span>
+      </span>
+      {queued > 0 && <span className="relative font-mono text-[11px] text-zinc-400">+{queued}</span>}
+    </div>
   );
 }

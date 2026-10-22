@@ -5,6 +5,7 @@
 import { useState } from "react";
 import { flushSync } from "react-dom";
 import { useUi } from "../app/store";
+import { ArrowFatUpIcon, BackspaceIcon, ClipboardTextIcon } from "@phosphor-icons/react";
 import { Dialog } from "./Dialog";
 import { Button, cx } from "./ui";
 
@@ -62,10 +63,10 @@ function Osk() {
     <Dialog title={`Keyboard: ${target.label}`} onBack={close} wide returnFocus={target.input}>
       <output
         aria-label="Typed text"
-        className="mb-4 block min-h-12 rounded-xl border border-white/10 bg-ink px-4 py-3 font-mono text-lg break-all text-zinc-100"
+        className="mb-5 block min-h-14 rounded-2xl border border-white/[0.08] bg-ink px-4 py-3.5 font-mono text-lg break-all text-zinc-100"
       >
         {show ? value : "•".repeat(value.length)}
-        <span className="text-accent-400">▏</span>
+        <span aria-hidden className="ml-px inline-block h-5 w-0.5 translate-y-0.5 animate-pulse bg-accent-400" />
       </output>
       <div className="grid gap-2">
         {ROWS.map((row) => (
@@ -78,7 +79,7 @@ function Osk() {
                   type="button"
                   data-autofocus={row === ROWS[0] && i === 0 ? true : undefined}
                   onClick={() => type(ch)}
-                  className="min-h-12 min-w-12 rounded-lg border border-white/10 bg-ink-3 font-mono text-lg text-zinc-100"
+                  className="min-h-12 min-w-12 rounded-xl border border-white/[0.06] bg-white/[0.06] font-mono text-lg text-zinc-100 transition-colors duration-150 hover:bg-white/[0.1] active:scale-95"
                 >
                   {k}
                 </button>
@@ -93,17 +94,26 @@ function Osk() {
           aria-pressed={shift}
           onClick={() => setShift((s) => !s)}
           className={cx(
-            "min-h-12 rounded-xl border px-5",
-            shift ? "border-accent-500/60 bg-accent-950 text-accent-200" : "border-white/10 bg-ink-3",
+            "inline-flex min-h-12 items-center gap-2 rounded-xl border px-4 text-sm font-medium transition-colors duration-200",
+            shift
+              ? "border-accent-400/40 bg-accent-400/[0.12] text-accent-200"
+              : "border-white/[0.06] bg-white/[0.06] text-zinc-100 hover:bg-white/[0.1]",
           )}
         >
+          <ArrowFatUpIcon aria-hidden size={16} weight={shift ? "fill" : "regular"} />
           Shift
         </button>
-        <Button onClick={() => setValue((v) => v.slice(0, -1))}>Backspace</Button>
+        <Button icon={<BackspaceIcon aria-hidden size={16} />} onClick={() => setValue((v) => v.slice(0, -1))}>
+          Backspace
+        </Button>
         <Button onClick={() => setValue("")}>Clear</Button>
-        <Button onClick={paste}>Paste</Button>
+        <Button icon={<ClipboardTextIcon aria-hidden size={16} />} onClick={paste}>
+          Paste
+        </Button>
         {secret && <Button onClick={() => setShow((s) => !s)}>{show ? "Hide" : "Show"}</Button>}
-        <Button onClick={close}>Cancel</Button>
+        <Button tone="ghost" onClick={close}>
+          Cancel
+        </Button>
         <Button tone={submitLabel ? "default" : "primary"} onClick={() => done()}>
           Done
         </Button>

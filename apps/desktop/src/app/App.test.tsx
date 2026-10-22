@@ -81,7 +81,8 @@ describe("structured results", () => {
     renderApp();
     act(() => useUi.getState().setView("mods"));
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Disable SkyUI" }));
+    // The enable control is a switch (legacy toggle).
+    await user.click(await screen.findByRole("switch", { name: "Disable SkyUI" }));
     expect(t.callsOf("mods_set_enabled")).toEqual([{ game: null, ids: [m.id], enabled: false }]);
     await user.click(await screen.findByRole("button", { name: "Deploy now" }));
     await waitFor(() => expect(t.callsOf("deploy")).toHaveLength(1));
@@ -101,5 +102,22 @@ describe("structured results", () => {
     await user.type(await screen.findByLabelText("nxm link"), "nxm://bad");
     await user.click(screen.getByRole("button", { name: "Download" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("not an nxm link");
+  });
+});
+
+describe("job island", () => {
+  // Fails when the island does not follow job events (stale "running" pill or none at all).
+  it("shows the running job with its latest line, then its outcome", async () => {
+    const { renderApp, t } = await setup();
+    renderApp();
+    act(() => {
+      t.emit("modman:job", { id: 4, kind: "deploy", state: "started", error: null });
+      t.emit("modman:activity", { job: 4, msg: { level: "info", spans: [{ text: "Linking files", style: "plain" }] }, text: "Linking files" });
+    });
+    const island = await screen.findByRole("status", { name: "Current job" });
+    expect(island).toHaveTextContent("deploy");
+    expect(island).toHaveTextContent("Linking files");
+    act(() => t.emit("modman:job", { id: 4, kind: "deploy", state: "failed", error: "disk full" }));
+    expect(screen.getByRole("status", { name: "Current job" })).toHaveTextContent("Failed: disk full");
   });
 });

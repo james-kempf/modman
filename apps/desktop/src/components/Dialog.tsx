@@ -64,7 +64,7 @@ export function Dialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-6">
+    <div className="fixed inset-0 z-50 grid animate-fade place-items-center bg-ink/70 p-6 backdrop-blur-sm">
       <div
         ref={ref}
         role="dialog"
@@ -72,13 +72,13 @@ export function Dialog({
         aria-labelledby={titleId}
         data-nav-scope
         onKeyDown={onKeyDown}
-        className={cx("surface max-h-[92vh] w-full overflow-y-auto p-6", wide ? "max-w-5xl" : "max-w-3xl")}
+        className={cx("glass max-h-[92vh] w-full animate-pop overflow-y-auto rounded-3xl p-7", wide ? "max-w-5xl" : "max-w-2xl")}
       >
-        <h2 id={titleId} className="text-xl font-medium text-zinc-50">
+        <h2 id={titleId} className="text-xl font-medium tracking-tight text-zinc-50">
           {title}
         </h2>
-        {subtitle && <p className="mt-1 text-sm text-zinc-400">{subtitle}</p>}
-        <div className="mt-5">{children}</div>
+        {subtitle && <p className="mt-1.5 text-[14.5px] leading-relaxed text-zinc-400">{subtitle}</p>}
+        <div className="mt-6">{children}</div>
       </div>
     </div>
   );
