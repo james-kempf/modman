@@ -4,8 +4,10 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { errMsg } from "../app/bridge";
 import { useActiveGame, useMods } from "../app/queries";
 import { useBusy, useRun } from "../app/run";
+import { useUi } from "../app/store";
 import { Dialog } from "../components/Dialog";
 import {
   ArrowDownIcon,
@@ -23,6 +25,7 @@ import {
   Button,
   Card,
   Empty,
+  ErrorNote,
   Fact,
   IconButton,
   Segmented,
@@ -51,7 +54,7 @@ export function Mods() {
   const { game } = useActiveGame();
   const [tab, setTab] = useState<Tab>("list");
   return (
-    <div className="grid gap-6">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
       <ViewHeader
         title="Mods"
         eyebrow={game?.name}
@@ -69,7 +72,8 @@ export function Mods() {
       ) : tab === "conflicts" ? (
         <Conflicts game={game.domain} />
       ) : tab === "updates" ? (
-        <Updates />
+        // key: a report for one game is not shown for another.
+        <Updates key={game.domain} />
       ) : (
         <Profiles game={game.domain} />
       )}
@@ -77,9 +81,15 @@ export function Mods() {
   );
 }
 
+/** One move at a time: the load order is one list, and a double click must not move a mod twice. */
+const MOVE = "Move mod";
+const enableKey = (id: number) => `Enable mod ${id}`;
+
 function ModList({ game }: { game: string }) {
   const mods = useMods(game);
   const run = useRun();
+  const moving = useBusy(MOVE);
+  const toggling = useUi((s) => s.busy);
   const [detail, setDetail] = useState<ModView | null>(null);
   if (mods.isLoading) return <Loading />;
   if (mods.error) return <Empty>Could not load mods: {String((mods.error as { message?: string }).message ?? mods.error)}</Empty>;
@@ -110,42 +120,54 @@ function ModList({ game }: { game: string }) {
         {list.map((m, i) => (
           <li
             key={m.id}
-            className="flex min-h-16 min-w-0 flex-wrap items-center gap-3 rounded-2xl border border-white/[0.05] bg-ink-2 py-2 pr-3 pl-2 transition-colors duration-200 hover:border-white/[0.08]"
+            className="flex min-h-16 min-w-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl border border-white/[0.05] bg-ink-2 py-2 pr-3 pl-2 transition-colors duration-200 hover:border-white/[0.08]"
           >
-            <span className="w-9 shrink-0 text-right font-mono text-[12px] text-dim">{m.position}</span>
-            <Thumb game={game} modId={m.nexus_mod_id} name={m.name} className={cx("transition-opacity", !m.enabled && "opacity-40 grayscale")} />
-            <span className="min-w-0 flex-1">
-              <span className={cx("block truncate text-[15px] transition-colors", m.enabled ? "text-zinc-100" : "text-zinc-400")}>
-                {m.name}
-              </span>
-              <span className="block truncate font-mono text-[11.5px] text-dim">
-                {m.version ? `v${m.version}` : "—"}
-                {m.author ? ` · ${m.author}` : ""} · {m.file_count} files
+            {/* The name keeps about 12rem; on a narrow row the controls wrap below it as one group. */}
+            <span className="flex min-w-0 flex-[1_1_18rem] items-center gap-3">
+              <span className="w-9 shrink-0 text-right font-mono text-[12px] text-dim">{m.position}</span>
+              <Thumb game={game} modId={m.nexus_mod_id} name={m.name} className={cx("transition-opacity", !m.enabled && "opacity-40 grayscale")} />
+              <span className="min-w-0 flex-1">
+                <span className={cx("block truncate text-[15px] transition-colors", m.enabled ? "text-zinc-100" : "text-zinc-400")} title={m.name}>
+                  {m.name}
+                </span>
+                <span className="block truncate font-mono text-[11.5px] text-dim">
+                  {m.version ? `v${m.version}` : "—"}
+                  {m.author ? ` · ${m.author}` : ""} · {m.file_count} files
+                </span>
               </span>
             </span>
-            <span className="hidden items-center gap-2 md:flex">
-              {m.collections.length > 0 && <Badge tone="accent">collection</Badge>}
-              <span className="w-16 text-right font-mono text-[11.5px] text-dim">{bytes(m.size)}</span>
+            <span className="ml-auto flex shrink-0 items-center gap-1">
+              <span className="hidden items-center gap-2 lg:flex">
+                {m.collections.length > 0 && <Badge tone="accent">collection</Badge>}
+                <span className="w-16 text-right font-mono text-[11.5px] text-dim">{bytes(m.size)}</span>
+              </span>
+              <Toggle
+                label={`${m.enabled ? "Disable" : "Enable"} ${m.name}`}
+                showLabel={false}
+                checked={m.enabled}
+                busy={(toggling[enableKey(m.id)] ?? 0) > 0}
+                onChange={(v) => run("Enable/disable", () => ipc.modsSetEnabled([m.id], v), { key: enableKey(m.id) })}
+              />
+              <IconButton
+                label={`Move ${m.name} up`}
+                disabled={i === 0}
+                busy={moving}
+                onClick={() => run("Move", () => ipc.modMove(m.uid, "up"), { key: MOVE })}
+              >
+                <ArrowUpIcon aria-hidden size={18} />
+              </IconButton>
+              <IconButton
+                label={`Move ${m.name} down`}
+                disabled={i === list.length - 1}
+                busy={moving}
+                onClick={() => run("Move", () => ipc.modMove(m.uid, "down"), { key: MOVE })}
+              >
+                <ArrowDownIcon aria-hidden size={18} />
+              </IconButton>
+              <Button size="sm" tone="ghost" icon={<CaretRightIcon aria-hidden size={14} />} onClick={() => setDetail(m)}>
+                Details
+              </Button>
             </span>
-            <Toggle
-              label={`${m.enabled ? "Disable" : "Enable"} ${m.name}`}
-              showLabel={false}
-              checked={m.enabled}
-              onChange={(v) => run("Enable/disable", () => ipc.modsSetEnabled([m.id], v))}
-            />
-            <IconButton label={`Move ${m.name} up`} disabled={i === 0} onClick={() => run("Move", () => ipc.modMove(m.uid, "up"))}>
-              <ArrowUpIcon aria-hidden size={18} />
-            </IconButton>
-            <IconButton
-              label={`Move ${m.name} down`}
-              disabled={i === list.length - 1}
-              onClick={() => run("Move", () => ipc.modMove(m.uid, "down"))}
-            >
-              <ArrowDownIcon aria-hidden size={18} />
-            </IconButton>
-            <Button size="sm" tone="ghost" icon={<CaretRightIcon aria-hidden size={14} />} onClick={() => setDetail(m)}>
-              Details
-            </Button>
           </li>
         ))}
       </ol>
@@ -318,6 +340,7 @@ function Updates() {
 function Profiles({ game }: { game: string }) {
   const q = useQuery({ queryKey: ["profiles", game], queryFn: () => ipc.profilesList(game) });
   const run = useRun();
+  const saving = useBusy("Save profile");
   const [name, setName] = useState("");
   // Deleting is not confirmed by the backend: press twice.
   const [armed, setArmed] = useState<string | null>(null);
@@ -328,28 +351,31 @@ function Profiles({ game }: { game: string }) {
         onSubmit={async (e) => {
           e.preventDefault();
           if (!name.trim()) return;
-          await run("Save profile", () => ipc.profileSave(name.trim()));
-          setName("");
+          const r = await run("Save profile", () => ipc.profileSave(name.trim()), { key: "Save profile" });
+          // undefined = failed (error notice shown): keep the name to retry.
+          if (r !== undefined) setName("");
         }}
       >
-        <TextField label="Save the current mod set as" value={name} onChange={(e) => setName(e.target.value)} className="min-w-72 flex-1" />
-        <Button type="submit" tone="primary" disabled={!name.trim()} icon={<FloppyDiskIcon aria-hidden size={15} />}>
+        <TextField label="Save the current mod set as" value={name} onChange={(e) => setName(e.target.value)} className="min-w-0 flex-[1_1_18rem]" />
+        <Button type="submit" tone="primary" busy={saving} inactive={!name.trim()} icon={<FloppyDiskIcon aria-hidden size={15} />}>
           Save profile
         </Button>
       </form>
-      {!q.data?.length ? (
+      {q.isError ? (
+        <ErrorNote>Could not load profiles: {errMsg(q.error)}</ErrorNote>
+      ) : !q.data?.length ? (
         <Empty>No saved profiles.</Empty>
       ) : (
         <ul className="rows">
           {q.data.map((p) => (
             <li key={p.name} className="flex flex-wrap items-center gap-3 py-3">
               <span className="min-w-0 flex-1">
-                <span className="block text-[14.5px] text-zinc-100">{p.name}</span>
+                <span className="block text-[14.5px] wrap-anywhere text-zinc-100">{p.name}</span>
                 <span className="font-mono text-[11.5px] text-dim">
                   {p.enabled}/{p.mods} enabled · saved {when(p.saved_at)}
                 </span>
               </span>
-              <Button size="sm" tone="primary" onClick={() => run("Load profile", () => ipc.profileLoad(p.name))}>
+              <Button size="sm" tone="primary" onClick={() => run("Load profile", () => ipc.profileLoad(p.name), { key: "Load profile" })}>
                 Load
               </Button>
               <Button

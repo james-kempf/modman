@@ -91,7 +91,7 @@ export function GamePicker({ games, tone }: { games: GameView[]; tone: DotTone }
           aria-label="Games"
           data-nav-scope
           onBlur={onBlur}
-          className="glass absolute inset-x-0 top-full z-30 mt-2 grid max-h-[60vh] animate-fade gap-0.5 overflow-y-auto rounded-2xl p-1.5"
+          className="glass absolute inset-x-0 top-full z-30 mt-2 grid max-h-[60vh] animate-fade grid-cols-[minmax(0,1fr)] gap-0.5 overflow-x-hidden overflow-y-auto rounded-2xl p-1.5"
         >
           {games.map((g) => (
             <button
@@ -101,12 +101,14 @@ export function GamePicker({ games, tone }: { games: GameView[]; tone: DotTone }
               aria-checked={g.active}
               onClick={() => pick(g)}
               className={cx(
-                "flex min-h-12 w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors duration-150",
+                "flex min-h-12 w-full min-w-0 items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors duration-150",
                 g.active ? "bg-white/[0.07]" : "hover:bg-white/[0.04]",
               )}
             >
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[14px] text-zinc-100">{g.name}</span>
+                <span className="block truncate text-[14px] text-zinc-100" title={g.name}>
+                  {g.name}
+                </span>
                 <span className="mt-1 flex flex-wrap items-center gap-2 font-mono text-[11px] text-dim">
                   {g.mod_count} mods
                   <SupportBadge support={g.support} />

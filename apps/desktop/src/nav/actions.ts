@@ -76,9 +76,10 @@ export function keyToNav(e: KeyboardEvent): NavAction | null {
     case "Escape":
       return { type: "back" };
     case "PageUp":
-      return { type: "tab", delta: -1 };
     case "PageDown":
-      return { type: "tab", delta: 1 };
+      // Inside a text field the keys keep their editing meaning.
+      if (inText) return null;
+      return { type: "tab", delta: e.key === "PageUp" ? -1 : 1 };
     default:
       return null;
   }

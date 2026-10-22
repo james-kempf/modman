@@ -5,6 +5,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { errMsg } from "../app/bridge";
 import { useActiveGame } from "../app/queries";
 import { useBusy, useRun } from "../app/run";
 import { useUi } from "../app/store";
@@ -13,11 +14,12 @@ import {
   CheckIcon,
   ClipboardTextIcon,
   DownloadSimpleIcon,
+  GameControllerIcon,
   LinkIcon,
   MagnifyingGlassIcon,
   ThumbsUpIcon,
 } from "@phosphor-icons/react";
-import { Badge, Button, Card, Empty, Segmented, StatusDot, TextField, Thumb, Toggle, ViewHeader, bytes, cx } from "../components/ui";
+import { Badge, Button, Card, Empty, ErrorNote, Segmented, StatusDot, TextField, Thumb, Toggle, ViewHeader, bytes, cx } from "../components/ui";
 
 /** 12345 -> "12.3K" (legacy `compact`). */
 function compact(n: number | null): string {
@@ -26,6 +28,7 @@ function compact(n: number | null): string {
 }
 import * as ipc from "../ipc/commands";
 import type { InstallResult, SearchView } from "../ipc/types";
+import { installKey } from "./Requirements";
 
 const FOMOD = [
   { value: "ask", label: "Ask (wizard)" },
@@ -47,20 +50,39 @@ export function installedText(r: InstallResult): string {
 }
 
 export function Install() {
-  const { game } = useActiveGame();
+  const { game, isLoading } = useActiveGame();
+  const setAddGame = useUi((s) => s.setAddGame);
   return (
-    <div className="grid gap-6">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
       <ViewHeader
         title="Install"
         eyebrow={game?.name}
         description="Install by ID or link, paste a Mod Manager Download link, or search Nexus Mods. Installers with options open as a wizard."
       />
-      <section className="stagger grid gap-6 lg:grid-cols-[1fr_1fr]">
-        <InstallCard />
-        <NxmCard />
-      </section>
-      <SearchCard />
-      <DownloadsCard />
+      {isLoading ? null : !game ? (
+        // Every install goes into the active game.
+        <Empty
+          icon={<GameControllerIcon size={28} weight="duotone" />}
+          title="No active game"
+          action={
+            <Button tone="primary" onClick={() => setAddGame(true)}>
+              Add game
+            </Button>
+          }
+        >
+          Add a game first; mods are installed into the active game.
+        </Empty>
+      ) : (
+        <>
+          <section className="stagger grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            <InstallCard />
+            <NxmCard />
+          </section>
+          {/* key: search results belong to one game. */}
+          <SearchCard key={game.domain} />
+          <DownloadsCard />
+        </>
+      )}
     </div>
   );
 }
@@ -74,7 +96,9 @@ function InstallCard() {
   const [deploy, setDeploy] = useState(false);
   const submit = async () => {
     if (!target.trim()) return;
-    const r = await run("Install", () => ipc.install({ target: target.trim(), fomod, deploy }));
+    const r = await run("Install", () => ipc.install({ target: target.trim(), fomod, deploy }), {
+      key: installKey(target.trim()),
+    });
     if (r) {
       notify(r.installed || r.collection ? "success" : "info", installedText(r));
       setTarget("");
@@ -99,11 +123,12 @@ function InstallCard() {
         <Segmented label="FOMOD" value={fomod} options={FOMOD} onChange={setFomod} />
         <div className="flex flex-wrap items-center gap-3">
           <Toggle label="Deploy after install" checked={deploy} onChange={setDeploy} />
+          {/* inactive, not disabled: focus returns here after the installer dialogs, when the field is already cleared. */}
           <Button
             type="submit"
             tone="primary"
             busy={busy}
-            disabled={!target.trim()}
+            inactive={!target.trim()}
             className="ml-auto"
             icon={<DownloadSimpleIcon aria-hidden size={16} />}
           >
@@ -175,20 +200,21 @@ function SearchCard() {
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<SearchView | null>(null);
   const searching = useBusy("Search");
+  const installing = useUi((s) => s.busy);
   return (
     <Card title="Search Nexus Mods">
       <form
         className="flex flex-wrap items-end gap-3"
         onSubmit={async (e) => {
           e.preventDefault();
-          if (query.trim()) setResult((await run("Search", () => ipc.search(query.trim()))) ?? null);
+          if (query.trim()) setResult((await run("Search", () => ipc.search(query.trim()), { key: "Search" })) ?? null);
         }}
       >
         <TextField
           label="Search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          className="min-w-72 flex-1"
+          className="min-w-0 flex-[1_1_18rem]"
           placeholder={game ? `Search ${game.name} mods` : "Search mods"}
         />
         <Button type="submit" busy={searching} disabled={!query.trim()} icon={<MagnifyingGlassIcon aria-hidden size={16} />}>
@@ -247,8 +273,11 @@ function SearchCard() {
                         size="sm"
                         tone="primary"
                         disabled={m.modId === null}
+                        busy={(installing[installKey(String(m.modId))] ?? 0) > 0}
                         onClick={async () => {
-                          const r = await run("Install", () => ipc.install({ target: String(m.modId), fomod: "ask" }));
+                          const r = await run("Install", () => ipc.install({ target: String(m.modId), fomod: "ask" }), {
+                            key: installKey(String(m.modId)),
+                          });
                           if (r) notify("success", installedText(r));
                         }}
                       >
@@ -273,6 +302,11 @@ function DownloadsCard() {
   const liveOnly = Object.values(live).filter((d) => d.last.type !== "finished" && !rows.some((r) => r.file_name === d.name));
   return (
     <Card title="Downloads">
+      {q.isError && (
+        <div className="mb-4">
+          <ErrorNote>Could not load the download queue: {errMsg(q.error)}</ErrorNote>
+        </div>
+      )}
       {!rows.length && !liveOnly.length ? (
         <Empty>No downloads.</Empty>
       ) : (

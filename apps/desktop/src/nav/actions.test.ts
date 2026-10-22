@@ -23,6 +23,13 @@ describe("keyboard mapping", () => {
     expect(keyToNav(key("PageUp"))).toEqual({ type: "tab", delta: -1 });
   });
 
+  // CT1 D14: fails when PageUp/PageDown in a text field switch the view instead of editing.
+  it("PageUp/PageDown inside a text field are left to the field", () => {
+    const input = document.createElement("input");
+    expect(keyToNav(key("PageUp", input))).toBeNull();
+    expect(keyToNav(key("PageDown", input))).toBeNull();
+  });
+
   it("left/right inside a text field move the caret, not focus", () => {
     const input = document.createElement("input");
     expect(keyToNav(key("ArrowLeft", input))).toBeNull();

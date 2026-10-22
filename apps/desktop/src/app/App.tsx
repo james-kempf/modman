@@ -24,6 +24,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type JSX, type ReactNode } from "react";
 import { AddGameHost } from "../components/AddGameDialog";
+import { ViewBoundary } from "../components/ErrorBoundary";
 import { GamePicker } from "../components/GamePicker";
 import { OskHost } from "../components/Osk";
 import { PromptHost } from "../components/PromptDialog";
@@ -40,6 +41,7 @@ import { Mods } from "../views/Mods";
 import { Overview } from "../views/Overview";
 import { Requirements } from "../views/Requirements";
 import { Settings } from "../views/Settings";
+import { jobLabel, jobOutcome } from "./jobs";
 import { useAccount, useActiveGame } from "./queries";
 import { useBusy, useDeploy } from "./run";
 import { VIEWS, useUi, type JobEntry, type NoticeTone, type ViewId } from "./store";
@@ -103,7 +105,9 @@ export function App() {
         <main className={cx("min-h-0 min-w-0 flex-1 overflow-y-auto", STACK_ROOM[stack] ?? STACK_ROOM[4])}>
           {/* key: each view enters with the short legacy fade/rise. */}
           <div key={view} className="mx-auto w-full max-w-[1400px] animate-rise px-10 pt-10">
-            <View />
+            <ViewBoundary name={VIEWS.find((v) => v.id === view)?.label ?? view}>
+              <View />
+            </ViewBoundary>
           </div>
         </main>
         <BottomStack island={island} />
@@ -132,7 +136,7 @@ function Brand() {
       </svg>
       <div className="leading-tight">
         <div className="text-[15px] font-semibold tracking-tight text-zinc-50">modman</div>
-        <div className="font-mono text-[10.5px] text-dim">v{info.data?.version ?? "…"}</div>
+        <div className="font-mono text-[10.5px] text-dim">v{info.data?.version ?? (info.isError ? "?" : "…")}</div>
       </div>
     </div>
   );
@@ -140,7 +144,11 @@ function Brand() {
 
 function Sidebar() {
   return (
-    <aside aria-label="Sidebar" className="flex h-full w-[268px] shrink-0 flex-col border-r border-white/[0.05] bg-ink">
+    // Scrolls by itself on short windows, so the app never grows past the viewport.
+    <aside
+      aria-label="Sidebar"
+      className="flex h-full min-h-0 w-[268px] shrink-0 flex-col overflow-y-auto border-r border-white/[0.05] bg-ink"
+    >
       <GameHeader />
       <TabRail />
       <AccountFooter />
@@ -241,11 +249,14 @@ function TabRail() {
 }
 
 function AccountFooter() {
-  const a = useAccount().data;
+  const q = useAccount();
+  const a = q.data;
   const signedIn = !!a?.key_source;
   return (
     <div className="mt-auto grid gap-4 border-t border-white/[0.05] px-6 py-5">
-      {signedIn ? (
+      {q.isError ? (
+        <p className="text-[13px] text-rose-300">Could not read the Nexus account. See Settings.</p>
+      ) : signedIn ? (
         <div className="flex items-center gap-3">
           <div
             aria-hidden
@@ -356,8 +367,9 @@ function JobIsland({ job }: { job: JobEntry }) {
   });
   const progress = useUi((s) => (s.deployProgress?.job === job.id ? s.deployProgress : null));
   const queued = useUi((s) => Object.values(s.jobs).filter((j) => j.state === "started" && j.id !== job.id).length);
-  const running = job.state === "started";
-  const failed = job.state === "failed";
+  const outcome = jobOutcome(job);
+  const running = outcome === "running";
+  const failed = outcome === "failed";
   return (
     <div
       role="status"
@@ -368,7 +380,11 @@ function JobIsland({ job }: { job: JobEntry }) {
         aria-hidden
         className={cx(
           "relative grid size-9 shrink-0 place-items-center rounded-full",
-          failed ? "bg-rose-400/15 text-rose-300" : "bg-accent-400/15 text-accent-300",
+          failed
+            ? "bg-rose-400/15 text-rose-300"
+            : outcome === "cancelled"
+              ? "bg-white/[0.08] text-zinc-300"
+              : "bg-accent-400/15 text-accent-300",
         )}
       >
         {running ? (
@@ -379,12 +395,14 @@ function JobIsland({ job }: { job: JobEntry }) {
           </span>
         ) : failed ? (
           <WarningIcon size={17} weight="bold" />
+        ) : outcome === "cancelled" ? (
+          <XIcon size={17} weight="bold" />
         ) : (
           <CheckIcon size={17} weight="bold" />
         )}
       </span>
       <span className="relative min-w-0 flex-1">
-        <span className="block truncate text-[13.5px] font-medium text-zinc-100 capitalize">{job.kind}</span>
+        <span className="block truncate text-[13.5px] font-medium text-zinc-100">{jobLabel(job.kind)}</span>
         <span className="block truncate font-mono text-[11px] text-dim">
           {running
             ? progress
@@ -392,7 +410,9 @@ function JobIsland({ job }: { job: JobEntry }) {
               : (last ?? "Starting…")
             : failed
               ? `Failed${job.error ? `: ${job.error}` : ""} · see Activity`
-              : "Finished"}
+              : outcome === "cancelled"
+                ? "Cancelled"
+                : "Finished"}
         </span>
       </span>
       {queued > 0 && <span className="relative font-mono text-[11px] text-zinc-400">+{queued}</span>}

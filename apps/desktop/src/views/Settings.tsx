@@ -4,18 +4,19 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
+import { errMsg } from "../app/bridge";
 import { useAccount } from "../app/queries";
 import { useBusy, useRun } from "../app/run";
 import { useUi } from "../app/store";
 import { readClipboard } from "../components/Osk";
 import { ClipboardTextIcon, FloppyDiskIcon, KeyIcon, KeyboardIcon, SignOutIcon } from "@phosphor-icons/react";
-import { Badge, Button, Empty, Fact, Row, Section, StatusDot, Toggle, ViewHeader, when } from "../components/ui";
+import { Badge, Button, Empty, ErrorNote, Fact, Row, Section, StatusDot, Toggle, ViewHeader, when } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import type { ConfigEntry, RunLogEntry } from "../ipc/types";
 
 export function Settings() {
   return (
-    <div className="grid gap-14">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-14">
       <ViewHeader title="Settings" description="Changes are saved by modman as soon as you make them." />
       <AccountCard />
       <AutoUpdateCard />
@@ -37,7 +38,11 @@ function AccountCard() {
       title="Nexus Mods account"
       intro="modman signs in with your personal API key. It is kept in the system keyring, or the modman config file when there is none."
     >
-      {signedIn ? (
+      {q.isError ? (
+        <div className="px-6 py-5">
+          <ErrorNote>Could not read the account: {errMsg(q.error)}</ErrorNote>
+        </div>
+      ) : signedIn ? (
         <Row
           title={
             <span className="flex flex-wrap items-center gap-2">
@@ -59,7 +64,7 @@ function AccountCard() {
             tone="danger"
             icon={<SignOutIcon aria-hidden size={15} />}
             onClick={async () => {
-              const envStill = await run("Sign out", () => ipc.logout());
+              const envStill = await run("Sign out", () => ipc.logout(), { key: "Sign out" });
               if (envStill) notify("warn", "NEXUS_API_KEY is still set in the environment.");
             }}
           >
@@ -95,7 +100,7 @@ export function ApiKeyEntry({ onDone }: { onDone?: () => void }) {
     const k = key.trim();
     if (!k) return;
     setKey("");
-    const r = await run("Sign in", () => ipc.login(k));
+    const r = await run("Sign in", () => ipc.login(k), { key: "Sign in" });
     if (!r) return;
     notify("success", `Signed in as ${r.user}${r.premium ? " (Premium)" : ""}; key stored in ${r.backend === "keyring" ? "the keyring" : r.file}`);
     if (r.keyring_unavailable) notify("warn", `Keyring unavailable: ${r.keyring_unavailable}`);
@@ -182,10 +187,18 @@ function AutoUpdateCard() {
         <Toggle
           label={on ? "Auto-update on" : "Auto-update off"}
           checked={on}
-          disabled={!s || busy}
-          onChange={(v) => run<unknown>("Auto-update", () => (v ? ipc.autoupdateEnable() : ipc.autoupdateDisable()))}
+          disabled={!s}
+          busy={busy}
+          onChange={(v) =>
+            run<unknown>("Auto-update", () => (v ? ipc.autoupdateEnable() : ipc.autoupdateDisable()), { key: "Auto-update" })
+          }
         />
       </Row>
+      {q.isError && (
+        <div className="px-6 py-5">
+          <ErrorNote>Could not read the auto-update status: {errMsg(q.error)}</ErrorNote>
+        </div>
+      )}
       {s && (
         <dl className="grid grid-cols-2 gap-x-6 gap-y-4 px-6 py-5 md:grid-cols-4">
           <Fact k="Timer" v={s.timer.installed ? (s.timer.active ?? "installed") : "not installed"} />
@@ -238,11 +251,18 @@ function ConfigCard() {
   const q = useQuery({ queryKey: ["config"], queryFn: ipc.configList });
   return (
     <Section title="Configuration" intro="modman's config keys, as on the command line (modman config).">
-      <ul className="rows">
-        {q.data?.map((e) => (
-          <ConfigRow key={e.key} entry={e} />
-        ))}
-      </ul>
+      {q.isError ? (
+        <div className="px-6 py-5">
+          <ErrorNote>Could not read the configuration: {errMsg(q.error)}</ErrorNote>
+        </div>
+      ) : (
+        <ul className="rows">
+          {q.data?.map((e) => (
+            // key on the value too: a saved (or refetched) value resets the field.
+            <ConfigRow key={`${e.key}=${e.value}`} entry={e} />
+          ))}
+        </ul>
+      )}
     </Section>
   );
 }
@@ -258,15 +278,15 @@ function ConfigRow({ entry }: { entry: ConfigEntry }) {
         className="flex flex-wrap items-end gap-3"
         onSubmit={async (e) => {
           e.preventDefault();
-          const r = await run("Save setting", () => ipc.configSet(entry.key, value));
+          const r = await run("Save setting", () => ipc.configSet(entry.key, value), { key: `Save ${entry.key}` });
           if (r) {
             notify("success", `${r.key} = ${r.value}`);
             if (r.old_data_left) notify("warn", `Old data is still in ${r.old_data_left}`);
           }
         }}
       >
-        <div className="grid min-w-72 flex-1 gap-2">
-          <label htmlFor={id} className="text-[13px] text-zinc-300">
+        <div className="grid min-w-0 flex-[1_1_18rem] gap-2">
+          <label htmlFor={id} className="text-[13px] wrap-anywhere text-zinc-300">
             <span className="font-mono text-zinc-100">{entry.key}</span> <span className="text-dim">{entry.description}</span>
           </label>
           <input id={id} className="input font-mono" value={value} onChange={(e) => setValue(e.target.value)} />
@@ -282,6 +302,14 @@ function ConfigRow({ entry }: { entry: ConfigEntry }) {
 function AppInfoCard() {
   const q = useQuery({ queryKey: ["appinfo"], queryFn: ipc.appInfo });
   const i = q.data;
+  if (q.isError)
+    return (
+      <Section title="About">
+        <div className="px-6 py-5">
+          <ErrorNote>Could not read the app info: {errMsg(q.error)}</ErrorNote>
+        </div>
+      </Section>
+    );
   if (!i) return null;
   return (
     <Section title="About">

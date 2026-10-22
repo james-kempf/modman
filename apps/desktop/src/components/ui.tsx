@@ -30,19 +30,31 @@ export function Button({
   size = "md",
   icon,
   busy,
+  inactive,
   className,
   children,
   ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { tone?: Tone; size?: Size; icon?: ReactNode; busy?: boolean }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
+  tone?: Tone;
+  size?: Size;
+  icon?: ReactNode;
+  busy?: boolean;
+  /**
+   * Unavailable but still focusable (aria-disabled): for a button that focus
+   * returns to, where native `disabled` would drop focus to <body>.
+   */
+  inactive?: boolean;
+}) {
+  const off = busy || inactive;
   return (
     <button
       type="button"
       {...rest}
       // Busy stays focusable: native `disabled` would drop focus to <body>.
       // preventDefault also cancels a submit button's form submission.
-      aria-disabled={busy || undefined}
+      aria-disabled={off || undefined}
       aria-busy={busy || undefined}
-      onClick={busy ? (e) => e.preventDefault() : rest.onClick}
+      onClick={off ? (e) => e.preventDefault() : rest.onClick}
       className={cx(
         "inline-flex min-w-12 shrink-0 items-center justify-center font-medium whitespace-nowrap transition-[background-color,color,transform,opacity] duration-200 active:translate-y-px active:scale-[0.98]",
         TONES[tone],
@@ -58,16 +70,20 @@ export function Button({
 
 export function IconButton({
   label,
+  busy,
   className,
   children,
   ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { label: string }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { label: string; busy?: boolean }) {
   return (
     <button
       type="button"
       aria-label={label}
       title={label}
       {...rest}
+      aria-disabled={busy || undefined}
+      aria-busy={busy || undefined}
+      onClick={busy ? (e) => e.preventDefault() : rest.onClick}
       className={cx(
         "grid size-12 shrink-0 place-items-center rounded-xl text-zinc-300 transition-colors duration-200 hover:bg-white/[0.06] hover:text-zinc-100 active:scale-95",
         className,
@@ -83,12 +99,15 @@ export function Toggle({
   onChange,
   label,
   disabled,
+  busy,
   showLabel = true,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   label: string;
   disabled?: boolean;
+  /** A change is being applied: ignores clicks but stays focusable (aria-disabled). */
+  busy?: boolean;
   /** Show `label` next to the switch (it is always the accessible name). */
   showLabel?: boolean;
 }) {
@@ -99,7 +118,9 @@ export function Toggle({
       aria-checked={checked}
       aria-label={label}
       disabled={disabled}
-      onClick={() => onChange(!checked)}
+      aria-disabled={busy || undefined}
+      aria-busy={busy || undefined}
+      onClick={() => !busy && onChange(!checked)}
       className={cx(
         "inline-flex min-h-12 min-w-12 shrink-0 items-center gap-3 rounded-xl text-sm text-zinc-200",
         showLabel ? "px-2" : "justify-center",
@@ -139,7 +160,7 @@ export function Segmented<T extends string>({
   return (
     <div role="group" aria-label={label} className="flex flex-wrap items-center gap-3">
       <span className="eyebrow">{label}</span>
-      <span className="flex rounded-xl border border-white/[0.06] bg-ink p-1">
+      <span className="flex max-w-full flex-wrap rounded-xl border border-white/[0.06] bg-ink p-1">
         {options.map((o) => (
           <button
             key={o.value}
@@ -348,11 +369,15 @@ export function Empty({
   );
 }
 
-/** Legacy ErrorNote. */
-export function ErrorNote({ children }: { children: ReactNode }) {
+/** Legacy ErrorNote (optional actions, e.g. "Try again"). */
+export function ErrorNote({ children, actions }: { children: ReactNode; actions?: ReactNode }) {
   return (
-    <div role="status" className="rounded-2xl border border-rose-400/15 bg-rose-500/[0.06] px-4 py-3 text-[14px] text-rose-200">
-      {children}
+    <div
+      role="status"
+      className="flex flex-wrap items-center gap-3 rounded-2xl border border-rose-400/15 bg-rose-500/[0.06] px-4 py-3 text-[14px] text-rose-200"
+    >
+      <div className="min-w-0 flex-1 wrap-anywhere">{children}</div>
+      {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
     </div>
   );
 }

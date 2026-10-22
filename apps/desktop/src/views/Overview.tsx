@@ -34,21 +34,25 @@ import {
   when,
 } from "../components/ui";
 import * as ipc from "../ipc/commands";
-import type { GameView, ModView, ReqRow, Skip, VerifyReport } from "../ipc/types";
+import type { GameView, ModView, PurgeReport, ReqRow, Skip, VerifyReport } from "../ipc/types";
 
 /** How many mods "Recently installed" lists. */
 const RECENT = 5;
 
 export function Overview() {
-  const { game, data: games } = useActiveGame();
+  const { game, data: games, error } = useActiveGame();
   const setAddGame = useUi((s) => s.setAddGame);
   return (
-    <div className="grid gap-6">
+    // minmax(0, 1fr): long unbroken names truncate inside the cards instead of widening the page.
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
       {/* The legacy Overview has no big page title: the game name leads the hero. */}
       <h1 className="eyebrow">Overview</h1>
       <StartupCheckCard />
-      {game ? (
-        <GameCards game={game} />
+      {error ? (
+        <ErrorNote>Could not load games: {errMsg(error)}</ErrorNote>
+      ) : game ? (
+        // key: per-game results (Verify) do not carry over to another game.
+        <GameCards key={game.domain} game={game} />
       ) : (
         <Empty
           icon={<GameControllerIcon size={28} weight="duotone" />}
@@ -75,11 +79,19 @@ function GameCards({ game }: { game: GameView }) {
   const bethesda = game.profile === "bethesda";
   return (
     <>
-      <section aria-label={game.name} className="stagger grid gap-6 xl:grid-cols-[1.35fr_1fr]">
+      <section
+        aria-label={game.name}
+        className="stagger grid grid-cols-[minmax(0,1fr)] gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]"
+      >
         <PlayCard game={game} outOfSync={outOfSync} />
         <DeploymentCard game={game} outOfSync={outOfSync} />
       </section>
-      <div className={cx("stagger grid gap-6 md:grid-cols-2", bethesda && "xl:grid-cols-3")}>
+      <div
+        className={cx(
+          "stagger grid grid-cols-[minmax(0,1fr)] gap-6 md:grid-cols-[repeat(2,minmax(0,1fr))]",
+          bethesda && "xl:grid-cols-[repeat(3,minmax(0,1fr))]",
+        )}
+      >
         <ModsCard mods={mods.data?.mods} outOfSync={outOfSync} />
         <RequirementsCard game={game.domain} />
         {bethesda && <PluginsCard game={game.domain} />}
@@ -102,7 +114,7 @@ function PlayCard({ game, outOfSync }: { game: GameView; outOfSync: boolean }) {
         ? { tone: "amber" as const, text: "Changes waiting to be deployed" }
         : { tone: "accent" as const, text: "Deployed and in sync" };
   const play = async () => {
-    const r = await run("Play", () => ipc.gameLaunch());
+    const r = await run("Play", () => ipc.gameLaunch(), { key: "Play" });
     if (!r) return;
     const ui = useUi.getState();
     if (r.deployed) ui.setNeedsDeploy(false);
@@ -117,7 +129,7 @@ function PlayCard({ game, outOfSync }: { game: GameView; outOfSync: boolean }) {
           <Badge>{game.profile}</Badge>
           <SupportBadge support={game.support} />
         </div>
-        <h2 className="mt-6 text-4xl leading-none font-medium tracking-tighter text-zinc-50 md:text-5xl">{game.name}</h2>
+        <h2 className="mt-6 text-4xl leading-none font-medium tracking-tighter wrap-anywhere text-zinc-50 md:text-5xl">{game.name}</h2>
         <p className="mt-4 font-mono text-[12.5px] wrap-anywhere text-dim">{game.folder ?? "no folder set"}</p>
       </div>
       <div className="grid gap-3">
@@ -154,7 +166,7 @@ function RemoveGame({ game }: { game: GameView }) {
       tone="ghost"
       size="sm"
       icon={<TrashIcon aria-hidden size={15} />}
-      onClick={() => run("Remove game", () => ipc.gameRemove(game.domain, false))}
+      onClick={() => run("Remove game", () => ipc.gameRemove(game.domain, false), { key: "Remove game" })}
     >
       Remove game
     </Button>
@@ -201,12 +213,21 @@ function DeploymentCard({ game, outOfSync }: { game: GameView; outOfSync: boolea
           <Button
             busy={verifying}
             icon={<ShieldCheckIcon aria-hidden size={16} />}
-            onClick={async () => setVerified((await run("Verify", () => ipc.verify())) ?? null)}
+            onClick={async () => setVerified((await run("Verify", () => ipc.verify(), { key: "Verify" })) ?? null)}
           >
             Verify
           </Button>
           {/* The backend asks for confirmation through a prompt. */}
-          <Button tone="danger" busy={purging} icon={<BroomIcon aria-hidden size={16} />} onClick={() => run("Purge", () => ipc.purge())}>
+          <Button
+            tone="danger"
+            busy={purging}
+            icon={<BroomIcon aria-hidden size={16} />}
+            onClick={async () => {
+              const r = await run("Purge", () => ipc.purge(), { key: "Purge" });
+              // null: declined at the confirmation.
+              if (r) useUi.getState().notify(r.nothing_deployed ? "info" : "success", purgedText(r));
+            }}
+          >
             Purge
           </Button>
         </div>
@@ -214,6 +235,16 @@ function DeploymentCard({ game, outOfSync }: { game: GameView; outOfSync: boolea
       </div>
     </div>
   );
+}
+
+export function purgedText(r: PurgeReport): string {
+  if (r.nothing_deployed) return "Nothing was deployed; nothing to purge.";
+  const parts = [`Purged: removed ${r.removed} files`, `restored ${r.restored} originals`];
+  if (r.missing) parts.push(`${r.missing} already missing`);
+  if (r.changed) parts.push(`${r.changed} changed in the game folder`);
+  if (r.kept) parts.push(`${r.kept} kept`);
+  if (r.plugins?.state === "failed") parts.push(`plugins.txt failed: ${r.plugins.detail}`);
+  return parts.join(", ");
 }
 
 function VerifyResult({ r }: { r: VerifyReport }) {

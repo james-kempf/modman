@@ -8,6 +8,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
 import { startBridge } from "./app/bridge";
 import { makeQueryClient } from "./app/queries";
+import { RootBoundary } from "./components/ErrorBoundary";
 // Bundled fonts (no remote origins under the CSP).
 import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
@@ -25,7 +26,9 @@ async function main() {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <QueryClientProvider client={qc}>
-        <App />
+        <RootBoundary>
+          <App />
+        </RootBoundary>
       </QueryClientProvider>
     </StrictMode>,
   );

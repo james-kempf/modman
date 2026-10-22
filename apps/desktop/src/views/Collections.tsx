@@ -5,6 +5,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { errMsg } from "../app/bridge";
 import { useActiveGame } from "../app/queries";
 import { useBusy, useRun } from "../app/run";
 import { useUi } from "../app/store";
@@ -16,7 +17,7 @@ import {
   TrashIcon,
   WarningIcon,
 } from "@phosphor-icons/react";
-import { Badge, Button, Card, Empty, Segmented, TextField, Toggle, ViewHeader, bytes, monogram, when } from "../components/ui";
+import { Badge, Button, Card, Empty, ErrorNote, Segmented, TextField, Toggle, ViewHeader, bytes, monogram, when } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import type { CollectionInfo, CollectionResult } from "../ipc/types";
 
@@ -38,7 +39,7 @@ export function collectionText(r: CollectionResult): string {
 export function Collections() {
   const { game } = useActiveGame();
   return (
-    <div className="grid gap-6">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
       <ViewHeader
         title="Collections"
         eyebrow={game?.name}
@@ -50,7 +51,8 @@ export function Collections() {
         </Empty>
       ) : (
         <>
-          <Lookup />
+          {/* key: a looked-up collection belongs to one game. */}
+          <Lookup key={game.domain} />
           <Installed game={game.domain} />
         </>
       )}
@@ -68,7 +70,9 @@ function Installed({ game }: { game: string }) {
       <h2 id="installed-collections" className="eyebrow px-1">
         Installed collections
       </h2>
-      {!list.length ? (
+      {q.isError ? (
+        <ErrorNote>Could not load installed collections: {errMsg(q.error)}</ErrorNote>
+      ) : !list.length ? (
         <Empty icon={<BooksIcon size={28} weight="duotone" />} title="No collections installed">
           Paste a collection link above. modman downloads every file, replays the curator&apos;s FOMOD choices and applies the
           load-order rules.
@@ -106,7 +110,9 @@ function Installed({ game }: { game: string }) {
                   tone="primary"
                   icon={<ArrowsClockwiseIcon aria-hidden size={14} />}
                   onClick={async () => {
-                    const r = await run("Update collection", () => ipc.collectionUpdate({ reference: c.slug }));
+                    const r = await run("Update collection", () => ipc.collectionUpdate({ reference: c.slug }), {
+                      key: `Collection ${c.slug}`,
+                    });
                     if (r) notify(r.failed.length ? "warn" : "success", collectionText(r));
                   }}
                 >
@@ -116,11 +122,11 @@ function Installed({ game }: { game: string }) {
                   size="sm"
                   tone="danger"
                   icon={<TrashIcon aria-hidden size={14} />}
-                  onClick={() => run("Remove collection", () => ipc.collectionRemove(c.slug, false))}
+                  onClick={() => run("Remove collection", () => ipc.collectionRemove(c.slug, false), { key: `Collection ${c.slug}` })}
                 >
                   Remove
                 </Button>
-                <Button size="sm" tone="ghost" onClick={() => run("Remove collection", () => ipc.collectionRemove(c.slug, true))}>
+                <Button size="sm" tone="ghost" onClick={() => run("Remove collection", () => ipc.collectionRemove(c.slug, true), { key: `Collection ${c.slug}` })}>
                   Remove, keep mods
                 </Button>
               </div>
@@ -143,8 +149,10 @@ function Lookup() {
   const installing = useBusy("Install collection");
   const install = async () => {
     if (!info) return;
-    const r = await run("Install collection", () =>
-      ipc.collectionInstall({ reference: info.slug, game: info.game, optional, deploy, revision: info.revision.number }),
+    const r = await run(
+      "Install collection",
+      () => ipc.collectionInstall({ reference: info.slug, game: info.game, optional, deploy, revision: info.revision.number }),
+      { key: "Install collection" },
     );
     if (r) notify(r.failed.length ? "warn" : "success", collectionText(r));
   };
@@ -161,7 +169,7 @@ function Lookup() {
           label="Collection URL, nxm link or slug"
           value={ref}
           onChange={(e) => setRef(e.target.value)}
-          className="min-w-72 flex-1"
+          className="min-w-0 flex-[1_1_18rem]"
           placeholder="https://next.nexusmods.com/skyrimspecialedition/collections/…"
         />
         <Button type="submit" busy={looking} disabled={!ref.trim()} icon={<MagnifyingGlassIcon aria-hidden size={16} />}>
@@ -173,7 +181,7 @@ function Lookup() {
           <div className="flex flex-wrap items-start gap-5">
             <Monogram name={info.revision.name} />
             <div className="min-w-0 flex-1">
-              <h3 className="text-xl font-medium tracking-tight text-zinc-50">
+              <h3 className="text-xl font-medium tracking-tight wrap-anywhere text-zinc-50">
                 {info.revision.name} <span className="text-[15px] font-normal text-zinc-400">by {info.revision.author}</span>
               </h3>
               <p className="mt-1 font-mono text-[12px] text-dim">

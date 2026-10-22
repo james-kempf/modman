@@ -260,7 +260,7 @@ describe("Activity", () => {
       t.emit("modman:job", { id: 9, kind: "install", state: "started", error: null });
       t.emit("modman:activity", { job: 9, msg: { level: "info", spans: [{ text: "Extracting", style: "plain" }] }, text: "Extracting" });
     });
-    expect(await screen.findByRole("list", { name: "Jobs" })).toHaveTextContent("install");
+    expect(await screen.findByRole("list", { name: "Jobs" })).toHaveTextContent("Install");
     expect(screen.getByRole("list", { name: "Messages" })).toHaveTextContent("Extracting");
     expect(await screen.findByText("line one")).toBeInTheDocument();
   });

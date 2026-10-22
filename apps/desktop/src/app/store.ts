@@ -209,7 +209,8 @@ export const useUi = create<UiState>()((set, get) => ({
   },
   dismiss: (id) => set((s) => ({ notices: s.notices.filter((n) => n.id !== id) })),
 
-  setNeedsDeploy: (v) => set({ needsDeploy: v }),
+  // In sync again: a "Deploy now" notice would offer a deploy that is no longer due.
+  setNeedsDeploy: (v) => set((s) => ({ needsDeploy: v, notices: v ? s.notices : s.notices.filter((n) => !n.deploy) })),
 
   setBusy: (label, on) =>
     set((s) => {

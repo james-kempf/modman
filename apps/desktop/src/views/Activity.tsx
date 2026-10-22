@@ -7,9 +7,11 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { errMsg } from "../app/bridge";
+import { jobLabel, jobOutcome } from "../app/jobs";
 import { useUi } from "../app/store";
 import { ArrowClockwiseIcon } from "@phosphor-icons/react";
-import { Button, Card, Empty, MsgLine, StatusDot, ViewHeader } from "../components/ui";
+import { Button, Card, Empty, ErrorNote, MsgLine, StatusDot, ViewHeader } from "../components/ui";
 import * as ipc from "../ipc/commands";
 
 export function Activity() {
@@ -45,18 +47,22 @@ function Jobs() {
         <Empty>No jobs yet in this session.</Empty>
       ) : (
         <ul className="grid content-start gap-1" aria-label="Jobs">
-          {list.map((j) => (
-            <li key={j.id} tabIndex={0} className="flex flex-wrap items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-white/[0.03]">
-              <StatusDot tone={j.state === "started" ? "accent" : j.state === "failed" ? "rose" : "zinc"} live={j.state === "started"} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[14px] text-zinc-200 capitalize">{j.kind}</span>
-                <span className="block font-mono text-[11px] text-dim">
-                  #{j.id} · {j.state === "started" ? "running" : j.state}
+          {list.map((j) => {
+            const o = jobOutcome(j);
+            return (
+              <li key={j.id} tabIndex={0} className="flex flex-wrap items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-white/[0.03]">
+                <StatusDot tone={o === "running" ? "accent" : o === "failed" ? "rose" : "zinc"} live={o === "running"} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[14px] text-zinc-200">{jobLabel(j.kind)}</span>
+                  <span className="block font-mono text-[11px] text-dim">
+                    #{j.id} · {o}
+                  </span>
                 </span>
-              </span>
-              {j.error && <span className="w-full pl-5 text-[13px] wrap-anywhere text-rose-300">{j.error}</span>}
-            </li>
-          ))}
+                {/* A cancel is the user's choice: no error text. */}
+                {j.error && o === "failed" && <span className="w-full pl-5 text-[13px] wrap-anywhere text-rose-300">{j.error}</span>}
+              </li>
+            );
+          })}
         </ul>
       )}
       {nxm.length > 0 && (
@@ -118,6 +124,11 @@ function LogTail() {
         </>
       }
     >
+      {q.isError && (
+        <div className="mb-4">
+          <ErrorNote>Could not read the log file: {errMsg(q.error)}</ErrorNote>
+        </div>
+      )}
       <pre
         tabIndex={0}
         aria-label="Log"
