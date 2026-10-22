@@ -5,7 +5,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { useUi, type ViewId } from "../app/store";
-import { game, experimentalGame } from "../mock/fixtures";
+import { game, experimentalGame, mod } from "../mock/fixtures";
 import type { Handler } from "../mock/fake";
 import { setup } from "../test/harness";
 import { installTarget } from "./Requirements";
@@ -18,23 +18,96 @@ async function open(view: ViewId, handlers: Record<string, Handler> = {}, games 
 }
 
 describe("Overview", () => {
-  it("switches the active game and adds a detected one", async () => {
-    const { t, user } = await open(
-      "overview",
-      {
-        games_detect: () => [
-          { domain: "fallout4", name: "Fallout 4", install_dir: "/s/Fallout 4", support: "experimental", configured: false },
-        ],
-        game_use: () => null,
-        game_add: () => game({ domain: "fallout4" }),
-      },
-      [game(), experimentalGame({ active: false })],
-    );
-    await user.click(await screen.findByRole("button", { name: "Use" }));
-    expect(t.callsOf("game_use")).toEqual([{ domain: "cyberpunk2077" }]);
-    await user.click(screen.getByRole("button", { name: "Detect Steam games" }));
-    await user.click(await screen.findByRole("button", { name: "Add" }));
-    expect(t.callsOf("game_add")).toEqual([{ domain: "fallout4", path: "/s/Fallout 4", subdir: null, profile: null }]);
+  // Fails when the old games list comes back on Overview (games live in the sidebar picker now).
+  it("has no games list; cards are about the active game", async () => {
+    await open("overview", {}, [game(), experimentalGame({ active: false })]);
+    const main = screen.getByRole("main");
+    expect(await within(main).findByRole("heading", { level: 2, name: "Skyrim Special Edition" })).toBeInTheDocument();
+    expect(within(main).queryByText("Cyberpunk 2077")).toBeNull();
+    expect(within(main).queryByRole("button", { name: "Use" })).toBeNull();
+    for (const card of ["Mods", "Requirements", "Plugins"]) expect(within(main).getByRole("region", { name: card })).toBeInTheDocument();
+  });
+
+  // Fails when Play does not call game_launch, or is offered without a Steam app id.
+  it("Play launches the game through game_launch; disabled without an app id", async () => {
+    const { t, user } = await open("overview", { game_launch: () => ({ appid: 489830, deployed: false }) });
+    await user.click(await screen.findByRole("button", { name: "Play" }));
+    await waitFor(() => expect(t.callsOf("game_launch")).toEqual([{ game: null }]));
+    expect(await screen.findByText(/Starting Skyrim Special Edition/)).toBeInTheDocument();
+  });
+
+  it("Play is disabled without a Steam app id", async () => {
+    await open("overview", {}, [game({ appid: null })]);
+    expect(await screen.findByRole("button", { name: "Play" })).toBeDisabled();
+    expect(screen.getByText(/No Steam app id/)).toBeInTheDocument();
+  });
+
+  // Fails when a deploy done by Play (pending changes) leaves the "deploy due" state set.
+  it("Play that deployed first clears the deploy-due state", async () => {
+    const env = await open("overview", { game_launch: () => ({ appid: 489830, deployed: true }) });
+    act(() => useUi.getState().setNeedsDeploy(true));
+    expect(await screen.findByText(/you will be asked to deploy first/)).toBeInTheDocument();
+    await env.user.click(screen.getByRole("button", { name: "Play" }));
+    await waitFor(() => expect(useUi.getState().needsDeploy).toBe(false));
+  });
+
+  // Fails when summary counts are computed from the wrong fields (enabled, deps status/acked, plugins).
+  it("summarises mods, requirements and plugins", async () => {
+    await open("overview", {
+      mods_list: () => ({
+        mods: [mod({ name: "A" }), mod({ name: "B", enabled: false }), mod({ name: "C" })],
+        changed_since_deploy: true,
+      }),
+      deps: () => [
+        { status: "missing", key: "a", name: "A", hint: "", urls: [], by: [], detail: "", acked: false },
+        { status: "disabled", key: "b", name: "B", hint: "", urls: [], by: [], detail: "", acked: false },
+        { status: "external", key: "c", name: "C", hint: "", urls: [], by: [], detail: "", acked: true },
+        { status: "external", key: "d", name: "D", hint: "", urls: [], by: [], detail: "", acked: false },
+        { status: "ok", key: "e", name: "E", hint: "", urls: [], by: [], detail: "", acked: false },
+      ],
+      plugins_list: () => [
+        { name: "Skyrim.esm", active: true, managed: false },
+        { name: "a.esp", active: true, managed: true },
+        { name: "b.esp", active: false, managed: true },
+      ],
+    });
+    const mods = await screen.findByRole("region", { name: "Mods" });
+    await waitFor(() => expect(mods).toHaveTextContent("3installed2enabled"));
+    expect(mods).toHaveTextContent("Changes since the last deploy");
+    const reqs = screen.getByRole("region", { name: "Requirements" });
+    await waitFor(() => expect(reqs).toHaveTextContent("2missing2ok"));
+    expect(reqs).toHaveTextContent("1 external tool to check by hand");
+    const plugins = screen.getByRole("region", { name: "Plugins" });
+    await waitFor(() => expect(plugins).toHaveTextContent("2active3in plugins.txt"));
+    await userEvent.setup().click(within(reqs).getByRole("button", { name: "Open Requirements" }));
+    expect(useUi.getState().view).toBe("requirements");
+  });
+
+  // Fails when recent mods are not ordered by install time or the list is unbounded.
+  it("lists the latest five installed mods, newest first", async () => {
+    const mods = [1, 7, 3, 9, 5, 2].map((d) => mod({ name: `Mod day ${d}`, installed_at: 1_760_000_000 + d * 86_400 }));
+    await open("overview", { mods_list: () => ({ mods, changed_since_deploy: false }) });
+    const list = await screen.findByRole("list", { name: "Recently installed mods" });
+    const names = within(list)
+      .getAllByRole("listitem")
+      .map((li) => /Mod day \d/.exec(li.textContent ?? "")?.[0]);
+    expect(names).toEqual(["Mod day 9", "Mod day 7", "Mod day 5", "Mod day 3", "Mod day 2"]);
+  });
+
+  // Fails when the plugins card queries plugins_list for a game without plugins.txt (it rejects).
+  it("hides the plugins card for non-Bethesda games", async () => {
+    const { t } = await open("overview", {}, [experimentalGame()]);
+    await screen.findByRole("region", { name: "Mods" });
+    expect(screen.queryByRole("region", { name: "Plugins" })).toBeNull();
+    expect(t.callsOf("plugins_list")).toEqual([]);
+  });
+
+  // Fails when the no-game state has no way to add one.
+  it("empty state offers Add game, which opens the add-game dialog", async () => {
+    const { user } = await open("overview", {}, []);
+    await screen.findByRole("heading", { name: "No game yet" });
+    await user.click(within(screen.getByRole("main")).getByRole("button", { name: "Add game" }));
+    expect(await screen.findByRole("dialog", { name: "Add a game" })).toBeInTheDocument();
   });
 
   it("Purge is a single click (the backend confirms through a prompt)", async () => {
@@ -169,6 +242,18 @@ describe("Requirements", () => {
 });
 
 describe("Activity", () => {
+  // Fails when a fixed-width column comes back (overflow at 1024 px, dead space at 1920 px):
+  // jobs and messages stack by default and share the width 1:2 from xl, in shrinkable tracks.
+  it("lays out jobs and messages in fluid columns", async () => {
+    await open("activity");
+    const cols = await screen.findByTestId("activity-columns");
+    expect(cols.className).toMatch(/\bgrid-cols-1\b/);
+    expect(cols.className).toMatch(/xl:grid-cols-\[minmax\(0,1fr\)_minmax\(0,2fr\)\]/);
+    expect(cols.className).not.toMatch(/\d+px/);
+    for (const section of [...cols.children, screen.getByRole("heading", { name: "modman log" }).closest("section")!])
+      expect(section.className).toMatch(/\bmin-w-0\b/);
+  });
+
   it("shows jobs and streamed messages from events, and the log tail", async () => {
     const { t } = await open("activity", { log_tail: () => ["line one"] });
     act(() => {

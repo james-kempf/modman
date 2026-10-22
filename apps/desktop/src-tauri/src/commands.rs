@@ -15,7 +15,7 @@ use modman_core::app::collection::{
     self as appcol, CollectionInfo, CollectionResult, RemoveResult,
 };
 use modman_core::app::deploy::{run_deploy, run_purge};
-use modman_core::app::games::{self as appgames, AddGame, Detected, GameView};
+use modman_core::app::games::{self as appgames, AddGame, Detected, GameView, Launched};
 use modman_core::app::install::{self as appinst, InstallRequest, InstallResult, Reinstalled};
 use modman_core::app::mods::{
     self as appmods, ModDetail, ModsView, MoveResult, ProfileLoaded, UninstallResult,
@@ -243,6 +243,21 @@ pub async fn game_use(app: AppHandle, state: St<'_>, domain: String) -> CmdResul
         let d = domain.to_ascii_lowercase();
         games::require_game(cx.store.conn(), &d).map_err(games_hint)?;
         Ok(games::set_active_game(cx.store, &d)?)
+    })
+    .await
+}
+
+/// Job: starts the game through Steam; pending mod changes raise a
+/// "Deploy before launching?" prompt first.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn game_launch(
+    app: AppHandle,
+    state: St<'_>,
+    game: Option<String>,
+) -> CmdResult<Launched> {
+    job(app, &state, "launch", game, |cx| {
+        let g = cx.need_game()?;
+        appgames::launch(cx, &g)
     })
     .await
 }

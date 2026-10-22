@@ -28,6 +28,7 @@ import type {
   GameConfig,
   GameView,
   InstallResult,
+  Launched,
   LoginResult,
   ModDetail,
   ModsView,
@@ -72,6 +73,7 @@ export const COMMANDS = [
   "game_use",
   "game_remove",
   "game_set",
+  "game_launch",
   "mods_list",
   "mod_detail",
   "mods_set_enabled",
@@ -160,6 +162,8 @@ export const gameRemove = (domain: string, deleteData: boolean) =>
 /** Keys: folder, subdir, profile, appid, method, prefix, plugins-file, paks-dir, name. */
 export const gameSet = (key: string, value: string, game?: Game) =>
   call<GameConfig>("game_set", { game: game ?? null, key, value });
+/** Job: start the game through Steam (asks to deploy pending changes first). */
+export const gameLaunch = (game?: Game) => call<Launched>("game_launch", { game: game ?? null });
 
 // ── mods ────────────────────────────────────────────────────
 

@@ -60,6 +60,13 @@ export interface Detected {
   configured: boolean;
 }
 
+/** game_launch result. */
+export interface Launched {
+  appid: number;
+  /** Pending mod changes were deployed first. */
+  deployed: boolean;
+}
+
 // ── deploy ──────────────────────────────────────────────────
 
 export type Method = "hardlink" | "reflink" | "symlink" | "copy";

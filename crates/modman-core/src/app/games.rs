@@ -290,6 +290,59 @@ pub fn detect(cx: &Cx<'_>) -> R<Vec<Detected>> {
     Ok(v)
 }
 
+/// What [`launch`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Launched {
+    pub appid: u32,
+    /// Pending mod changes were deployed first.
+    pub deployed: bool,
+}
+
+/// Starts `game` through Steam (`steam://rungameid/<appid>`). When mods
+/// changed since the last deploy, asks whether to deploy first (default
+/// yes). Legacy `cmd_launch`.
+pub fn launch(cx: &mut Cx<'_>, game: &GameConfig) -> R<Launched> {
+    let Some(appid) = game.appid else {
+        fail!(
+            "No Steam app id for {}. Set one with: modman game set appid <id>",
+            game.name
+        );
+    };
+    let enabled = crate::mods::list_mods(cx.store.conn(), &game.domain)?
+        .iter()
+        .any(|m| m.enabled);
+    let st = deploy::status(cx.store.conn(), &game.domain)?;
+    let mut deployed = false;
+    if enabled && crate::mods::changed_since(cx.store, &game.domain, st.last_deployed_at)? {
+        cx.ui.warn("Mods changed since the last deploy.");
+        if cx.ui.confirm("Deploy before launching?", true) {
+            super::deploy::run_deploy(cx, game, None, false)?;
+            deployed = true;
+        }
+    }
+    cx.ui
+        .info(&format!("Launching {} (Steam app {appid})...", game.name));
+    let url = format!("steam://rungameid/{appid}");
+    let (prog, args): (PathBuf, Vec<String>) = match super::which("steam") {
+        // setsid: the game outlives a CLI run's terminal.
+        Some(steam) => match super::which("setsid") {
+            Some(setsid) => (setsid, vec![steam.display().to_string(), url]),
+            None => (steam, vec![url]),
+        },
+        None => match super::which("xdg-open") {
+            Some(x) => (x, vec![url]),
+            None => fail!("Neither steam nor xdg-open was found to start the game."),
+        },
+    };
+    std::process::Command::new(prog)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+    Ok(Launched { appid, deployed })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

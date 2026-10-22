@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /*
  * Visual language of the legacy web UI (Geist, zinc neutrals, one emerald
- * accent, soft surfaces, glass overlays). Fonts are bundled through
+ * accent, glass overlays), flattened: surfaces are solid fills with a
+ * border, no gradients, buttons have no glow. Fonts are bundled through
  * @fontsource-variable (imported in main.tsx): the CSP allows no remote
  * origins. Motion is CSS only (no inline styles under style-src 'self').
  */
@@ -28,7 +29,6 @@
 
   --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
 
-  --animate-shimmer: shimmer 1.6s var(--ease-spring) infinite;
   --animate-breathe: breathe 2.8s ease-in-out infinite;
   --animate-bar: bar 0.9s ease-in-out infinite;
   /* Page and list entrances: short enough that switching tabs feels instant (legacy 9ae14f4). */
@@ -37,10 +37,6 @@
   --animate-pop: pop 0.2s var(--ease-spring) both;
   --animate-island: island 0.24s var(--ease-spring) both;
 
-  @keyframes shimmer {
-    0% { transform: translateX(-100%); }
-    100% { transform: translateX(200%); }
-  }
   @keyframes breathe {
     0%, 100% { transform: scale(1); opacity: 0.55; }
     50% { transform: scale(2.1); opacity: 0; }
@@ -139,20 +135,15 @@
 @layer components {
   .surface {
     @apply rounded-3xl border border-white/[0.06] bg-ink-2;
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.035),
-      0 24px 48px -28px rgb(0 0 0 / 0.55);
   }
   /* The large legacy panels (hero, install, collections). */
   .panel {
     @apply rounded-[2rem] border border-white/[0.06] bg-ink-2;
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.035);
   }
+  /* Overlays (dialogs, notices, island): a plain drop shadow lifts them off the page. */
   .glass {
-    @apply border border-white/10 bg-zinc-900/85 backdrop-blur-xl;
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.08),
-      0 20px 50px -20px rgb(0 0 0 / 0.7);
+    @apply border border-white/10 bg-zinc-900/95 backdrop-blur-xl;
+    box-shadow: 0 20px 50px -20px rgb(0 0 0 / 0.7);
   }
   .eyebrow {
     @apply font-mono text-[11px] tracking-[0.14em] text-dim uppercase;
@@ -176,20 +167,15 @@
   .stagger > :nth-child(7) { animation-delay: 90ms; }
   .stagger > :nth-child(n + 8) { animation-delay: 105ms; }
 
-  /* Deterministic monogram backgrounds (legacy computed a hue inline; the CSP forbids that). */
-  .mono-0 { background: linear-gradient(135deg, oklch(0.4 0.06 20), oklch(0.24 0.03 60)); }
-  .mono-1 { background: linear-gradient(135deg, oklch(0.4 0.06 65), oklch(0.24 0.03 105)); }
-  .mono-2 { background: linear-gradient(135deg, oklch(0.4 0.06 110), oklch(0.24 0.03 150)); }
-  .mono-3 { background: linear-gradient(135deg, oklch(0.4 0.06 155), oklch(0.24 0.03 195)); }
-  .mono-4 { background: linear-gradient(135deg, oklch(0.4 0.06 200), oklch(0.24 0.03 240)); }
-  .mono-5 { background: linear-gradient(135deg, oklch(0.4 0.06 245), oklch(0.24 0.03 285)); }
-  .mono-6 { background: linear-gradient(135deg, oklch(0.4 0.06 290), oklch(0.24 0.03 330)); }
-  .mono-7 { background: linear-gradient(135deg, oklch(0.4 0.06 335), oklch(0.24 0.03 15)); }
-
-  /* Hero glow (legacy: blurred accent disc in the top-right corner). */
-  .glow {
-    @apply pointer-events-none absolute -top-24 -right-24 size-80 rounded-full bg-accent-500/[0.07] blur-3xl;
-  }
+  /* Deterministic monogram fills, one flat colour per hue (legacy computed a hue inline; the CSP forbids that). */
+  .mono-0 { background: oklch(0.34 0.05 20); }
+  .mono-1 { background: oklch(0.34 0.05 65); }
+  .mono-2 { background: oklch(0.34 0.05 110); }
+  .mono-3 { background: oklch(0.34 0.05 155); }
+  .mono-4 { background: oklch(0.34 0.05 200); }
+  .mono-5 { background: oklch(0.34 0.05 245); }
+  .mono-6 { background: oklch(0.34 0.05 290); }
+  .mono-7 { background: oklch(0.34 0.05 335); }
 }
 
 @media (prefers-reduced-motion: reduce) {

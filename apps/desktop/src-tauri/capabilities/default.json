@@ -24,6 +24,7 @@
     "allow-game-use",
     "allow-game-remove",
     "allow-game-set",
+    "allow-game-launch",
     "allow-mods-list",
     "allow-mod-detail",
     "allow-mods-set-enabled",

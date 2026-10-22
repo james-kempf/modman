@@ -80,12 +80,43 @@ export function createDemoBackend(): FakeTransport {
     },
     games_list: () => games.map((g) => ({ ...g })),
     games_detect: () => [
-      { domain: "fallout4", name: "Fallout 4", install_dir: "/steam/common/Fallout 4", support: "experimental", configured: false },
+      {
+        domain: "fallout4",
+        name: "Fallout 4",
+        install_dir: "/steam/common/Fallout 4",
+        support: "experimental",
+        configured: games.some((g) => g.domain === "fallout4"),
+      },
     ],
     game_use: (a: Args) => {
       games.forEach((g) => (g.active = g.domain === a!.domain));
       return null;
     },
+    game_add: (a: Args) =>
+      job("game_add", async (id) => {
+        const domain = String(a!.domain);
+        const name = domain === "fallout4" ? "Fallout 4" : domain;
+        games.forEach((g) => (g.active = false));
+        const g = experimentalGame({ domain, name, profile: "bethesda", folder: (a!.path as string) ?? null, mod_count: 0, active: true });
+        games.push(g);
+        say(id, `Added ${name}.`, "success");
+        return g;
+      }),
+    game_remove: (a: Args) =>
+      job("game_remove", async (id) => {
+        const g = games.find((x) => x.domain === a!.domain)!;
+        const r = await ask(id, { type: "confirm", question: `Forget ${g.name}?`, default_yes: false });
+        if (r.type !== "confirm" || !r.yes) return false;
+        games.splice(games.indexOf(g), 1);
+        if (g.active && games[0]) games[0].active = true;
+        return true;
+      }),
+    game_launch: () =>
+      job("launch", async (id) => {
+        const g = active();
+        say(id, `Launching ${g.name} (Steam app ${g.appid})...`);
+        return { appid: g.appid, deployed: false };
+      }),
     mods_list: () => ({ mods: mods.map((m) => ({ ...m })), changed_since_deploy: false }),
     mod_detail: (a: Args) => {
       const m = mods.find((x) => x.uid === a!.reference)!;
@@ -161,6 +192,12 @@ export function createDemoBackend(): FakeTransport {
     deps_ack: (a: Args) => ({ status: "external", key: a!.name, name: a!.name, hint: "", urls: [], by: [], detail: "", acked: true }),
     deps_unack: (a: Args) => ({ status: "external", key: a!.name, name: a!.name, hint: "", urls: [], by: [], detail: "", acked: false }),
     profiles_list: () => [],
+    plugins_list: () => [
+      { name: "Skyrim.esm", active: true, managed: false },
+      { name: "Update.esm", active: true, managed: false },
+      { name: "Unofficial Skyrim Special Edition Patch.esp", active: true, managed: true },
+      { name: "SkyUI_SE.esp", active: false, managed: true },
+    ],
     collections_list: () => [],
     updates_check: () => ({ checked: mods.length, fetched: 0, stopped_early: false, updates: [], installed: 0 }),
     search: () => ({ total: 0, mods: [] }),

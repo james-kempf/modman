@@ -11,6 +11,7 @@ import {
   DownloadSimpleIcon,
   GearSixIcon,
   InfoIcon,
+  PlusIcon,
   PuzzlePieceIcon,
   RocketLaunchIcon,
   SquaresFourIcon,
@@ -22,9 +23,11 @@ import {
 } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type JSX, type ReactNode } from "react";
+import { AddGameHost } from "../components/AddGameDialog";
+import { GamePicker } from "../components/GamePicker";
 import { OskHost } from "../components/Osk";
 import { PromptHost } from "../components/PromptDialog";
-import { Button, IconButton, StatusDot, SupportBadge, cx, type DotTone } from "../components/ui";
+import { Button, IconButton, SupportBadge, cx, type DotTone } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import { installKeyboardNav, performNav } from "../nav/actions";
 import { startGamepadLoop } from "../nav/gamepad";
@@ -104,6 +107,7 @@ export function App() {
           </div>
         </main>
         <BottomStack island={island} />
+        <AddGameHost />
       </div>
       <PromptHost />
       <OskHost />
@@ -144,50 +148,58 @@ function Sidebar() {
   );
 }
 
-/** Brand + active game (the legacy sidebar's game list, reduced to the active one; switch games on Overview). */
+/**
+ * Brand + game picker (every added game; switching runs game_use) and
+ * "Add game" below it. Part of the rail for spatial navigation: Down from
+ * here reaches the tabs, not the view.
+ */
 function GameHeader() {
-  const { game, isLoading } = useActiveGame();
+  const { game, data: games, isLoading } = useActiveGame();
   const needsDeploy = useUi((s) => s.needsDeploy);
   const progress = useUi((s) => s.deployProgress);
+  const setAddGame = useUi((s) => s.setAddGame);
   const deploy = useDeploy();
   const busy = useBusy("Deploy");
   const d = game?.deploy;
   const tone: DotTone = !d?.active ? "zinc" : d.interrupted ? "rose" : needsDeploy ? "amber" : "accent";
   return (
-    <header className="grid gap-6 px-6 pt-7 pb-5">
+    <header className="grid grid-cols-[minmax(0,1fr)] gap-5 px-6 pt-6 pb-4">
       <Brand />
-      <div className="grid gap-2">
-        <div className="eyebrow">Game</div>
-        {game ? (
-          <>
-            <div className="flex items-center gap-3">
-              <StatusDot tone={tone} live={!!d?.active} />
-              <span className="min-w-0 flex-1 truncate text-[14.5px] text-zinc-50">{game.name}</span>
-              <span className="font-mono text-[11px] text-dim">{game.mod_count}</span>
-            </div>
-            <SupportBadge support={game.support} />
-            {progress && (
-              <span className="grid gap-1.5 pt-1 font-mono text-[11px] text-dim">
-                <progress aria-label="Deploy progress" max={progress.total || 1} value={progress.done} />
-                deploying {progress.done}/{progress.total}
-              </span>
-            )}
-            {needsDeploy && !progress && (
-              <Button
-                tone="primary"
-                size="sm"
-                className="mt-1 w-full"
-                busy={busy}
-                icon={<RocketLaunchIcon aria-hidden size={16} weight="duotone" />}
-                onClick={deploy}
-              >
-                Deploy changes
-              </Button>
-            )}
-          </>
-        ) : (
-          <span className="text-[14px] text-zinc-400">{isLoading ? "Loading…" : "No game selected"}</span>
+      {/* No "Game" eyebrow: the picker names itself ("Game: <name>"), and a short header keeps the tabs high. */}
+      <div data-nav-rail className="grid grid-cols-[minmax(0,1fr)] gap-2">
+        {isLoading ? (
+          <span className="text-[14px] text-zinc-400">Loading…</span>
+        ) : games?.length ? (
+          <GamePicker games={games} tone={tone} />
+        ) : null}
+        {game && <SupportBadge support={game.support} />}
+        {progress && (
+          <span className="grid gap-1.5 pt-1 font-mono text-[11px] text-dim">
+            <progress aria-label="Deploy progress" max={progress.total || 1} value={progress.done} />
+            deploying {progress.done}/{progress.total}
+          </span>
         )}
+        {game && needsDeploy && !progress && (
+          <Button
+            tone="primary"
+            size="sm"
+            className="mt-1 w-full"
+            busy={busy}
+            icon={<RocketLaunchIcon aria-hidden size={16} weight="duotone" />}
+            onClick={deploy}
+          >
+            Deploy changes
+          </Button>
+        )}
+        <Button
+          tone="ghost"
+          size="sm"
+          className="w-full justify-start"
+          icon={<PlusIcon aria-hidden size={16} />}
+          onClick={() => setAddGame(true)}
+        >
+          Add game
+        </Button>
       </div>
     </header>
   );
@@ -237,7 +249,7 @@ function AccountFooter() {
         <div className="flex items-center gap-3">
           <div
             aria-hidden
-            className="grid size-9 place-items-center rounded-xl bg-gradient-to-br from-accent-600/50 to-ink-3 font-mono text-[12px] font-semibold text-accent-50"
+            className="grid size-9 place-items-center rounded-xl bg-accent-950 font-mono text-[12px] font-semibold text-accent-50"
           >
             {(a?.user ?? "?").slice(0, 2).toUpperCase()}
           </div>
@@ -352,11 +364,6 @@ function JobIsland({ job }: { job: JobEntry }) {
       aria-label="Current job"
       className="glass pointer-events-auto relative flex min-h-14 w-full max-w-xl animate-island items-center gap-3 overflow-hidden rounded-full py-2 pr-5 pl-2.5"
     >
-      {running && (
-        <span aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden rounded-full">
-          <span className="absolute inset-y-0 w-1/2 animate-shimmer bg-gradient-to-r from-transparent via-accent-400/[0.08] to-transparent" />
-        </span>
-      )}
       <span
         aria-hidden
         className={cx(

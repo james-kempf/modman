@@ -713,42 +713,8 @@ pub use app::which;
 
 pub fn launch(ctx: &mut Ctx, _args: LaunchArgs) -> Result<()> {
     let game = ctx.need_game()?;
-    let out = ctx.out;
-    let Some(appid) = game.appid else {
-        bail!(
-            "No Steam app id for {}. Set one with: modman game set appid <id>",
-            game.name
-        );
-    };
-    let enabled = mods::list_mods(ctx.store.conn(), &game.domain)?
-        .iter()
-        .any(|m| m.enabled);
-    let st = deploy::status(ctx.store.conn(), &game.domain)?;
-    if enabled && mods::changed_since(&ctx.store, &game.domain, st.last_deployed_at)? {
-        out.warn("Mods changed since the last deploy.");
-        if ctx.confirm("Deploy before launching?", true) {
-            let ui = ctx.ui();
-            app::deploy::run_deploy(&mut ctx.cx(&ui), &game, None, false)?;
-        }
-    }
-    out.info(&format!("Launching {} (Steam app {appid})...", game.name));
-    let url = format!("steam://rungameid/{appid}");
-    let (prog, args): (std::path::PathBuf, Vec<String>) = match which("steam") {
-        Some(steam) => match which("setsid") {
-            Some(setsid) => (setsid, vec![steam.display().to_string(), url]),
-            None => (steam, vec![url]),
-        },
-        None => match which("xdg-open") {
-            Some(x) => (x, vec![url]),
-            None => bail!("Neither steam nor xdg-open was found to start the game."),
-        },
-    };
-    std::process::Command::new(prog)
-        .args(args)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()?;
+    let ui = ctx.ui();
+    app::games::launch(&mut ctx.cx(&ui), &game)?;
     Ok(())
 }
 

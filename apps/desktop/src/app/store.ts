@@ -110,6 +110,10 @@ export interface UiState {
   osk: OskTarget | null;
   openOsk(t: OskTarget): void;
   closeOsk(): void;
+
+  /** The add-game dialog (sidebar "Add game", Overview empty state) is open. */
+  addGame: boolean;
+  setAddGame(open: boolean): void;
 }
 
 let seq = 0;
@@ -127,6 +131,7 @@ const initial = {
   needsDeploy: false,
   busy: {},
   osk: null,
+  addGame: false,
 };
 
 export const useUi = create<UiState>()((set, get) => ({
@@ -217,6 +222,8 @@ export const useUi = create<UiState>()((set, get) => ({
 
   openOsk: (t) => set({ osk: t }),
   closeOsk: () => set({ osk: null }),
+
+  setAddGame: (open) => set({ addGame: open }),
 }));
 
 /** Test helper: back to the initial state. */

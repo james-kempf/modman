@@ -208,15 +208,14 @@ function Lookup() {
   );
 }
 
-/** Legacy collection monogram (gradient tile with initials). */
+/** Legacy collection monogram (flat colour tile with initials). */
 function Monogram({ name }: { name: string }) {
   const m = monogram(name);
   return (
     <div
       aria-hidden
-      className={`relative grid size-20 shrink-0 place-items-center overflow-hidden rounded-3xl text-xl font-semibold tracking-tight text-white/85 ${m.cls}`}
+      className={`grid size-20 shrink-0 place-items-center rounded-3xl text-xl font-semibold tracking-tight text-white/85 ${m.cls}`}
     >
-      <span className="absolute inset-0 rounded-3xl shadow-[inset_0_1px_0_rgb(255_255_255/0.15)]" />
       {m.initials}
     </div>
   );

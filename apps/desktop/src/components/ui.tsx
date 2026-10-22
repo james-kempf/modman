@@ -13,8 +13,7 @@ export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Bool
 
 type Tone = "primary" | "default" | "danger" | "ghost";
 const TONES: Record<Tone, string> = {
-  primary:
-    "bg-accent-400 text-accent-950 font-semibold hover:bg-accent-300 shadow-[inset_0_1px_0_rgb(255_255_255/0.35),0_10px_30px_-14px_var(--color-accent-500)]",
+  primary: "bg-accent-400 text-accent-950 font-semibold hover:bg-accent-300",
   default: "bg-white/[0.06] text-zinc-100 border border-white/[0.06] hover:bg-white/[0.1]",
   danger: "bg-rose-500/10 text-rose-200 border border-rose-400/20 hover:bg-rose-500/20",
   ghost: "text-zinc-300 hover:text-zinc-100 hover:bg-white/[0.05]",
@@ -115,7 +114,7 @@ export function Toggle({
       >
         <span
           className={cx(
-            "size-5 rounded-full shadow-sm transition-[transform,background-color] duration-300 ease-spring",
+            "size-5 rounded-full transition-[transform,background-color] duration-300 ease-spring",
             checked ? "translate-x-5 bg-white" : "bg-zinc-400",
           )}
         />
@@ -396,7 +395,7 @@ export function MsgLine({ msg }: { msg: Msg }) {
   );
 }
 
-/** Deterministic gradient class + initials for a name (legacy monogram fallback). */
+/** Deterministic flat colour class + initials for a name (legacy monogram fallback). */
 export function monogram(name: string): { cls: string; initials: string } {
   const h = [...name].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 997, 7);
   const initials =

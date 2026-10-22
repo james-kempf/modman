@@ -21,6 +21,7 @@ pub const COMMANDS: &[&str] = &[
     "game_use",
     "game_remove",
     "game_set",
+    "game_launch",
     "mods_list",
     "mod_detail",
     "mods_set_enabled",

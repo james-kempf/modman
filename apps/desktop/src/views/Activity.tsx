@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Activity: jobs (running and finished), their streamed messages, waiting
-// questions, forwarded nxm links and the log file tail.
+// questions, forwarded nxm links and the log file tail. Fluid like the other
+// views: jobs and messages side by side from xl, stacked below; every column
+// is minmax(0, ...) so long log lines scroll inside their box instead of
+// widening the page.
 
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -11,12 +14,12 @@ import * as ipc from "../ipc/commands";
 
 export function Activity() {
   return (
-    <div className="grid gap-6">
+    <div className="grid grid-cols-1 gap-6">
       <ViewHeader
         title="Activity"
         description="Everything the app ran in this session, with its output. The log file also covers the command line and the auto-update timer."
       />
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,340px)_1fr]">
+      <div data-testid="activity-columns" className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
         <Jobs />
         <Messages />
       </div>
@@ -31,7 +34,7 @@ function Jobs() {
   const nxm = useUi((s) => s.nxm);
   const list = Object.values(jobs).sort((a, b) => b.id - a.id);
   return (
-    <Card title="Jobs" className="!p-5">
+    <Card title="Jobs" className="min-w-0 !p-5">
       {prompts > 0 && (
         <p className="mb-3 flex items-center gap-2 text-[14px] text-amber-300">
           <StatusDot tone="amber" live />
@@ -51,7 +54,7 @@ function Jobs() {
                   #{j.id} · {j.state === "started" ? "running" : j.state}
                 </span>
               </span>
-              {j.error && <span className="w-full pl-5 text-[13px] text-rose-300">{j.error}</span>}
+              {j.error && <span className="w-full pl-5 text-[13px] wrap-anywhere text-rose-300">{j.error}</span>}
             </li>
           ))}
         </ul>
@@ -76,14 +79,14 @@ function Messages() {
   const activity = useUi((s) => s.activity);
   const recent = activity.slice(-200).reverse();
   return (
-    <Card title="Messages" className="!p-5">
+    <Card title="Messages" className="min-w-0 !p-5">
       {!recent.length ? (
         <Empty>Messages from running jobs appear here.</Empty>
       ) : (
         <ol
           aria-label="Messages"
           tabIndex={0}
-          className="grid max-h-[28rem] content-start gap-0.5 overflow-y-auto font-mono text-[12.5px] leading-[1.7] break-words whitespace-pre-wrap"
+          className="grid max-h-[min(28rem,60vh)] content-start gap-0.5 overflow-y-auto font-mono text-[12.5px] leading-[1.7] wrap-anywhere whitespace-pre-wrap"
         >
           {recent.map((a) => (
             <li key={a.seq}>
@@ -103,7 +106,7 @@ function LogTail() {
   return (
     <Card
       title="modman log"
-      className="!p-5"
+      className="min-w-0 !p-5"
       actions={
         <>
           <Button size="sm" tone="ghost" icon={<ArrowClockwiseIcon aria-hidden size={14} />} onClick={() => q.refetch()}>
@@ -118,7 +121,7 @@ function LogTail() {
       <pre
         tabIndex={0}
         aria-label="Log"
-        className="max-h-[32rem] overflow-auto rounded-2xl bg-ink p-4 font-mono text-[12px] leading-[1.7] text-zinc-400"
+        className="max-h-[min(32rem,60vh)] overflow-auto rounded-2xl bg-ink p-4 font-mono text-[12px] leading-[1.7] text-zinc-400"
       >
         {q.data?.join("\n") || "(empty)"}
       </pre>
