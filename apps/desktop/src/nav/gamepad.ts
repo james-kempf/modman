@@ -4,6 +4,7 @@
 // Directions repeat while held; buttons fire once per press.
 
 import type { NavAction } from "./actions";
+import { setModality } from "./modality";
 import type { Dir } from "./spatial";
 
 export const BUTTON = { A: 0, B: 1, LB: 4, RB: 5, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 } as const;
@@ -102,7 +103,10 @@ export function startGamepadLoop(
   let frame = 0;
   let running = false;
   const tick = () => {
-    nav.poll(win.performance.now()).forEach(dispatch);
+    const actions = nav.poll(win.performance.now());
+    // Gamepad input fires no key event: switch the focus ring on here.
+    if (actions.length) setModality("nav", win.document);
+    actions.forEach(dispatch);
     frame = win.requestAnimationFrame(tick);
   };
   const start = () => {

@@ -92,12 +92,17 @@
     background: color-mix(in oklch, var(--color-accent-400) 35%, transparent);
   }
   /*
-   * Focus ring on :focus, not only :focus-visible: spatial navigation driven
-   * by the gamepad moves focus without a key event, and WebKit would then
-   * hide a :focus-visible ring.
+   * Focus ring only for keyboard/gamepad use (html[data-input], set by
+   * nav/modality.ts), not :focus-visible: spatial navigation driven by the
+   * gamepad moves focus without a key event, and WebKit would then hide a
+   * :focus-visible ring. Neutral light ring, not the accent, so it reads as
+   * focus rather than a green border.
    */
   :focus {
-    outline: 3px solid var(--color-accent-400);
+    outline: none;
+  }
+  html[data-input="nav"] :focus {
+    outline: 2px solid var(--color-zinc-100);
     outline-offset: 2px;
   }
   * {
@@ -153,7 +158,7 @@
     @apply font-mono text-[11px] tracking-[0.14em] text-dim uppercase;
   }
   .input {
-    @apply min-h-12 w-full rounded-xl border border-white/[0.08] bg-ink px-3.5 text-[15px] text-zinc-100 transition-colors duration-200 placeholder:text-zinc-500 focus:border-accent-500/60 focus:bg-ink-3;
+    @apply min-h-12 w-full rounded-xl border border-white/[0.08] bg-ink px-3.5 text-[15px] text-zinc-100 transition-colors duration-200 placeholder:text-zinc-500 focus:border-white/25 focus:bg-ink-3;
   }
   /* Row list inside a surface (Settings, lists). */
   .rows > * + * {

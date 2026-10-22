@@ -28,6 +28,7 @@ import { Button, IconButton, StatusDot, SupportBadge, cx, type DotTone } from ".
 import * as ipc from "../ipc/commands";
 import { installKeyboardNav, performNav } from "../nav/actions";
 import { startGamepadLoop } from "../nav/gamepad";
+import { installModalityTracking } from "../nav/modality";
 import { installFocusRecovery } from "../nav/spatial";
 import { Activity } from "../views/Activity";
 import { Collections } from "../views/Collections";
@@ -77,12 +78,14 @@ export function App() {
     const stopKeys = installKeyboardNav();
     const stopPad = startGamepadLoop((a) => performNav(a));
     const stopRecovery = installFocusRecovery();
+    const stopModality = installModalityTracking();
     // Start on the tab rail so arrows/D-pad work right away.
     document.querySelector<HTMLElement>("[data-tab][aria-current='page']")?.focus();
     return () => {
       stopKeys();
       stopPad();
       stopRecovery();
+      stopModality();
     };
   }, []);
 
