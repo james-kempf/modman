@@ -983,5 +983,10 @@ pub fn status(conn: &Connection, domain: &str) -> Result<DeployStatus, DeployErr
         [domain],
         |r| r.get(0),
     )?;
+    s.enabled_mods = one("SELECT COUNT(*) FROM mods WHERE game = ?1 AND enabled = 1")? as usize;
+    s.deployed_mods = one(
+        "SELECT COUNT(*) FROM mods m WHERE m.game = ?1 AND m.enabled = 1 \
+         AND EXISTS (SELECT 1 FROM deployments d WHERE d.game = m.game AND d.mod_id = m.id)",
+    )? as usize;
     Ok(s)
 }

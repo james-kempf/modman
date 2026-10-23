@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Mods: load order list (enable, move, reinstall, uninstall, details),
-// file/plugin conflicts, updates and profiles.
+// Mods: load order list (search and filters; enable, move, reinstall,
+// uninstall, details), file/plugin conflicts, updates and profiles.
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { errMsg } from "../app/bridge";
 import { useActiveGame, useMods } from "../app/queries";
@@ -16,6 +16,7 @@ import {
   CaretRightIcon,
   DownloadSimpleIcon,
   FloppyDiskIcon,
+  FunnelSimpleIcon,
   StackIcon,
   SwordIcon,
   TrashIcon,
@@ -29,6 +30,7 @@ import {
   Fact,
   IconButton,
   Segmented,
+  Select,
   StatusDot,
   SupportBadge,
   TextField,
@@ -40,7 +42,7 @@ import {
   when,
 } from "../components/ui";
 import * as ipc from "../ipc/commands";
-import type { ModView, ProfileLoaded, UninstallResult, UpdateReport } from "../ipc/types";
+import type { ConflictData, ModView, ProfileLoaded, UninstallResult, UpdateReport } from "../ipc/types";
 import { NoGame } from "../components/NoGame";
 
 const TABS = [
@@ -72,7 +74,7 @@ export function Mods() {
         <Conflicts game={game.domain} />
       ) : tab === "updates" ? (
         // key: a report for one game is not shown for another.
-        <Updates key={game.domain} />
+        <Updates key={game.domain} game={game.domain} />
       ) : (
         <Profiles game={game.domain} />
       )}
@@ -84,12 +86,80 @@ export function Mods() {
 const MOVE = "Move mod";
 const enableKey = (id: number) => `Enable mod ${id}`;
 
+export type StateFilter = "all" | "enabled" | "disabled" | "conflicts" | "updates";
+/** "" = any collection membership, "-" = in none, "*" = in any, else a collection slug. */
+export type CollectionFilter = string;
+export interface ModFilter {
+  query: string;
+  state: StateFilter;
+  collection: CollectionFilter;
+}
+export const NO_FILTER: ModFilter = { query: "", state: "all", collection: "" };
+
+/**
+ * Mods matching a filter: the query (case-insensitive) in the name, author
+ * or uid, or the Nexus id; the state (conflicts and updates need their
+ * data: mod ids in a conflict / with an update); the collection.
+ */
+export function filterMods(
+  mods: ModView[],
+  f: ModFilter,
+  data: { conflicted?: Set<number>; updated?: Set<number> } = {},
+): ModView[] {
+  const q = f.query.trim().toLocaleLowerCase();
+  return mods.filter((m) => {
+    if (
+      q &&
+      ![m.name, m.author ?? "", m.uid].some((t) => t.toLocaleLowerCase().includes(q)) &&
+      String(m.nexus_mod_id ?? "") !== q
+    )
+      return false;
+    switch (f.state) {
+      case "enabled":
+        if (!m.enabled) return false;
+        break;
+      case "disabled":
+        if (m.enabled) return false;
+        break;
+      case "conflicts":
+        if (!data.conflicted?.has(m.id)) return false;
+        break;
+      case "updates":
+        // No update check yet: the filter is not offered, so it does not narrow.
+        if (data.updated && !data.updated.has(m.id)) return false;
+        break;
+    }
+    if (f.collection === "*") return m.collections.length > 0;
+    if (f.collection === "-") return m.collections.length === 0;
+    return !f.collection || m.collections.includes(f.collection);
+  });
+}
+
+/** Ids of the mods that win or lose a file, or provide/override a plugin. */
+export function conflictedIds(c: ConflictData | undefined): Set<number> {
+  const ids = new Set<number>();
+  for (const f of c?.files ?? []) [f.winner, ...f.losers].forEach((m) => ids.add(m.id));
+  for (const p of c?.plugins ?? []) if (p.overridden.length) [p.provider, ...p.overridden].forEach((m) => m && ids.add(m.id));
+  return ids;
+}
+
+/** The last update check of a game (set by the Updates tab; never fetched here: it needs the network). */
+const useUpdateReport = (game: string) =>
+  useQuery<UpdateReport | null>({ queryKey: ["updates", game], queryFn: () => null, enabled: false, staleTime: Infinity });
+
 function ModList({ game }: { game: string }) {
   const mods = useMods(game);
   const run = useRun();
   const moving = useBusy(MOVE);
   const toggling = useUi((s) => s.busy);
   const [detail, setDetail] = useState<ModView | null>(null);
+  const [filter, setFilter] = useState<ModFilter>(NO_FILTER);
+  const conflicts = useQuery({
+    queryKey: ["conflicts", game],
+    queryFn: () => ipc.conflicts(game),
+    enabled: filter.state === "conflicts",
+  });
+  const updates = useUpdateReport(game).data;
   if (mods.isLoading) return <Loading />;
   if (mods.error) return <Empty>Could not load mods: {String((mods.error as { message?: string }).message ?? mods.error)}</Empty>;
   const list = mods.data?.mods ?? [];
@@ -101,8 +171,14 @@ function ModList({ game }: { game: string }) {
       </Empty>
     );
   const on = list.filter((m) => m.enabled).length;
+  const shown = filterMods(list, filter, {
+    conflicted: conflictedIds(conflicts.data),
+    updated: updates ? new Set(updates.updates.map((u) => u.mod.id)) : undefined,
+  });
+  const filtered = shown.length !== list.length;
   return (
     <>
+      <ModFilters mods={list} filter={filter} onChange={setFilter} hasUpdates={!!updates} />
       {mods.data?.changed_since_deploy && (
         <p className="flex items-center gap-2.5 rounded-2xl border border-amber-400/15 bg-amber-400/[0.05] px-4 py-3 text-[14px] text-amber-200">
           <StatusDot tone="amber" live />
@@ -110,13 +186,29 @@ function ModList({ game }: { game: string }) {
         </p>
       )}
       <div className="flex items-center justify-between px-1 font-mono text-[11.5px] text-dim">
-        <span>
+        <span role="status">
+          {filtered && `${shown.length} of `}
           {list.length} {list.length === 1 ? "mod" : "mods"} · {on} enabled
         </span>
         <span>{bytes(list.reduce((n, m) => n + (m.size ?? 0), 0))} staged</span>
       </div>
+      {!shown.length && (
+        <Empty
+          icon={<FunnelSimpleIcon size={28} weight="duotone" />}
+          title="No mods match"
+          action={
+            <Button onClick={() => setFilter(NO_FILTER)} data-testid="clear-filters">
+              Clear search and filters
+            </Button>
+          }
+        >
+          {filter.state === "conflicts" && conflicts.isPending
+            ? "Reading conflicts…"
+            : "Nothing in the load order matches the search and filters."}
+        </Empty>
+      )}
       <ol aria-label="Load order" className="stagger grid min-w-0 gap-2">
-        {list.map((m, i) => (
+        {shown.map((m) => (
           <li
             key={m.id}
             className="flex min-h-16 min-w-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl border border-white/[0.05] bg-ink-2 py-2 pr-3 pl-2 transition-colors duration-200 hover:border-white/[0.08]"
@@ -149,7 +241,7 @@ function ModList({ game }: { game: string }) {
               />
               <IconButton
                 label={`Move ${m.name} up`}
-                disabled={i === 0}
+                disabled={m.position <= 1}
                 busy={moving}
                 onClick={() => run("Move", () => ipc.modMove(m.uid, "up"), { key: MOVE })}
               >
@@ -157,7 +249,7 @@ function ModList({ game }: { game: string }) {
               </IconButton>
               <IconButton
                 label={`Move ${m.name} down`}
-                disabled={i === list.length - 1}
+                disabled={m.position >= list.length}
                 busy={moving}
                 onClick={() => run("Move", () => ipc.modMove(m.uid, "down"), { key: MOVE })}
               >
@@ -172,6 +264,63 @@ function ModList({ game }: { game: string }) {
       </ol>
       {detail && <ModDetailDialog mod={detail} game={game} onClose={() => setDetail(null)} />}
     </>
+  );
+}
+
+const STATES: { value: StateFilter; label: string }[] = [
+  { value: "all", label: "All mods" },
+  { value: "enabled", label: "Enabled" },
+  { value: "disabled", label: "Disabled" },
+  { value: "conflicts", label: "Has conflicts" },
+];
+
+/** Search box and filters over the load order (instant; the list stays in load order). */
+function ModFilters({
+  mods,
+  filter,
+  onChange,
+  hasUpdates,
+}: {
+  mods: ModView[];
+  filter: ModFilter;
+  onChange: (f: ModFilter) => void;
+  hasUpdates: boolean;
+}) {
+  const slugs = [...new Set(mods.flatMap((m) => m.collections))].sort();
+  const states = hasUpdates ? [...STATES, { value: "updates" as const, label: "Has updates" }] : STATES;
+  return (
+    <div role="search" aria-label="Filter mods" className="flex flex-wrap items-end gap-3">
+      <TextField
+        label="Search mods"
+        type="search"
+        name="mod-search"
+        placeholder="Name, author or ID"
+        value={filter.query}
+        onChange={(e) => onChange({ ...filter, query: e.target.value })}
+        className="min-w-0 flex-[2_1_16rem]"
+      />
+      <Select
+        label="Filter"
+        value={states.some((o) => o.value === filter.state) ? filter.state : "all"}
+        options={states}
+        onChange={(state) => onChange({ ...filter, state })}
+        className="min-w-0 flex-[1_1_11rem]"
+      />
+      {slugs.length > 0 && (
+        <Select
+          label="Collection"
+          value={filter.collection}
+          options={[
+            { value: "", label: "Any" },
+            { value: "*", label: "In a collection" },
+            { value: "-", label: "Not in a collection" },
+            ...slugs.map((c) => ({ value: c, label: c })),
+          ]}
+          onChange={(collection) => onChange({ ...filter, collection })}
+          className="min-w-0 flex-[1_1_11rem]"
+        />
+      )}
+    </div>
   );
 }
 
@@ -301,12 +450,15 @@ function Conflicts({ game }: { game: string }) {
   );
 }
 
-function Updates() {
+function Updates({ game }: { game: string }) {
   const run = useRun();
+  const qc = useQueryClient();
   const notify = useUi((s) => s.notify);
   const checking = useBusy("Check updates");
   const installing = useBusy("Install updates");
-  const [report, setReport] = useState<UpdateReport | null>(null);
+  // Kept in the query cache, so the Mods list can filter on it ("Has updates").
+  const report = useUpdateReport(game).data ?? null;
+  const setReport = (r: UpdateReport | null) => qc.setQueryData(["updates", game], r);
   return (
     <Card
       title="Updates"

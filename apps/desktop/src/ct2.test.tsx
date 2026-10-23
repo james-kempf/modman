@@ -97,23 +97,21 @@ describe("CT2 D02/D04 deploy-due per game", () => {
   it("is not shown for another game", async () => {
     let games = two;
     const { qc } = await open("overview", { games_list: () => games }, two);
-    act(() => {
-      useUi.getState().markDeployDue("skyrimspecialedition");
-      useUi.getState().notify("warn", "Changes are not in the game yet.", "skyrimspecialedition");
-    });
-    expect(await screen.findByRole("button", { name: "Deploy changes" })).toBeInTheDocument();
+    act(() => useUi.getState().markDeployDue("skyrimspecialedition"));
+    expect(await within(main()).findByText("Changes waiting to be deployed")).toBeInTheDocument();
     games = [game({ active: false }), experimentalGame({ active: true })];
     await act(() => qc.refetchQueries({ queryKey: ["games"] }));
     await within(main()).findByText("Cyberpunk 2077");
-    expect(screen.queryByRole("button", { name: "Deploy changes" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Deploy now" })).toBeNull();
+    expect(within(main()).queryByText("Changes waiting to be deployed")).toBeNull();
     expect(within(main()).getByText("Deployed and in sync")).toBeInTheDocument();
   });
 
-  // D02: fails when the backend's per-game changed_since_deploy is not used for the sidebar.
+  // D02: fails when the backend's per-game changed_since_deploy is not used for the deploy state.
+  // U02: deploying is offered on the Overview only (no sidebar "Deploy changes").
   it("follows the game's changed_since_deploy", async () => {
     await open("overview", { mods_list: () => ({ mods: [], changed_since_deploy: true }) });
-    expect(await screen.findByRole("button", { name: "Deploy changes" })).toBeInTheDocument();
+    expect(await within(main()).findByText("Changes waiting to be deployed")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Deploy changes" })).toBeNull();
   });
 
   // D04: fails when a deploy clears the pending state although mods changed while it ran, or the notice omits the game.
@@ -147,7 +145,8 @@ describe("CT2 D04 deploy progress", () => {
 
 describe("CT2 D03/D07 collection install", () => {
   // D03: fails when a collection install with deploy off does not offer the deploy (CollectionResult has no needs_deploy).
-  it("deploy off: warns and shows Deploy changes when the game is out of sync", async () => {
+  // U02: the deploy now due is recorded (Overview, game tile) without a notice or a sidebar button.
+  it("deploy off: marks the game out of sync, with no notice or sidebar button", async () => {
     let dirty = false;
     const { user } = await open("collections", {
       collection_info: () => collInfo(null),
@@ -158,9 +157,9 @@ describe("CT2 D03/D07 collection install", () => {
     await user.click(screen.getByRole("button", { name: "Look up" }));
     await user.click(await screen.findByRole("switch", { name: "Deploy when done" }));
     await user.click(screen.getByRole("button", { name: "Install collection" }));
-    await waitFor(() => expect(noticeTexts()).toContain("Changes are not in the game yet."));
-    expect(useUi.getState().deployDue.skyrimspecialedition).toBeDefined();
-    expect(await screen.findByRole("button", { name: "Deploy changes" })).toBeInTheDocument();
+    await waitFor(() => expect(useUi.getState().deployDue.skyrimspecialedition).toBeDefined());
+    expect(noticeTexts()).not.toContain("Changes are not in the game yet.");
+    expect(screen.queryByRole("button", { name: "Deploy changes" })).toBeNull();
   });
 
   // D03: fails when a collection install that deployed says nothing about the deploy. D07: the panel stays at "Install collection".

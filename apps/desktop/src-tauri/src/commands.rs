@@ -15,7 +15,9 @@ use modman_core::app::collection::{
     self as appcol, CollectionInfo, CollectionResult, RemoveResult,
 };
 use modman_core::app::deploy::{run_deploy, run_purge};
-use modman_core::app::games::{self as appgames, AddGame, Detected, GameView, Launched};
+use modman_core::app::games::{
+    self as appgames, AddGame, Detected, GameFolder, GameView, Launched,
+};
 use modman_core::app::install::{self as appinst, InstallRequest, InstallResult, Reinstalled};
 use modman_core::app::mods::{
     self as appmods, ModDetail, ModsView, MoveResult, ProfileLoaded, UninstallResult,
@@ -378,11 +380,36 @@ pub async fn mod_reinstall(
     .await
 }
 
-/// The game's portrait library art (600x900) as a `data:` URL: the local
-/// Steam cache, else modman's cache of Steam's CDN copy; `None` = no art.
+/// The game's library art (`kind`: portrait `library_600x900`, the
+/// default, or wide `library_hero`) as a `data:` URL: the local Steam
+/// cache, else modman's cache of Steam's CDN copy; `None` = no art.
 #[tauri::command(rename_all = "snake_case")]
-pub async fn game_art(app: AppHandle, state: St<'_>, domain: String) -> CmdResult<Option<String>> {
-    query(app, &state, None, move |cx| art::game_art(cx, &domain)).await
+pub async fn game_art(
+    app: AppHandle,
+    state: St<'_>,
+    domain: String,
+    kind: Option<art::ArtKind>,
+) -> CmdResult<Option<String>> {
+    query(app, &state, None, move |cx| {
+        art::game_art(cx, &domain, kind.unwrap_or_default())
+    })
+    .await
+}
+
+/// Opens the game folder or the Proton prefix of `game` in the file
+/// manager. The path comes from the game's stored configuration only (the
+/// webview names a game and a kind, never a path); returns the path opened.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn open_folder(
+    app: AppHandle,
+    state: St<'_>,
+    game: String,
+    which: GameFolder,
+) -> CmdResult<PathBuf> {
+    query(app, &state, None, move |cx| {
+        appgames::open_folder(cx, &game, which, appgames::launch_file_manager)
+    })
+    .await
 }
 
 /// The mod's picture as a `data:` URL (cached; `None` when it has none).
@@ -639,6 +666,21 @@ pub async fn profile_delete(
 }
 
 // ── collections ─────────────────────────────────────────────
+
+/// A collection's tile picture from Nexus as a `data:` URL (cached;
+/// `None` = it has none or Nexus could not be asked).
+#[tauri::command(rename_all = "snake_case")]
+pub async fn collection_art(
+    app: AppHandle,
+    state: St<'_>,
+    game: String,
+    slug: String,
+) -> CmdResult<Option<String>> {
+    query(app, &state, None, move |cx| {
+        thumbs::collection_art(cx, &game, &slug)
+    })
+    .await
+}
 
 #[tauri::command(rename_all = "snake_case")]
 pub async fn collections_list(

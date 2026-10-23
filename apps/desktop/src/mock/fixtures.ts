@@ -18,6 +18,8 @@ export const deployStatus = (o: Partial<DeployStatus> = {}): DeployStatus => ({
   dirs: 12,
   last_deployed_at: 1_760_000_000,
   interrupted: false,
+  enabled_mods: 2,
+  deployed_mods: 2,
   ...o,
 });
 

@@ -13,7 +13,6 @@ import {
   GearSixIcon,
   InfoIcon,
   PuzzlePieceIcon,
-  RocketLaunchIcon,
   SquaresFourIcon,
   StackIcon,
   TerminalWindowIcon,
@@ -38,12 +37,12 @@ import { Collections } from "../views/Collections";
 import { Games } from "../views/Games";
 import { Install } from "../views/Install";
 import { Mods } from "../views/Mods";
-import { Overview } from "../views/Overview";
+import { HeroBackdrop, Overview } from "../views/Overview";
 import { Requirements } from "../views/Requirements";
 import { Settings } from "../views/Settings";
 import { jobLabel, jobOutcome } from "./jobs";
 import { useAccount, useActiveGame } from "./queries";
-import { useBusy, useDeploy, useDeployDue } from "./run";
+import { useDeploy, useDeployDue } from "./run";
 import { VIEWS, useUi, type JobEntry, type NoticeTone, type ViewId } from "./store";
 
 const VIEW: Record<ViewId, () => JSX.Element> = {
@@ -69,10 +68,12 @@ const ICON: Record<ViewId, ReactNode> = {
 };
 
 /**
- * Bottom padding + scroll-padding for the fixed bottom stack (~82px per
- * notice or island + 24px offset), so a control scrolled into view is not under it.
+ * Bottom padding of the view: with nothing in the bottom stack it equals
+ * the side padding (px-10); with notices or the island it also leaves room
+ * (+ scroll-padding) for the fixed stack (~82px per notice or island + 24px
+ * offset), so a control scrolled into view is not under it.
  */
-const STACK_ROOM = ["pb-24", "pb-28 scroll-pb-28", "pb-48 scroll-pb-48", "pb-72 scroll-pb-72", "pb-96 scroll-pb-96"];
+const STACK_ROOM = ["pb-10", "pb-28 scroll-pb-28", "pb-48 scroll-pb-48", "pb-72 scroll-pb-72", "pb-96 scroll-pb-96"];
 
 /** How long a finished job stays in the island (legacy: 5 s). */
 const ISLAND_LINGER = 5000;
@@ -104,14 +105,18 @@ export function App() {
       {/* Dialogs render in a portal on <body> and make everything else inert while open. */}
       <div className="flex h-full">
         <Sidebar />
-        <main className={cx("min-h-0 min-w-0 flex-1 overflow-y-auto", STACK_ROOM[stack] ?? STACK_ROOM[4])}>
-          {/* key: each view enters with the short legacy fade/rise. */}
-          <div key={view} className="mx-auto w-full max-w-[1400px] animate-rise px-10 pt-10">
-            <ViewBoundary name={VIEWS.find((v) => v.id === view)?.label ?? view}>
-              <View />
-            </ViewBoundary>
-          </div>
-        </main>
+        {/* The Overview's hero art sits behind the scrolling view, not in it: it stays put while the view scrolls. */}
+        <div className="relative isolate min-h-0 min-w-0 flex-1">
+          {view === "overview" && <HeroBackdrop />}
+          <main className={cx("relative h-full overflow-y-auto", STACK_ROOM[stack] ?? STACK_ROOM[4])}>
+            {/* key: each view enters with the short legacy fade/rise. */}
+            <div key={view} className="mx-auto w-full max-w-[1400px] animate-rise px-10 pt-10">
+              <ViewBoundary name={VIEWS.find((v) => v.id === view)?.label ?? view}>
+                <View />
+              </ViewBoundary>
+            </div>
+          </main>
+        </div>
         <BottomStack island={island} />
         <AddGameHost />
       </div>
@@ -159,17 +164,15 @@ function Sidebar() {
 }
 
 /**
- * Brand + the active game (picked in the Games view), with its deploy
- * progress or "Deploy changes" when due. Part of the rail for spatial
- * navigation: Down from here reaches the tabs, not the view.
+ * Brand + the active game (picked in the Games view) and its deploy
+ * progress. Deploying is done from the Overview's Deployment card. Part of
+ * the rail for spatial navigation: Down from here reaches the tabs, not the view.
  */
 function GameHeader() {
   const { game, isLoading } = useActiveGame();
   const needsDeploy = useDeployDue(game?.domain ?? null);
   // Progress of a deploy of another game is not shown under this one (the job island shows it).
   const progress = useUi((s) => (s.deployGame && s.deployGame !== game?.domain ? null : s.deployProgress));
-  const deploy = useDeploy();
-  const busy = useBusy("Deploy");
   const d = game?.deploy;
   const tone: DotTone = !d?.active ? "zinc" : d.interrupted ? "rose" : needsDeploy ? "amber" : "accent";
   return (
@@ -197,18 +200,6 @@ function GameHeader() {
             <progress aria-label="Deploy progress" max={progress.total || 1} value={progress.done} />
             deploying {progress.done}/{progress.total}
           </span>
-        )}
-        {game && needsDeploy && !progress && (
-          <Button
-            tone="primary"
-            size="sm"
-            className="mt-1 w-full"
-            busy={busy}
-            icon={<RocketLaunchIcon aria-hidden size={16} weight="duotone" />}
-            onClick={() => void deploy()}
-          >
-            Deploy changes
-          </Button>
         )}
       </div>
     </header>

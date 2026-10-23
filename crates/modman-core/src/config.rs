@@ -11,6 +11,26 @@ use crate::store::{Store, StoreError};
 /// Deploy methods accepted by `config deploy-method` and `game set method`.
 /// `reflink` is new in the rewrite (tech stack §4.1 fallback chain).
 pub const DEPLOY_METHODS: &[&str] = &["auto", "hardlink", "reflink", "symlink", "copy"];
+/// Values of `config fomod`.
+pub const FOMOD_MODES: &[&str] = &["auto", "ask", "default"];
+/// Values of the true/false keys.
+pub const BOOLS: &[&str] = &["true", "false"];
+
+/// The kind of value a key takes, for front ends (dropdown, toggle, text field).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ValueKind {
+    /// One of [`ConfigKey::options`].
+    Enum,
+    /// `true` or `false`.
+    Bool,
+    /// A non-negative integer.
+    Number,
+    /// An absolute path (`~` expands).
+    Path,
+    /// Free text.
+    Text,
+}
 
 /// Errors from settings handling.
 #[derive(Debug, thiserror::Error)]
@@ -95,6 +115,30 @@ impl ConfigKey {
         }
     }
 
+    /// The kind of value the key takes.
+    pub fn kind(self) -> ValueKind {
+        match self {
+            ConfigKey::DataDir => ValueKind::Path,
+            ConfigKey::DeployMethod | ConfigKey::Fomod => ValueKind::Enum,
+            ConfigKey::Jobs | ConfigKey::AutoupdateInterval => ValueKind::Number,
+            ConfigKey::Cdn => ValueKind::Text,
+            ConfigKey::Adult | ConfigKey::AutoDeploy | ConfigKey::AutoupdateCollections => {
+                ValueKind::Bool
+            }
+        }
+    }
+
+    /// The accepted values of an enum or bool key (empty for the others);
+    /// [`ConfigKey::normalize`] checks against the same lists.
+    pub fn options(self) -> &'static [&'static str] {
+        match self {
+            ConfigKey::DeployMethod => DEPLOY_METHODS,
+            ConfigKey::Fomod => FOMOD_MODES,
+            _ if self.kind() == ValueKind::Bool => BOOLS,
+            _ => &[],
+        }
+    }
+
     /// Default value (legacy L220-223; data-dir follows XDG instead of
     /// `~/nexus-mods`).
     pub fn default_value(self, paths: &Paths) -> String {
@@ -126,7 +170,8 @@ impl ConfigKey {
                 }
                 Ok(v.to_string())
             }
-            ConfigKey::DeployMethod => DEPLOY_METHODS
+            ConfigKey::DeployMethod => self
+                .options()
                 .contains(&value)
                 .then(|| value.to_string())
                 .ok_or_else(|| invalid("auto, hardlink, reflink, symlink or copy")),
@@ -135,12 +180,14 @@ impl ConfigKey {
                 _ => Err(invalid("an integer 1-16")),
             },
             ConfigKey::Cdn => Ok(value.to_string()),
-            ConfigKey::Adult | ConfigKey::AutoDeploy | ConfigKey::AutoupdateCollections => {
-                matches!(value, "true" | "false")
-                    .then(|| value.to_string())
-                    .ok_or_else(|| invalid("true or false"))
-            }
-            ConfigKey::Fomod => matches!(value, "auto" | "ask" | "default")
+            ConfigKey::Adult | ConfigKey::AutoDeploy | ConfigKey::AutoupdateCollections => self
+                .options()
+                .contains(&value)
+                .then(|| value.to_string())
+                .ok_or_else(|| invalid("true or false")),
+            ConfigKey::Fomod => self
+                .options()
+                .contains(&value)
                 .then(|| value.to_string())
                 .ok_or_else(|| invalid("auto, ask or default")),
             ConfigKey::AutoupdateInterval => value
@@ -273,6 +320,34 @@ mod tests {
         ok(ConfigKey::AutoupdateInterval, "12");
         bad(ConfigKey::AutoupdateInterval, "-1");
         ok(ConfigKey::Cdn, "Amsterdam");
+    }
+
+    // Fails when the options a front end offers drift from what validation accepts
+    // (a dropdown entry that is rejected, or an enum/bool key offered as free text).
+    #[test]
+    fn options_match_validation_per_kind() {
+        let h = Path::new("/home/u");
+        let p = paths();
+        for k in ConfigKey::ALL {
+            let opts = k.options();
+            match k.kind() {
+                ValueKind::Enum | ValueKind::Bool => {
+                    assert!(!opts.is_empty(), "{k:?}");
+                    for o in opts {
+                        assert_eq!(k.normalize(o, h).unwrap(), *o, "{k:?}={o}");
+                    }
+                    assert!(k.normalize("not-an-option", h).is_err(), "{k:?}");
+                    assert!(opts.contains(&k.default_value(&p).as_str()), "{k:?}");
+                }
+                _ => assert!(opts.is_empty(), "{k:?}"),
+            }
+        }
+        assert_eq!(ConfigKey::DeployMethod.options(), DEPLOY_METHODS);
+        assert_eq!(ConfigKey::Fomod.options(), ["auto", "ask", "default"]);
+        assert_eq!(ConfigKey::AutoDeploy.kind(), ValueKind::Bool);
+        assert_eq!(ConfigKey::Jobs.kind(), ValueKind::Number);
+        assert_eq!(ConfigKey::DataDir.kind(), ValueKind::Path);
+        assert_eq!(ConfigKey::Cdn.kind(), ValueKind::Text);
     }
 
     #[test]

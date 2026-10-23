@@ -146,7 +146,10 @@ describe("game library", () => {
     await waitFor(() => expect(within(tile("Cyberpunk 2077")).getByTestId("game-monogram")).toHaveTextContent("C2"));
     expect(within(tile("Manual Game")).getByTestId("game-monogram")).toHaveTextContent("MG");
     // No app id: nothing to look up.
-    expect(t.callsOf("game_art")).toEqual([{ domain: "skyrimspecialedition" }, { domain: "cyberpunk2077" }]);
+    expect(t.callsOf("game_art")).toEqual([
+      { domain: "skyrimspecialedition", kind: "library_600x900" },
+      { domain: "cyberpunk2077", kind: "library_600x900" },
+    ]);
   });
 
   // Fails when a non-image string from the backend ends up in <img src>.

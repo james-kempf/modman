@@ -12,12 +12,17 @@ import { createFakeTransport, type Args, type FakeTransport } from "./fake";
 import { afterChange, autoupdateStatus, deployReport, experimentalGame, game, mod } from "./fixtures";
 
 export function createDemoBackend(): FakeTransport {
-  const games = [game(), experimentalGame({ active: false, mod_count: 0 })];
+  const games = [
+    game({ prefix: "/home/deck/.local/share/Steam/steamapps/compatdata/489830/pfx" }),
+    experimentalGame({ active: false, mod_count: 0 }),
+  ];
   type Profile = ProfileSummary & { set: { uid: string; enabled: boolean }[] };
   interface GameState {
     mods: ModView[];
     /** The mod set changed since the last deploy. */
     dirty: boolean;
+    /** Ids of the mods the last deploy placed. */
+    deployed?: Set<number>;
     profiles: Profile[];
     collections: CollectionRecord[];
   }
@@ -45,9 +50,42 @@ export function createDemoBackend(): FakeTransport {
   const waiting = new Map<number, (a: Answer) => void>();
   let loggedIn = false;
   let timer = false;
+  const bools = ["true", "false"];
+  // The core's 9 keys with their kinds and options (config.rs).
   const config: ConfigEntry[] = [
-    { key: "deploy-method", value: "auto", description: "hardlink, reflink, symlink, copy or auto" },
-    { key: "autoupdate-interval", value: "0", description: "hours between auto-update runs (0 = hourly)" },
+    { key: "data-dir", value: "~/.local/share/modman", description: "where downloads and per-game data live", kind: "path", options: [] },
+    {
+      key: "deploy-method",
+      value: "auto",
+      description: "auto|hardlink|reflink|symlink|copy",
+      kind: "enum",
+      options: ["auto", "hardlink", "reflink", "symlink", "copy"],
+    },
+    { key: "jobs", value: "4", description: "reserved; downloads run one at a time", kind: "number", options: [] },
+    { key: "cdn", value: "", description: "preferred download server", kind: "text", options: [] },
+    { key: "adult", value: "false", description: "show adult-only collections", kind: "bool", options: bools },
+    { key: "auto-deploy", value: "false", description: "deploy after every change", kind: "bool", options: bools },
+    {
+      key: "fomod",
+      value: "auto",
+      description: "auto|ask|default — installer behaviour for single mods",
+      kind: "enum",
+      options: ["auto", "ask", "default"],
+    },
+    {
+      key: "autoupdate-collections",
+      value: "true",
+      description: "auto-update moves collections to their newest revision",
+      kind: "bool",
+      options: bools,
+    },
+    {
+      key: "autoupdate-interval",
+      value: "0",
+      description: "hours between extra auto-update checks; 0 = only after system/game updates",
+      kind: "number",
+      options: [],
+    },
   ];
   const deps: ReqRow[] = [
     { status: "missing", key: "skse", name: "SKSE64", hint: "install 30379", urls: [], by: ["SkyUI"], detail: "", acked: false },
@@ -79,6 +117,11 @@ export function createDemoBackend(): FakeTransport {
   const now = () => Math.floor(Date.now() / 1000);
   const renumber = (g: GameState) => g.mods.forEach((m, k) => (m.position = k + 1));
   state.forEach(renumber);
+  // The first game starts deployed and in sync: its deployment holds its enabled mods.
+  for (const g of games) {
+    const s = state.get(g.domain);
+    if (s && g.deploy.active) s.deployed = new Set(s.mods.filter((m) => m.enabled).map((m) => m.id));
+  }
   /** A mod-set change: deploy is due, or done when the command asked for it. */
   const changed = (g: GameState, deployNow = false) => {
     g.dirty = !deployNow;
@@ -136,7 +179,13 @@ export function createDemoBackend(): FakeTransport {
     config_set: (a: Args) => {
       const c = config.find((x) => x.key === a!.key);
       if (!c) throw { message: `unknown config key '${String(a!.key)}'` };
-      c.value = String(a!.value);
+      const v = String(a!.value);
+      const bad =
+        (c.options.length && !c.options.includes(v)) ||
+        (c.kind === "number" && !/^\d+$/.test(v)) ||
+        (c.kind === "path" && !/^[/~]/.test(v));
+      if (bad) throw { message: `invalid value '${v}' for ${c.key}` };
+      c.value = v;
       return { ...c, old_data_left: null };
     },
     account: () =>
@@ -151,7 +200,16 @@ export function createDemoBackend(): FakeTransport {
       loggedIn = false;
       return false;
     },
-    games_list: () => games.map((g) => ({ ...g })),
+    games_list: () =>
+      games.map((g) => {
+        const s = state.get(g.domain);
+        const on = s ? s.mods.filter((m) => m.enabled) : [];
+        const placed = s?.deployed ?? new Set<number>();
+        return {
+          ...g,
+          deploy: { ...g.deploy, enabled_mods: on.length, deployed_mods: on.filter((m) => placed.has(m.id)).length },
+        };
+      }),
     games_detect: () => [
       {
         domain: "fallout4",
@@ -189,8 +247,19 @@ export function createDemoBackend(): FakeTransport {
     game_art: (a: Args) => {
       const g = games.find((x) => x.domain === a!.domain);
       if (!g) throw { message: `no game '${String(a!.domain)}'` };
-      return g.domain === "skyrimspecialedition" ? placeholderArt(g.name) : null;
+      if (g.domain !== "skyrimspecialedition") return null;
+      return a!.kind === "library_hero" ? placeholderHero(g.name) : placeholderArt(g.name);
     },
+    open_folder: (a: Args) => {
+      const g = games.find((x) => x.domain === a!.game);
+      if (!g) throw { message: `no game '${String(a!.game)}'` };
+      const p = a!.which === "prefix" ? g.prefix : a!.which === "game" ? g.folder : undefined;
+      if (p === undefined) throw { message: `unknown folder '${String(a!.which)}'` };
+      if (!p) throw { message: `${g.domain}: no ${a!.which === "prefix" ? "Proton prefix" : "game folder"} is set` };
+      return p;
+    },
+    // Generated tile art for collections, except slugs containing "noart" (monogram), so both paths show.
+    collection_art: (a: Args) => (String(a!.slug).includes("noart") ? null : placeholderTile(String(a!.slug))),
     game_launch: () =>
       job("launch", async (id) => {
         const g = active();
@@ -279,15 +348,17 @@ export function createDemoBackend(): FakeTransport {
         const g = st(a);
         for (let d = 0; d <= 20; d += 5) t.emit("modman:deploy-progress", { job: id, done: d, total: 20 });
         g.dirty = false;
+        g.deployed = new Set(g.mods.filter((m) => m.enabled).map((m) => m.id));
         return deployReport({ mods: g.mods.filter((m) => m.enabled).length });
       }),
-    purge: () =>
+    purge: (args: Args) =>
       job("purge", async (id) => {
         const a = await ask(id, { type: "confirm", question: "Remove every deployed file?", default_yes: false });
         if (a.type !== "confirm" || !a.yes) {
           say(id, "Cancelled.");
           return null;
         }
+        st(args).deployed = new Set();
         return { nothing_deployed: false, removed: 20, restored: 0, missing: 0, changed: 0, kept: 0, recovered: null, plugins: null };
       }),
     verify: () => ({ intact: 20, issues: [], interrupted: false }),
@@ -522,6 +593,28 @@ export function placeholderArt(name: string): string {
     `<rect width="600" height="900" fill="#1d2a33"/><rect x="40" y="40" width="520" height="820" fill="none" stroke="#3b5566" stroke-width="4"/>` +
     `<circle cx="300" cy="360" r="120" fill="#2c4250"/>` +
     `<text x="300" y="640" fill="#e4eef2" font-family="sans-serif" font-size="44" text-anchor="middle">${esc}</text></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+/** A flat wide SVG standing in for Steam's hero art, as a data: URL. */
+export function placeholderHero(name: string): string {
+  const esc = name.replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`);
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="620" viewBox="0 0 1920 620">` +
+    `<rect width="1920" height="620" fill="#22313b"/><circle cx="1500" cy="250" r="220" fill="#3b5566"/>` +
+    `<rect x="0" y="470" width="1920" height="150" fill="#2c4250"/>` +
+    `<text x="120" y="300" fill="#e4eef2" font-family="sans-serif" font-size="96">${esc}</text></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+/** A flat square SVG standing in for a collection's Nexus tile image, as a data: URL. */
+export function placeholderTile(slug: string): string {
+  const esc = slug.slice(0, 8).replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`);
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320">` +
+    `<rect width="320" height="320" fill="#2a2f45"/><path d="M0 240 L110 130 L190 200 L250 150 L320 220 V320 H0Z" fill="#46507a"/>` +
+    `<circle cx="235" cy="80" r="34" fill="#8a93c4"/>` +
+    `<text x="24" y="60" fill="#e8eaf6" font-family="sans-serif" font-size="34">${esc}</text></svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 

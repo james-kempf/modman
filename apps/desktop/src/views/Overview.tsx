@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Overview of the active game: play, deployment (deploy/purge/verify), mods,
-// requirements, recently installed mods, plugins (Bethesda games) and the
-// start-up auto-update check. Games are picked and added in the Games view.
+// Overview of the active game: play and its folders, deployment
+// (deploy/purge/verify and how many enabled mods are deployed), mods,
+// collections, requirements, recently installed mods, plugins (Bethesda
+// games) and the start-up auto-update check, over the game's Steam hero art.
+// Games are picked and added in the Games view.
 
 import {
   ArrowRightIcon,
   ArrowsClockwiseIcon,
   BroomIcon,
+  FolderOpenIcon,
   PlayIcon,
   RocketLaunchIcon,
   ShieldCheckIcon,
@@ -32,7 +35,7 @@ import {
   when,
 } from "../components/ui";
 import * as ipc from "../ipc/commands";
-import type { GameView, ModView, PurgeReport, ReqRow, Skip, VerifyReport } from "../ipc/types";
+import type { DeployStatus, GameFolder, GameView, ModView, PurgeReport, ReqRow, Skip, VerifyReport } from "../ipc/types";
 import { NoGame } from "../components/NoGame";
 
 /** How many mods "Recently installed" lists. */
@@ -78,10 +81,12 @@ function GameCards({ game }: { game: GameView }) {
       <div
         className={cx(
           "stagger grid grid-cols-[minmax(0,1fr)] gap-6 md:grid-cols-[repeat(2,minmax(0,1fr))]",
-          bethesda && "xl:grid-cols-[repeat(3,minmax(0,1fr))]",
+          // Three cards in a row from xl; with Plugins, two rows of two until there is room for four.
+          bethesda ? "2xl:grid-cols-[repeat(4,minmax(0,1fr))]" : "xl:grid-cols-[repeat(3,minmax(0,1fr))]",
         )}
       >
         <ModsCard mods={mods.data?.mods} outOfSync={outOfSync} />
+        <CollectionsCard game={game.domain} />
         <RequirementsCard game={game.domain} />
         {bethesda && <PluginsCard game={game.domain} />}
       </div>
@@ -112,14 +117,24 @@ function PlayCard({ game, outOfSync }: { game: GameView; outOfSync: boolean }) {
   return (
     <div className="panel flex min-w-0 flex-col justify-between gap-8 p-7 md:p-9">
       <div>
-        <div className="flex flex-wrap items-center gap-2.5">
-          <StatusDot tone={status.tone} live={d.active} />
-          <span className="text-[13.5px] text-zinc-300">{status.text}</span>
+        <div data-testid="game-tags" className="flex flex-wrap items-center gap-2.5">
+          {game.appid !== null && <Badge>App {game.appid}</Badge>}
           <Badge>{game.profile}</Badge>
           <SupportBadge support={game.support} />
+          <span className="flex items-center gap-2.5">
+            <StatusDot tone={status.tone} live={d.active} />
+            <span className="text-[13.5px] text-zinc-300">{status.text}</span>
+          </span>
         </div>
         <h2 className="mt-6 text-4xl leading-none font-medium tracking-tighter wrap-anywhere text-zinc-50 md:text-5xl">{game.name}</h2>
-        <p className="mt-4 font-mono text-[12.5px] wrap-anywhere text-dim">{game.folder ?? "no folder set"}</p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {game.folder ? (
+            <FolderButton game={game} which="game" label="Game folder" />
+          ) : (
+            <p className="font-mono text-[12.5px] text-dim">no folder set</p>
+          )}
+          {game.prefix && <FolderButton game={game} which="prefix" label="Proton folder" />}
+        </div>
       </div>
       <div className="grid gap-3">
         <div className="flex flex-wrap items-center gap-3">
@@ -135,15 +150,34 @@ function PlayCard({ game, outOfSync }: { game: GameView; outOfSync: boolean }) {
           </Button>
           <RemoveGame game={game} />
         </div>
-        <p className="text-[13px] leading-relaxed text-dim">
-          {game.appid === null
-            ? "No Steam app id is set for this game, so it cannot be started from here (modman game set appid <id>)."
-            : outOfSync
-              ? "Starts the game through Steam. Your mod changes are not deployed yet: you will be asked to deploy first."
-              : `Starts the game through Steam (app ${game.appid}).`}
-        </p>
+        {(game.appid === null || outOfSync) && (
+          <p className="text-[13px] leading-relaxed text-dim">
+            {game.appid === null
+              ? "No Steam app id is set for this game, so it cannot be started from here (modman game set appid <id>)."
+              : "Your mod changes are not deployed yet: Play asks to deploy them first."}
+          </p>
+        )}
       </div>
     </div>
+  );
+}
+
+/** Opens a folder of the game in the file manager; the backend resolves the path from the game's settings. */
+function FolderButton({ game, which, label }: { game: GameView; which: GameFolder; label: string }) {
+  const run = useRun();
+  const key = `Open ${label}`;
+  const busy = useBusy(key);
+  return (
+    <Button
+      size="sm"
+      tone="ghost"
+      busy={busy}
+      title={which === "game" ? (game.folder ?? undefined) : (game.prefix ?? undefined)}
+      icon={<FolderOpenIcon aria-hidden size={16} />}
+      onClick={() => void run(key, () => ipc.openFolder(game.domain, which), { key })}
+    >
+      {label}
+    </Button>
   );
 }
 
@@ -153,8 +187,8 @@ function RemoveGame({ game }: { game: GameView }) {
   return (
     <Button
       tone="ghost"
-      size="sm"
-      icon={<TrashIcon aria-hidden size={15} />}
+      size="lg"
+      icon={<TrashIcon aria-hidden size={17} />}
       onClick={() => run("Remove game", () => ipc.gameRemove(game.domain, false), { key: "Remove game" })}
     >
       Remove game
@@ -174,13 +208,14 @@ function DeploymentCard({ game, outOfSync }: { game: GameView; outOfSync: boolea
     <div className="panel flex min-w-0 flex-col justify-between gap-7 p-7 md:p-9">
       <div>
         <h2 className="eyebrow">Deployment</h2>
-        <p className="mt-3 max-w-[44ch] text-[15px] leading-relaxed text-zinc-400">
-          {outOfSync
-            ? "You changed mods since the last deploy. Deploy to apply them to the game folder."
-            : d.active
-              ? "Your enabled mods are linked into the game. Purge restores the original files."
+        {(outOfSync || !d.active) && (
+          <p className="mt-3 max-w-[44ch] text-[15px] leading-relaxed text-zinc-400">
+            {outOfSync
+              ? "You changed mods since the last deploy. Deploy to apply them to the game folder."
               : "Link every enabled mod into the game folder. Original files are backed up first."}
-        </p>
+          </p>
+        )}
+        <DeployTracker d={d} outOfSync={outOfSync} />
         <dl className="mt-6 grid grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] gap-4">
           <Stat label="Files" value={d.files.toLocaleString()} />
           <Stat label="Method" value={game.method ?? "auto"} />
@@ -222,6 +257,36 @@ function DeploymentCard({ game, outOfSync }: { game: GameView; outOfSync: boolea
         </div>
         {verified && <VerifyResult r={verified} />}
       </div>
+    </div>
+  );
+}
+
+/**
+ * How many enabled mods are in the game: none before a deploy; all of them
+ * when in sync (a mod whose every file lost a conflict is still part of
+ * the deploy); else the ones with files in the current deployment.
+ */
+export function deployTracker(d: DeployStatus, outOfSync: boolean): { deployed: number; enabled: number; pct: number } {
+  const enabled = d.enabled_mods ?? 0;
+  if (!d.active) return { deployed: 0, enabled, pct: 0 };
+  if (!outOfSync) return { deployed: enabled, enabled, pct: 100 };
+  const deployed = Math.min(d.deployed_mods ?? 0, enabled);
+  // Out of sync with nothing enabled (all mods disabled since): nothing of the current set is deployed.
+  const pct = enabled ? Math.floor((deployed / enabled) * 100) : 0;
+  return { deployed, enabled, pct };
+}
+
+function DeployTracker({ d, outOfSync }: { d: DeployStatus; outOfSync: boolean }) {
+  const t = deployTracker(d, outOfSync);
+  return (
+    <div data-testid="deploy-tracker" className="mt-5 grid gap-2">
+      <div className="flex items-center gap-3">
+        <progress aria-label="Enabled mods deployed" className="flex-1" max={100} value={t.pct} />
+        <span className="w-12 text-right font-mono text-[13px] text-zinc-200">{t.pct}%</span>
+      </div>
+      <p className="font-mono text-[12px] text-zinc-400">
+        {t.deployed} of {t.enabled} enabled {t.enabled === 1 ? "mod" : "mods"} deployed
+      </p>
     </div>
   );
 }
@@ -322,6 +387,33 @@ function ModsCard({ mods, outOfSync }: { mods: ModView[] | undefined; outOfSync:
   );
 }
 
+function CollectionsCard({ game }: { game: string }) {
+  // Same query as the Collections view, so both share the cache.
+  const q = useQuery({ queryKey: ["collections", game], queryFn: () => ipc.collectionsList(game) });
+  const list = q.data ?? [];
+  const members = list.reduce((n, c) => n + c.record.mods.length, 0);
+  const enabled = list.reduce((n, c) => n + c.enabled, 0);
+  return (
+    <SummaryCard title="Collections" view="collections" linkLabel="Open Collections">
+      {q.isError ? (
+        <ErrorNote>{errMsg(q.error)}</ErrorNote>
+      ) : q.isPending ? (
+        <p className="text-[14px] text-zinc-400">Reading collections…</p>
+      ) : !list.length ? (
+        <p className="text-[14px] text-zinc-400">No collections installed. Add one from the Collections tab.</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-4">
+            <Count n={list.length} label="installed" />
+            <Count n={`${enabled}/${members}`} label="mods enabled" />
+          </div>
+          <progress aria-label="Collection mods enabled" className="mt-5" max={members || 1} value={enabled} />
+        </>
+      )}
+    </SummaryCard>
+  );
+}
+
 /** A requirement still needs the user (acknowledged external tools count as done). */
 const open = (r: ReqRow) => !r.acked && r.status !== "ok" && r.status !== "gone";
 
@@ -414,6 +506,31 @@ function RecentCard({ game, mods }: { game: string; mods: ModView[] | undefined 
         </ul>
       )}
     </Card>
+  );
+}
+
+/**
+ * The active game's Steam hero art, faint and flat behind the Overview
+ * (none without an app id or art). Decorative: hidden from assistive tech.
+ */
+export function HeroBackdrop() {
+  const { game } = useActiveGame();
+  const q = useQuery({
+    queryKey: ["art", game?.domain, game?.appid, "hero"],
+    queryFn: () => ipc.gameArt(game!.domain, "library_hero"),
+    enabled: !!game && game.appid !== null,
+    staleTime: Infinity,
+  });
+  const src = game && q.data && q.data.startsWith("data:image/") ? q.data : null;
+  if (!src) return null;
+  return (
+    <img
+      src={src}
+      alt=""
+      aria-hidden
+      data-testid="hero-art"
+      className="pointer-events-none absolute inset-0 size-full object-cover object-top opacity-[0.09] select-none"
+    />
   );
 }
 

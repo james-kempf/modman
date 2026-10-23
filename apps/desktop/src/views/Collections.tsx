@@ -17,7 +17,7 @@ import {
   TrashIcon,
   WarningIcon,
 } from "@phosphor-icons/react";
-import { Badge, Button, Card, Empty, ErrorNote, Segmented, TextField, Toggle, ViewHeader, bytes, monogram, when } from "../components/ui";
+import { Badge, Button, Card, Empty, ErrorNote, Segmented, TextField, Toggle, ViewHeader, bytes, cx, monogram, when } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import type { CollectionInfo, CollectionRemoved, CollectionResult } from "../ipc/types";
 import { NoGame } from "../components/NoGame";
@@ -106,7 +106,7 @@ function Installed({ game }: { game: string }) {
         <ul className="stagger grid gap-5">
           {list.map(({ record: c, enabled }) => (
             <li key={c.id} className="panel grid gap-6 p-6 md:grid-cols-[auto_1fr_auto] md:items-center md:p-8">
-              <Monogram name={c.name ?? c.slug} />
+              <CollectionArt game={c.game} slug={c.slug} name={c.name ?? c.slug} />
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="truncate text-xl font-medium tracking-tight text-zinc-50">{c.name ?? c.slug}</h3>
@@ -206,7 +206,7 @@ function Lookup() {
       {info && (
         <div className="mt-6 grid animate-rise gap-5 rounded-3xl border border-white/[0.06] bg-ink p-6">
           <div className="flex flex-wrap items-start gap-5">
-            <Monogram name={info.revision.name} />
+            <CollectionArt game={info.game} slug={info.slug} name={info.revision.name} />
             <div className="min-w-0 flex-1">
               <h3 className="text-xl font-medium tracking-tight wrap-anywhere text-zinc-50">
                 {info.revision.name} <span className="text-[15px] font-normal text-zinc-400">by {info.revision.author}</span>
@@ -243,13 +243,26 @@ function Lookup() {
   );
 }
 
-/** Legacy collection monogram (flat colour tile with initials). */
-function Monogram({ name }: { name: string }) {
+/**
+ * The collection's Nexus tile picture (a data: URL fetched and cached by
+ * the backend; the CSP allows no remote images), else the legacy monogram
+ * (flat colour tile with initials).
+ */
+export function CollectionArt({ game, slug, name }: { game: string; slug: string; name: string }) {
+  const q = useQuery({
+    queryKey: ["collection-art", game, slug],
+    queryFn: () => ipc.collectionArt(game, slug),
+    staleTime: Infinity,
+  });
+  const src = q.data && q.data.startsWith("data:image/") ? q.data : null;
+  const tile = "size-20 shrink-0 rounded-3xl";
+  if (src) return <img src={src} alt="" aria-hidden data-testid="collection-art" className={cx(tile, "object-cover")} />;
   const m = monogram(name);
   return (
     <div
       aria-hidden
-      className={`grid size-20 shrink-0 place-items-center rounded-3xl text-xl font-semibold tracking-tight text-white/85 ${m.cls}`}
+      data-testid="collection-monogram"
+      className={cx(tile, "grid place-items-center text-xl font-semibold tracking-tight text-white/85", m.cls)}
     >
       {m.initials}
     </div>

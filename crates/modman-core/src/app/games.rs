@@ -4,12 +4,12 @@
 
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::{fail, Cx, Msg, R};
 use crate::config::expand_tilde;
 use crate::deploy::{self, DeployStatus};
-use crate::games::{self, steam, GameConfig, Support, KNOWN_PROFILES};
+use crate::games::{self, steam, GameConfig, Support, Target, KNOWN_PROFILES};
 
 /// Options of [`add_game`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -343,6 +343,67 @@ pub fn launch(cx: &mut Cx<'_>, game: &GameConfig) -> R<Launched> {
     Ok(Launched { appid, deployed })
 }
 
+/// A folder of a game that [`open_folder`] opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GameFolder {
+    /// The game's install folder.
+    Game,
+    /// The Proton (Wine) prefix.
+    Prefix,
+}
+
+/// The folder's path, taken only from the game's stored configuration: an
+/// existing directory, as an absolute canonical path.
+pub fn folder_path(game: &GameConfig, which: GameFolder) -> R<PathBuf> {
+    let target = match which {
+        GameFolder::Game => Target::GameDir,
+        GameFolder::Prefix => Target::PrefixDir,
+    };
+    let root = deploy::target_root(game, target)?;
+    Ok(root.canonicalize()?)
+}
+
+/// Opens a folder of `domain` with `open` (the file manager, see
+/// [`launch_file_manager`]); returns the path opened.
+pub fn open_folder(
+    cx: &Cx<'_>,
+    domain: &str,
+    which: GameFolder,
+    open: impl FnOnce(&Path) -> R<()>,
+) -> R<PathBuf> {
+    let g = games::require_game(cx.store.conn(), domain)?;
+    let p = folder_path(&g, which)?;
+    open(&p)?;
+    Ok(p)
+}
+
+/// Shows `dir` in the desktop's file manager (`xdg-open`, else `gio open`),
+/// detached: no shell, output discarded, the child reaped in the background.
+pub fn launch_file_manager(dir: &Path) -> R<()> {
+    let (prog, pre): (PathBuf, &[&str]) = match super::which("xdg-open") {
+        Some(x) => (x, &[]),
+        None => match super::which("gio") {
+            Some(g) => (g, &["open"]),
+            None => fail!(
+                "Neither xdg-open nor gio was found to open {}.",
+                dir.display()
+            ),
+        },
+    };
+    let mut child = std::process::Command::new(prog)
+        .args(pre)
+        .arg(dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -433,5 +494,68 @@ mod tests {
         )
         .unwrap_err();
         assert!(e.to_string().contains("subdir"), "{e}");
+    }
+
+    fn stored_game(cx: &Cx<'_>, folder: Option<PathBuf>, prefix: Option<PathBuf>) {
+        let mut g = GameConfig::custom("foo");
+        g.folder = folder;
+        g.prefix = prefix;
+        games::save_game(cx.store.conn(), &g).unwrap();
+    }
+
+    // Fails when a folder other than the stored game folder / prefix could be opened,
+    // or a missing / unset one reaches the file manager.
+    #[test]
+    fn open_folder_resolves_only_configured_existing_folders() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = Paths::for_home(home.path());
+        let mut store = Store::open_in_memory().unwrap();
+        let ui = Recorder::default();
+        let cx = Cx::new(&paths, &mut store, &ui);
+        let game = home.path().join("game");
+        let pfx = home.path().join("pfx");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::create_dir_all(&pfx).unwrap();
+        // A symlinked game folder opens as its real path.
+        let link = home.path().join("link");
+        std::os::unix::fs::symlink(&game, &link).unwrap();
+        stored_game(&cx, Some(link), None);
+        let mut opened = Vec::new();
+        let p = open_folder(&cx, "foo", GameFolder::Game, |d| {
+            opened.push(d.to_path_buf());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(p, game.canonicalize().unwrap());
+        assert_eq!(opened, std::slice::from_ref(&p));
+        // No prefix configured: refused, nothing opened.
+        let never = |_: &Path| -> R<()> { panic!("must not open") };
+        let e = open_folder(&cx, "foo", GameFolder::Prefix, never).unwrap_err();
+        assert!(e.to_string().contains("Proton prefix"), "{e}");
+        // Configured prefix opens.
+        stored_game(&cx, Some(game.clone()), Some(pfx.clone()));
+        let p = open_folder(&cx, "foo", GameFolder::Prefix, |_| Ok(())).unwrap();
+        assert_eq!(p, pfx.canonicalize().unwrap());
+        // A configured folder that is gone (or a file) is refused.
+        stored_game(
+            &cx,
+            Some(home.path().join("gone")),
+            Some(home.path().join("f")),
+        );
+        std::fs::write(home.path().join("f"), b"x").unwrap();
+        assert!(open_folder(&cx, "foo", GameFolder::Game, never).is_err());
+        assert!(open_folder(&cx, "foo", GameFolder::Prefix, never).is_err());
+        // Unknown game.
+        assert!(open_folder(&cx, "nope", GameFolder::Game, never).is_err());
+    }
+
+    // Fails when the webview names a folder kind other than game/prefix.
+    #[test]
+    fn folder_kinds_deserialize_from_game_and_prefix_only() {
+        let g: GameFolder = serde_json::from_str("\"game\"").unwrap();
+        assert_eq!(g, GameFolder::Game);
+        let g: GameFolder = serde_json::from_str("\"prefix\"").unwrap();
+        assert_eq!(g, GameFolder::Prefix);
+        assert!(serde_json::from_str::<GameFolder>("\"/etc\"").is_err());
     }
 }

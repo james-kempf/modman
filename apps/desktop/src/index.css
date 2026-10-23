@@ -113,6 +113,10 @@
     cursor: not-allowed;
     opacity: 0.45;
   }
+  /* The search fields' native clear button would be the browser's blue: hidden (Escape/select-all clears). */
+  input[type="search"]::-webkit-search-cancel-button {
+    appearance: none;
+  }
   progress {
     @apply h-1.5 w-full overflow-hidden rounded-full;
     appearance: none;

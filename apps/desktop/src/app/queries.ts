@@ -13,11 +13,12 @@ export function makeQueryClient(): QueryClient {
   });
 }
 
-/**
- * Refresh after a command or job: every query except game art, which no
- * command changes (its key holds the app id) and which may need the network.
- */
-export const refreshAll = (qc: QueryClient) => qc.invalidateQueries({ predicate: (q) => q.queryKey[0] !== "art" });
+/** Picture queries: no command changes them (game art's key holds the app id) and they may need the network. */
+const PICTURES = new Set(["art", "collection-art"]);
+
+/** Refresh after a command or job: every query except pictures. */
+export const refreshAll = (qc: QueryClient) =>
+  qc.invalidateQueries({ predicate: (q) => !PICTURES.has(String(q.queryKey[0])) });
 
 export const useGames = () => useQuery({ queryKey: ["games"], queryFn: ipc.gamesList });
 

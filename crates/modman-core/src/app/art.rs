@@ -1,19 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Portrait library art (600x900, the art Steam's library and the Deck
-//! show) for the GUI's game library. Looked up in this order:
+//! Steam library art for the GUI: the portrait art (600x900, the art
+//! Steam's library and the Deck show) for the game library, and the wide
+//! hero art behind a game's Overview. Looked up in this order:
 //! 1. the local Steam cache, read-only:
-//!    `<steam root>/appcache/librarycache/<appid>/library_600x900.jpg`,
-//!    `<appid>/<hash>/library_600x900*.jpg` (newer clients) and the older
-//!    flat `<appid>_library_600x900.jpg`;
-//! 2. modman's own cache `<data>/art/<appid>`, refreshed after [`TTL_SECS`];
+//!    `<steam root>/appcache/librarycache/<appid>/<name>.jpg`,
+//!    `<appid>/<hash>/<name>*.jpg` (newer clients) and the older flat
+//!    `<appid>_<name>.jpg`, where `<name>` is `library_600x900` or
+//!    `library_hero` (never the `library_hero_blur` variant);
+//! 2. modman's own cache `<data>/art/<appid>[_hero]`, refreshed after
+//!    [`TTL_SECS`];
 //! 3. a fetch from Steam's CDN (https, allow-listed hosts on every hop,
 //!    size cap, image sniff) into that cache.
 //!
 //! The picture is returned as a `data:` URL, so the webview's CSP keeps
 //! `img-src 'self' data:` with no remote origins. `None`: no art (the UI
-//! shows a monogram).
+//! shows a monogram, or no background).
 
 use std::path::{Path, PathBuf};
+
+use serde::Deserialize;
 
 use super::thumbs::{data_url, fetch_image, sniff};
 use super::{Cx, R};
@@ -23,10 +28,11 @@ use crate::store;
 
 /// Cached downloads are refreshed after 30 days (store art rarely changes).
 pub const TTL_SECS: i64 = 30 * 86_400;
-/// Larger files (local or downloaded) are not used.
+/// Larger portrait files (local or downloaded) are not used.
 pub const MAX_BYTES: u64 = 4 << 20;
-/// Steam's file name for the portrait art.
-const NAME: &str = "library_600x900";
+/// Larger hero files are not used: hero art is 3840x1240 and some games
+/// ship more than 4 MiB of it.
+pub const HERO_MAX_BYTES: u64 = 8 << 20;
 /// Hosts Steam serves store art from.
 const HOSTS: [&str; 3] = [
     "shared.steamstatic.com",
@@ -34,13 +40,62 @@ const HOSTS: [&str; 3] = [
     "steamcdn-a.akamaihd.net",
 ];
 
+/// Which library picture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+pub enum ArtKind {
+    /// Portrait 600x900 (the game library tiles).
+    #[default]
+    #[serde(rename = "library_600x900")]
+    Portrait,
+    /// Wide hero art (the Overview background).
+    #[serde(rename = "library_hero")]
+    Hero,
+}
+
+impl ArtKind {
+    /// Steam's file name (without `.jpg`).
+    pub fn name(self) -> &'static str {
+        match self {
+            ArtKind::Portrait => "library_600x900",
+            ArtKind::Hero => "library_hero",
+        }
+    }
+
+    /// Size cap of a local or downloaded file.
+    pub fn max_bytes(self) -> u64 {
+        match self {
+            ArtKind::Portrait => MAX_BYTES,
+            ArtKind::Hero => HERO_MAX_BYTES,
+        }
+    }
+
+    /// modman's cache file name (the portrait keeps its original name).
+    fn cache_name(self, appid: u32) -> String {
+        match self {
+            ArtKind::Portrait => appid.to_string(),
+            ArtKind::Hero => format!("{appid}_hero"),
+        }
+    }
+
+    /// A file name in a hashed subfolder that is this art (`<name>*.jpg`,
+    /// not the blurred hero).
+    fn matches(self, file: &str) -> bool {
+        file.strip_prefix(self.name())
+            .and_then(|rest| rest.strip_suffix(".jpg"))
+            .is_some_and(|mid| !mid.starts_with("_blur"))
+    }
+}
+
 pub fn art_dir(paths: &Paths) -> PathBuf {
     paths.data_dir.join("art")
 }
 
-/// The CDN URL of an app's portrait art.
-pub fn art_url(appid: u32) -> String {
-    format!("https://shared.steamstatic.com/store_item_assets/steam/apps/{appid}/{NAME}.jpg")
+/// The CDN URL of an app's library art.
+pub fn art_url(appid: u32, kind: ArtKind) -> String {
+    format!(
+        "https://shared.steamstatic.com/store_item_assets/steam/apps/{appid}/{}.jpg",
+        kind.name()
+    )
 }
 
 /// Only https URLs on Steam's art hosts (exact host match) are fetched.
@@ -53,9 +108,9 @@ pub fn allowed_url(u: &str) -> bool {
 }
 
 /// A small image file, else `None` (missing, too large, not an image).
-fn read_image(p: &Path) -> Option<Vec<u8>> {
+fn read_image(p: &Path, max_bytes: u64) -> Option<Vec<u8>> {
     let meta = std::fs::metadata(p).ok()?;
-    if !meta.is_file() || meta.len() > MAX_BYTES {
+    if !meta.is_file() || meta.len() > max_bytes {
         return None;
     }
     std::fs::read(p).ok().filter(|b| sniff(b).is_some())
@@ -70,33 +125,34 @@ fn sorted_entries(dir: &Path) -> Vec<PathBuf> {
     v
 }
 
-/// Candidate paths of an app's portrait art in one Steam root, best first.
-fn local_candidates(root: &Path, appid: u32) -> Vec<PathBuf> {
+/// Candidate paths of an app's library art in one Steam root, best first.
+fn local_candidates(root: &Path, appid: u32, kind: ArtKind) -> Vec<PathBuf> {
+    let name = kind.name();
     let cache = root.join("appcache/librarycache");
     let app = cache.join(appid.to_string());
-    let mut out = vec![app.join(format!("{NAME}.jpg"))];
+    let mut out = vec![app.join(format!("{name}.jpg"))];
     for sub in sorted_entries(&app).into_iter().filter(|p| p.is_dir()) {
         out.extend(sorted_entries(&sub).into_iter().filter(|f| {
             f.file_name()
                 .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with(NAME) && n.ends_with(".jpg"))
+                .is_some_and(|n| kind.matches(n))
         }));
     }
-    out.push(cache.join(format!("{appid}_{NAME}.jpg")));
+    out.push(cache.join(format!("{appid}_{name}.jpg")));
     out
 }
 
-/// The app's portrait art from the local Steam caches (read-only).
-pub fn local_art(roots: &[PathBuf], appid: u32) -> Option<Vec<u8>> {
+/// The app's library art from the local Steam caches (read-only).
+pub fn local_art(roots: &[PathBuf], appid: u32, kind: ArtKind) -> Option<Vec<u8>> {
     roots
         .iter()
-        .flat_map(|r| local_candidates(r, appid))
-        .find_map(|p| read_image(&p))
+        .flat_map(|r| local_candidates(r, appid, kind))
+        .find_map(|p| read_image(&p, kind.max_bytes()))
 }
 
 /// A downloaded picture younger than [`TTL_SECS`].
-pub fn cached(dir: &Path, appid: u32, now: i64) -> Option<Vec<u8>> {
-    let p = dir.join(appid.to_string());
+pub fn cached(dir: &Path, appid: u32, kind: ArtKind, now: i64) -> Option<Vec<u8>> {
+    let p = dir.join(kind.cache_name(appid));
     let age = std::fs::metadata(&p)
         .ok()?
         .modified()
@@ -106,25 +162,26 @@ pub fn cached(dir: &Path, appid: u32, now: i64) -> Option<Vec<u8>> {
     if age > TTL_SECS {
         return None;
     }
-    read_image(&p)
+    read_image(&p, kind.max_bytes())
 }
 
 /// Local Steam cache, then modman's cache, then `fetch` (a failed fetch is
-/// "no art": the UI falls back to a monogram).
+/// "no art": the UI falls back to a monogram or no background).
 pub fn lookup(
     roots: &[PathBuf],
     dir: &Path,
     appid: u32,
+    kind: ArtKind,
     now: i64,
     fetch: impl FnOnce(&Path, &str) -> R<Vec<u8>>,
 ) -> Option<String> {
-    let bytes = local_art(roots, appid)
-        .or_else(|| cached(dir, appid, now))
+    let bytes = local_art(roots, appid, kind)
+        .or_else(|| cached(dir, appid, kind, now))
         .or_else(
-            || match fetch(&dir.join(appid.to_string()), &art_url(appid)) {
+            || match fetch(&dir.join(kind.cache_name(appid)), &art_url(appid, kind)) {
                 Ok(b) => Some(b),
                 Err(e) => {
-                    tracing::debug!("no library art for app {appid}: {e}");
+                    tracing::debug!("no {} art for app {appid}: {e}", kind.name());
                     None
                 }
             },
@@ -132,9 +189,9 @@ pub fn lookup(
     data_url(&bytes)
 }
 
-/// The game's portrait art as a `data:` URL (`None`: no Steam app id, or
+/// The game's library art as a `data:` URL (`None`: no Steam app id, or
 /// no art anywhere).
-pub fn game_art(cx: &Cx<'_>, domain: &str) -> R<Option<String>> {
+pub fn game_art(cx: &Cx<'_>, domain: &str, kind: ArtKind) -> R<Option<String>> {
     let g = games::require_game(cx.store.conn(), domain)?;
     let Some(appid) = g.appid else {
         return Ok(None);
@@ -144,8 +201,9 @@ pub fn game_art(cx: &Cx<'_>, domain: &str) -> R<Option<String>> {
         &roots,
         &art_dir(cx.paths),
         appid,
+        kind,
         store::now(),
-        |dest, url| fetch_image(dest, url, MAX_BYTES, allowed_url),
+        |dest, url| fetch_image(dest, url, kind.max_bytes(), allowed_url),
     ))
 }
 
@@ -154,6 +212,8 @@ mod tests {
     use super::*;
     use std::fs;
 
+    const P: ArtKind = ArtKind::Portrait;
+    const H: ArtKind = ArtKind::Hero;
     const JPG: &[u8] = b"\xFF\xD8\xFF\xE0jpeg body";
     const JPG2: &[u8] = b"\xFF\xD8\xFF\xE1other jpeg";
 
@@ -174,7 +234,10 @@ mod tests {
         let lc = root.join("appcache/librarycache");
         write(&lc.join("489830/library_600x900.jpg"), JPG);
         write(&lc.join("489830_library_600x900.jpg"), JPG2);
-        assert_eq!(local_art(&[root], 489830).as_deref(), Some(JPG));
+        assert_eq!(
+            local_art(&[root], 489830, ArtKind::Portrait).as_deref(),
+            Some(JPG)
+        );
     }
 
     // Fails when hashed subfolders (<appid>/<hash>/library_600x900*.jpg) are not searched.
@@ -186,7 +249,10 @@ mod tests {
         write(&app.join("header.jpg"), JPG2);
         write(&app.join("0dfe3eed/logo.png"), b"\x89PNG\r\n\x1a\n");
         write(&app.join("9a8b7c/library_600x900_2x.jpg"), JPG);
-        assert_eq!(local_art(&[root], 1091500).as_deref(), Some(JPG));
+        assert_eq!(
+            local_art(&[root], 1091500, ArtKind::Portrait).as_deref(),
+            Some(JPG)
+        );
     }
 
     // Fails when the older flat <appid>_library_600x900.jpg name is not read.
@@ -200,7 +266,10 @@ mod tests {
             &b.join("appcache/librarycache/72850_library_600x900.jpg"),
             JPG,
         );
-        assert_eq!(local_art(&[a, b], 72850).as_deref(), Some(JPG));
+        assert_eq!(
+            local_art(&[a, b], 72850, ArtKind::Portrait).as_deref(),
+            Some(JPG)
+        );
     }
 
     // Fails when a non-image or oversize file in the Steam cache is used.
@@ -212,19 +281,20 @@ mod tests {
         write(&lc.join("1/library_600x900.jpg"), b"<svg onload=alert(1)>");
         write(&lc.join("1_library_600x900.jpg"), JPG);
         assert_eq!(
-            local_art(std::slice::from_ref(&root), 1).as_deref(),
+            local_art(std::slice::from_ref(&root), 1, ArtKind::Portrait).as_deref(),
             Some(JPG)
         );
         let mut big = JPG.to_vec();
         big.resize(MAX_BYTES as usize + 1, 0);
         write(&lc.join("2/library_600x900.jpg"), &big);
-        assert_eq!(local_art(&[root], 2), None);
+        assert_eq!(local_art(&[root], 2, ArtKind::Portrait), None);
     }
 
     // Fails when the host allow-list admits plain http, look-alike hosts or ports.
     #[test]
     fn only_https_steam_art_hosts_are_allowed() {
-        assert!(allowed_url(&art_url(489830)));
+        assert!(allowed_url(&art_url(489830, ArtKind::Portrait)));
+        assert!(allowed_url(&art_url(489830, ArtKind::Hero)));
         assert!(allowed_url(
             "https://cdn.cloudflare.steamstatic.com/steam/apps/1/library_600x900.jpg"
         ));
@@ -249,27 +319,115 @@ mod tests {
         let dir = t.path().join("art");
         let now = store::now();
         // Nothing local, fetch fails: no art, not an error.
-        let none = lookup(std::slice::from_ref(&root), &dir, 5, now, |_, _| {
+        let none = lookup(std::slice::from_ref(&root), &dir, 5, P, now, |_, _| {
             Err(super::super::AppError::Msg("404".into()))
         });
         assert_eq!(none, None);
         // Fetch succeeds: asked for the CDN URL, result returned as a data: URL.
-        let got = lookup(std::slice::from_ref(&root), &dir, 5, now, |dest, url| {
-            assert_eq!(url, art_url(5));
+        let got = lookup(std::slice::from_ref(&root), &dir, 5, P, now, |dest, url| {
+            assert_eq!(url, art_url(5, P));
             write(dest, JPG);
             Ok(JPG.to_vec())
         });
         assert!(got.unwrap().starts_with("data:image/jpeg;base64,"));
         // Cached now: no second fetch, until the TTL runs out.
-        assert!(lookup(std::slice::from_ref(&root), &dir, 5, now, no_fetch).is_some());
-        assert!(cached(&dir, 5, now + TTL_SECS + 10).is_none());
+        assert!(lookup(std::slice::from_ref(&root), &dir, 5, P, now, no_fetch).is_some());
+        assert!(cached(&dir, 5, P, now + TTL_SECS + 10).is_none());
         // Local Steam art wins over the cache.
         write(
             &root.join("appcache/librarycache/5/library_600x900.jpg"),
             JPG2,
         );
-        let local = lookup(&[root], &dir, 5, now, no_fetch).unwrap();
+        let local = lookup(&[root], &dir, 5, P, now, no_fetch).unwrap();
         assert_eq!(local, data_url(JPG2).unwrap());
+    }
+
+    // Fails when hero art is not found in the three Steam layouts, or the blurred variant is used.
+    #[test]
+    fn hero_art_layouts_and_no_blur() {
+        let t = tempfile::tempdir().unwrap();
+        let root = t.path().join("Steam");
+        let lc = root.join("appcache/librarycache");
+        // Per-app folder: the hero, never library_hero_blur.jpg next to it.
+        write(&lc.join("10/library_hero_blur.jpg"), JPG2);
+        write(&lc.join("10/library_hero.jpg"), JPG);
+        write(&lc.join("10/library_600x900.jpg"), JPG2);
+        assert_eq!(
+            local_art(std::slice::from_ref(&root), 10, H).as_deref(),
+            Some(JPG)
+        );
+        // Hashed subfolder holding only a blurred hero and the real one.
+        write(&lc.join("20/abc/library_hero_blur.jpg"), JPG2);
+        write(&lc.join("20/def/library_hero.jpg"), JPG);
+        assert_eq!(
+            local_art(std::slice::from_ref(&root), 20, H).as_deref(),
+            Some(JPG)
+        );
+        // Flat name.
+        write(&lc.join("30_library_hero.jpg"), JPG);
+        assert_eq!(
+            local_art(std::slice::from_ref(&root), 30, H).as_deref(),
+            Some(JPG)
+        );
+        // Only blurred or portrait art: no hero.
+        write(&lc.join("40/library_hero_blur.jpg"), JPG2);
+        write(&lc.join("40/library_600x900.jpg"), JPG2);
+        assert_eq!(local_art(&[root], 40, H), None);
+    }
+
+    // Fails when hero art over the portrait cap (some exceed 4 MiB) is dropped, or the hero cap is not enforced.
+    #[test]
+    fn hero_art_has_its_own_size_cap() {
+        let t = tempfile::tempdir().unwrap();
+        let root = t.path().join("Steam");
+        let lc = root.join("appcache/librarycache");
+        let mut five = JPG.to_vec();
+        five.resize(5 << 20, 0);
+        write(&lc.join("1/library_hero.jpg"), &five);
+        write(&lc.join("1/library_600x900.jpg"), &five);
+        assert_eq!(
+            local_art(std::slice::from_ref(&root), 1, H).map(|b| b.len()),
+            Some(5 << 20)
+        );
+        assert_eq!(local_art(std::slice::from_ref(&root), 1, P), None);
+        let mut big = JPG.to_vec();
+        big.resize(HERO_MAX_BYTES as usize + 1, 0);
+        write(&lc.join("2/library_hero.jpg"), &big);
+        assert_eq!(local_art(&[root], 2, H), None);
+    }
+
+    // Fails when the hero shares the portrait's cache file or CDN URL (one would show as the other).
+    #[test]
+    fn hero_lookup_uses_its_own_cache_and_url() {
+        let t = tempfile::tempdir().unwrap();
+        let dir = t.path().join("art");
+        let now = store::now();
+        let p = lookup(&[], &dir, 7, P, now, |dest, url| {
+            assert_eq!(url, art_url(7, P));
+            write(dest, JPG);
+            Ok(JPG.to_vec())
+        });
+        assert_eq!(p, data_url(JPG));
+        let h = lookup(&[], &dir, 7, H, now, |dest, url| {
+            assert!(url.ends_with("/apps/7/library_hero.jpg"), "{url}");
+            assert!(dest.ends_with("7_hero"), "{}", dest.display());
+            write(dest, JPG2);
+            Ok(JPG2.to_vec())
+        });
+        assert_eq!(h, data_url(JPG2));
+        assert_eq!(lookup(&[], &dir, 7, H, now, no_fetch), data_url(JPG2));
+        assert_eq!(lookup(&[], &dir, 7, P, now, no_fetch), data_url(JPG));
+    }
+
+    // Fails when the IPC names of the kinds change (the GUI sends them).
+    #[test]
+    fn kinds_deserialize_from_steam_names() {
+        let k: ArtKind = serde_json::from_str("\"library_hero\"").unwrap();
+        assert_eq!(k, H);
+        let k: ArtKind = serde_json::from_str("\"library_600x900\"").unwrap();
+        assert_eq!(k, P);
+        assert!(serde_json::from_str::<ArtKind>("\"header\"").is_err());
+        assert_eq!(ArtKind::default(), P);
     }
 
     /// Probe of the real lookup against a Steam root (read-only, no fetch):
@@ -284,10 +442,15 @@ mod tests {
             .parse()
             .unwrap();
         let dir = tempfile::tempdir().unwrap();
+        let kind = match std::env::var("MODMAN_ART_PROBE_KIND").as_deref() {
+            Ok("library_hero") => ArtKind::Hero,
+            _ => P,
+        };
         let url = lookup(
             std::slice::from_ref(&root),
             dir.path(),
             appid,
+            kind,
             store::now(),
             no_fetch,
         );

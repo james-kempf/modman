@@ -171,6 +171,104 @@ pub(crate) fn fetch_image(
     res
 }
 
+/// Tile and header image of a collection (its latest revision). Kept out of
+/// the install query, so a schema change here only costs the picture.
+pub const COLLECTION_ART_QUERY: &str =
+    "query CollArt($slug: String, $domainName: String, $viewAdultContent: Boolean) {
+  collectionRevision(slug: $slug, domainName: $domainName, viewAdultContent: $viewAdultContent) {
+    collection { tileImage { url } headerImage { url } }
+  }
+}";
+
+/// A collection slug as Nexus spells it (also safe as a file name).
+fn is_slug(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 64 && s.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
+/// `<thumbs>/collections/<game>/<slug>`.
+fn collection_cache_path(dir: &Path, game: &str, slug: &str) -> R<PathBuf> {
+    if !games::is_valid_domain(game) || !is_slug(slug) {
+        fail!("invalid collection '{game}/{slug}'");
+    }
+    Ok(dir.join("collections").join(game).join(slug))
+}
+
+/// The picture URL of a `collectionRevision` answer: the tile image, else
+/// the header image; only https Nexus URLs.
+pub fn collection_image_url(data: &serde_json::Value) -> Option<String> {
+    let c = data.pointer("/collectionRevision/collection")?;
+    ["/tileImage/url", "/headerImage/url"]
+        .iter()
+        .filter_map(|p| c.pointer(p).and_then(serde_json::Value::as_str))
+        .find(|u| allowed_url(u))
+        .map(str::to_owned)
+}
+
+/// Cached picture, else `query` (the GraphQL answer) and `fetch` (into the
+/// cache path). A collection without a picture, or a failed query or
+/// fetch, is `None` (the UI shows a monogram).
+pub fn collection_art_lookup(
+    dir: &Path,
+    game: &str,
+    slug: &str,
+    now: i64,
+    query: impl FnOnce() -> R<serde_json::Value>,
+    fetch: impl FnOnce(&Path, &str) -> R<Vec<u8>>,
+) -> R<Option<String>> {
+    let dest = collection_cache_path(dir, game, slug)?;
+    if let Some(b) = fresh(&dest, now) {
+        return Ok(data_url(&b));
+    }
+    let got = query().and_then(|data| match collection_image_url(&data) {
+        Some(url) => fetch(&dest, &url).map(Some),
+        None => Ok(None),
+    });
+    match got {
+        Ok(b) => Ok(b.as_deref().and_then(data_url)),
+        Err(e) => {
+            tracing::debug!("no picture for collection {game}/{slug}: {e}");
+            Ok(None)
+        }
+    }
+}
+
+/// A file younger than [`TTL_SECS`] that is an image.
+fn fresh(p: &Path, now: i64) -> Option<Vec<u8>> {
+    let age = std::fs::metadata(p)
+        .ok()?
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(i64::MAX, |d| now - d.as_secs() as i64);
+    if age > TTL_SECS {
+        return None;
+    }
+    std::fs::read(p).ok().filter(|b| sniff(b).is_some())
+}
+
+/// A collection's tile picture from Nexus as a `data:` URL (`None`: it has
+/// none, or Nexus could not be asked).
+pub fn collection_art(cx: &Cx<'_>, game: &str, slug: &str) -> R<Option<String>> {
+    let adult = cx.config()?.adult;
+    collection_art_lookup(
+        &thumbs_dir(cx.paths),
+        game,
+        slug,
+        store::now(),
+        || {
+            let nexus = nx::connect(cx.paths, cx.store, false)?
+                .ok_or_else(|| AppError::Msg("no Nexus client".into()))?;
+            let vars = serde_json::json!({ "slug": slug, "domainName": game });
+            Ok(nexus.run(
+                nexus
+                    .client
+                    .collection_graphql(COLLECTION_ART_QUERY, vars, adult),
+            )??)
+        },
+        |dest, url| fetch_image(dest, url, MAX_BYTES, allowed_url),
+    )
+}
+
 /// The mod's picture as a `data:` URL (`None`: the mod has none).
 pub fn thumbnail(cx: &Cx<'_>, game: &str, mod_id: u64) -> R<Option<String>> {
     let dir = thumbs_dir(cx.paths);
@@ -229,6 +327,97 @@ mod tests {
     }
 
     const PNG: &[u8] = b"\x89PNG\r\n\x1a\nbody";
+
+    fn rev(tile: Option<&str>, header: Option<&str>) -> serde_json::Value {
+        serde_json::json!({ "collectionRevision": { "collection": {
+            "tileImage": tile.map(|u| serde_json::json!({ "url": u })),
+            "headerImage": header.map(|u| serde_json::json!({ "url": u })),
+        } } })
+    }
+
+    // Fails when a non-Nexus or http picture URL from the API would be fetched, or the header is not the fallback.
+    #[test]
+    fn collection_image_url_prefers_the_tile_and_only_nexus_hosts() {
+        let tile = "https://staticdelivery.nexusmods.com/images/tile.jpg";
+        let head = "https://staticdelivery.nexusmods.com/images/head.jpg";
+        assert_eq!(
+            collection_image_url(&rev(Some(tile), Some(head))).as_deref(),
+            Some(tile)
+        );
+        assert_eq!(
+            collection_image_url(&rev(None, Some(head))).as_deref(),
+            Some(head)
+        );
+        assert_eq!(
+            collection_image_url(&rev(Some("https://evil.example/t.jpg"), Some(head))).as_deref(),
+            Some(head)
+        );
+        assert_eq!(
+            collection_image_url(&rev(
+                Some("http://staticdelivery.nexusmods.com/t.jpg"),
+                None
+            )),
+            None
+        );
+        assert_eq!(collection_image_url(&rev(None, None)), None);
+        assert_eq!(
+            collection_image_url(&serde_json::json!({ "collectionRevision": null })),
+            None
+        );
+    }
+
+    // Fails when the cache is bypassed, a failure is an error instead of "no art", or slugs reach the file system unchecked.
+    #[test]
+    fn collection_art_lookup_caches_and_falls_back_to_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = store::now();
+        let tile = "https://staticdelivery.nexusmods.com/images/tile.png";
+        let no_query = || -> R<serde_json::Value> { panic!("must not query") };
+        let no_fetch = |_: &Path, _: &str| -> R<Vec<u8>> { panic!("must not fetch") };
+        // No picture: None, nothing fetched.
+        let r = collection_art_lookup(
+            dir.path(),
+            "g",
+            "abc",
+            now,
+            || Ok(rev(None, None)),
+            no_fetch,
+        );
+        assert_eq!(r.unwrap(), None);
+        // Query fails: None, not an error.
+        let r = collection_art_lookup(
+            dir.path(),
+            "g",
+            "abc",
+            now,
+            || Err(AppError::Msg("offline".into())),
+            no_fetch,
+        );
+        assert_eq!(r.unwrap(), None);
+        // Fetched into the cache path, then served from it.
+        let r = collection_art_lookup(
+            dir.path(),
+            "g",
+            "abc",
+            now,
+            || Ok(rev(Some(tile), None)),
+            |dest, url| {
+                assert_eq!(url, tile);
+                assert!(dest.ends_with("collections/g/abc"));
+                std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+                std::fs::write(dest, PNG).unwrap();
+                Ok(PNG.to_vec())
+            },
+        );
+        assert_eq!(r.unwrap(), data_url(PNG));
+        assert_eq!(
+            collection_art_lookup(dir.path(), "g", "abc", now, no_query, no_fetch).unwrap(),
+            data_url(PNG)
+        );
+        // Bad slug or game: refused before any file or network access.
+        assert!(collection_art_lookup(dir.path(), "g", "../x", now, no_query, no_fetch).is_err());
+        assert!(collection_art_lookup(dir.path(), "../g", "abc", now, no_query, no_fetch).is_err());
+    }
 
     /// Two servers on 127.0.0.1; `allow` accepts only the first's URLs.
     fn servers() -> (tokio::runtime::Runtime, MockServer, MockServer) {

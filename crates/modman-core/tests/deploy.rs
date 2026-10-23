@@ -797,6 +797,33 @@ fn status_reports_deployment_state() {
     assert!(!s.interrupted);
 }
 
+// Fails when the deploy tracker counts disabled mods, mods enabled after the
+// deploy, or anything once the deployment is purged.
+#[test]
+fn status_counts_enabled_mods_present_in_the_deployment() {
+    let mut fx = Fx::new();
+    fx.three_mods();
+    let s = deploy::status(fx.store.conn(), GAME).unwrap();
+    assert_eq!((s.deployed_mods, s.enabled_mods), (0, 3));
+    fx.deploy().unwrap();
+    let s = deploy::status(fx.store.conn(), GAME).unwrap();
+    assert_eq!((s.deployed_mods, s.enabled_mods), (3, 3));
+    // Enabled after the deploy: counted as enabled, not deployed.
+    let late = fx.add_mod("late", 9, &[("late.txt", "x")]);
+    let s = deploy::status(fx.store.conn(), GAME).unwrap();
+    assert_eq!((s.deployed_mods, s.enabled_mods), (3, 4));
+    // Disabled (still in the deployment until the next deploy): counted in neither.
+    let conn = fx.store.conn();
+    conn.execute("UPDATE mods SET enabled = 0 WHERE uid = 'low'", [])
+        .unwrap();
+    let s = deploy::status(conn, GAME).unwrap();
+    assert_eq!((s.deployed_mods, s.enabled_mods), (2, 3));
+    assert!(late > 0);
+    fx.purge().unwrap();
+    let s = deploy::status(fx.store.conn(), GAME).unwrap();
+    assert_eq!((s.deployed_mods, s.enabled_mods), (0, 3));
+}
+
 #[test]
 fn staging_lives_per_steam_library() {
     let data = Path::new("/home/u/.local/share/modman");

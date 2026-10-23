@@ -38,6 +38,11 @@ export function activeGame(qc: QueryClient): GameView | null {
   return qc.getQueryData<GameView[]>(["games"])?.find((g) => g.active) ?? null;
 }
 
+/**
+ * A completed deploy is reported; a deploy that is now due is only
+ * recorded (no notice): the Overview's Deployment card and the game tile
+ * show it, and deploying is done from there.
+ */
 export function applyAfterChange(a: AfterChange, game: string | null): void {
   const ui = useUi.getState();
   if (a.deployed) {
@@ -45,7 +50,6 @@ export function applyAfterChange(a: AfterChange, game: string | null): void {
     ui.notify("success", deployedText(a.deployed));
   } else if (a.needs_deploy && game) {
     ui.markDeployDue(game);
-    ui.notify("warn", "Changes are not in the game yet.", game);
   }
 }
 

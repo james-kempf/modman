@@ -3,14 +3,27 @@
 // auto-update toggle with status and last-run log, config keys, app paths.
 
 import { useQuery } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { errMsg } from "../app/bridge";
 import { useAccount } from "../app/queries";
 import { useBusy, useRun } from "../app/run";
 import { useUi } from "../app/store";
 import { readClipboard } from "../components/Osk";
 import { ClipboardTextIcon, FloppyDiskIcon, KeyIcon, KeyboardIcon, SignOutIcon } from "@phosphor-icons/react";
-import { Badge, Button, Empty, ErrorNote, Fact, Row, Section, StatusDot, Toggle, ViewHeader, when } from "../components/ui";
+import {
+  Badge,
+  Button,
+  Empty,
+  ErrorNote,
+  Fact,
+  Row,
+  Section,
+  Select,
+  StatusDot,
+  Toggle,
+  ViewHeader,
+  when,
+} from "../components/ui";
 import * as ipc from "../ipc/commands";
 import type { ConfigEntry, RunLogEntry } from "../ipc/types";
 
@@ -258,8 +271,9 @@ function ConfigCard() {
       ) : (
         <ul className="rows">
           {q.data?.map((e) => (
-            // key on the value too: a saved (or refetched) value resets the field.
-            <ConfigRow key={`${e.key}=${e.value}`} entry={e} />
+            // Text fields key on the value too: a saved (or refetched) value resets the field. Switches and
+            // dropdowns show the value as given and must stay mounted, so focus stays on them after a change.
+            <ConfigRow key={e.kind === "bool" || e.kind === "enum" ? e.key : `${e.key}=${e.value}`} entry={e} />
           ))}
         </ul>
       )}
@@ -267,33 +281,111 @@ function ConfigCard() {
   );
 }
 
+/** Client-side check of a typed value (the backend validates again); null = acceptable. */
+export function configError(entry: ConfigEntry, value: string): string | null {
+  const v = value.trim();
+  if (entry.kind === "number") return /^\d+$/.test(v) ? null : "Enter a whole number.";
+  if (entry.kind === "path") return /^(\/|~(\/|$))/.test(v) ? null : "Enter an absolute path (starting with / or ~).";
+  return null;
+}
+
+/** One setting: a dropdown (enum), a switch (bool), else a validated text field with Save. */
 function ConfigRow({ entry }: { entry: ConfigEntry }) {
   const run = useRun();
   const notify = useUi((s) => s.notify);
+  const busyKey = `Save ${entry.key}`;
+  const busy = useBusy(busyKey);
+  const save = async (value: string) => {
+    const r = await run("Save setting", () => ipc.configSet(entry.key, value), { key: busyKey });
+    if (r) {
+      notify("success", `${r.key} = ${r.value}`);
+      if (r.old_data_left) notify("warn", `Old data is still in ${r.old_data_left}`);
+    }
+  };
+  const title = (
+    <>
+      <span className="font-mono text-zinc-100">{entry.key}</span> <span className="text-dim">{entry.description}</span>
+    </>
+  );
+  if (entry.kind === "bool")
+    return (
+      <li className="flex flex-wrap items-center justify-between gap-3 px-6 py-4">
+        <span className="min-w-0 flex-[1_1_18rem] text-[13px] wrap-anywhere text-zinc-300">{title}</span>
+        <Toggle
+          label={entry.key}
+          showLabel={false}
+          checked={entry.value === "true"}
+          busy={busy}
+          onChange={(v) => void save(v ? "true" : "false")}
+        />
+      </li>
+    );
+  if (entry.kind === "enum")
+    return (
+      <li className="px-6 py-5">
+        <Select
+          label={title}
+          value={entry.value}
+          options={entry.options.map((o) => ({ value: o, label: o }))}
+          busy={busy}
+          onChange={(v) => void save(v)}
+          className="max-w-md font-mono"
+        />
+      </li>
+    );
+  return <ConfigTextRow entry={entry} title={title} save={save} busy={busy} />;
+}
+
+function ConfigTextRow({
+  entry,
+  title,
+  save,
+  busy,
+}: {
+  entry: ConfigEntry;
+  title: ReactNode;
+  save: (v: string) => Promise<void>;
+  busy: boolean;
+}) {
   const [value, setValue] = useState(entry.value);
+  const error = value === entry.value ? null : configError(entry, value);
   const id = `config-${entry.key}`;
   return (
     <li className="px-6 py-5">
       <form
-        className="flex flex-wrap items-end gap-3"
-        onSubmit={async (e) => {
+        className="grid gap-2"
+        onSubmit={(e) => {
           e.preventDefault();
-          const r = await run("Save setting", () => ipc.configSet(entry.key, value), { key: `Save ${entry.key}` });
-          if (r) {
-            notify("success", `${r.key} = ${r.value}`);
-            if (r.old_data_left) notify("warn", `Old data is still in ${r.old_data_left}`);
-          }
+          if (!error && value !== entry.value) void save(value.trim());
         }}
       >
-        <div className="grid min-w-0 flex-[1_1_18rem] gap-2">
-          <label htmlFor={id} className="text-[13px] wrap-anywhere text-zinc-300">
-            <span className="font-mono text-zinc-100">{entry.key}</span> <span className="text-dim">{entry.description}</span>
-          </label>
-          <input id={id} className="input font-mono" value={value} onChange={(e) => setValue(e.target.value)} />
+        <label htmlFor={id} className="text-[13px] wrap-anywhere text-zinc-300">
+          {title}
+        </label>
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            id={id}
+            className="input min-w-0 flex-[1_1_18rem] font-mono"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            inputMode={entry.kind === "number" ? "numeric" : undefined}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? `${id}-err` : undefined}
+          />
+          <Button
+            type="submit"
+            busy={busy}
+            disabled={value === entry.value || !!error}
+            icon={<FloppyDiskIcon aria-hidden size={15} />}
+          >
+            Save
+          </Button>
         </div>
-        <Button type="submit" disabled={value === entry.value} icon={<FloppyDiskIcon aria-hidden size={15} />}>
-          Save
-        </Button>
+        {error && (
+          <p id={`${id}-err`} className="text-[13px] text-rose-300">
+            {error}
+          </p>
+        )}
       </form>
     </li>
   );

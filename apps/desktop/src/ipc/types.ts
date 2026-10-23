@@ -60,6 +60,11 @@ export interface Detected {
   configured: boolean;
 }
 
+/** game_art: portrait (library tiles) or wide hero (Overview background). */
+export type ArtKind = "library_600x900" | "library_hero";
+/** open_folder: the game's install folder or its Proton prefix. */
+export type GameFolder = "game" | "prefix";
+
 /** game_launch result. */
 export interface Launched {
   appid: number;
@@ -80,6 +85,10 @@ export interface DeployStatus {
   dirs: number;
   last_deployed_at: number | null;
   interrupted: boolean;
+  /** Enabled mods of the game. */
+  enabled_mods: number;
+  /** Enabled mods with files in the current deployment. */
+  deployed_mods: number;
 }
 
 export interface ModRef {
@@ -476,10 +485,15 @@ export interface LoginResult {
   file: string | null;
   keyring_unavailable: string | null;
 }
+/** What a setting's value is: picked from `options`, a switch, or typed. */
+export type ConfigKind = "enum" | "bool" | "number" | "path" | "text";
 export interface ConfigEntry {
   key: string;
   value: string;
   description: string;
+  kind: ConfigKind;
+  /** Accepted values of an enum or bool key; empty for the others. */
+  options: string[];
 }
 export interface ConfigChange extends ConfigEntry {
   /** data-dir moved away from a folder that still holds data. */

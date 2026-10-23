@@ -39,6 +39,8 @@ export function baseHandlers(games: GameView[] = [game()]): Record<string, Handl
     profiles_list: () => [],
     plugins_list: () => [],
     thumbnail: () => null,
+    game_art: () => null,
+    collection_art: () => null,
     prompt_answer: () => true,
   };
 }

@@ -9,7 +9,7 @@ use serde::Serialize;
 
 use super::nexus as nx;
 use super::{Cx, R};
-use crate::config::{self, ConfigKey};
+use crate::config::{self, ConfigKey, ValueKind};
 use crate::download::{self, Download};
 use crate::games::GameConfig;
 use crate::mods;
@@ -22,6 +22,10 @@ pub struct ConfigEntry {
     pub key: String,
     pub value: String,
     pub description: String,
+    /// What the value is (dropdown, toggle or text field in the GUI).
+    pub kind: ValueKind,
+    /// The accepted values of an enum or bool key; empty for the others.
+    pub options: Vec<String>,
 }
 
 fn entry(cx: &Cx<'_>, k: ConfigKey) -> R<ConfigEntry> {
@@ -29,6 +33,8 @@ fn entry(cx: &Cx<'_>, k: ConfigKey) -> R<ConfigEntry> {
         key: k.name().to_string(),
         value: config::get(cx.store, cx.paths, k)?,
         description: k.describe().to_string(),
+        kind: k.kind(),
+        options: k.options().iter().map(|s| s.to_string()).collect(),
     })
 }
 
@@ -161,6 +167,34 @@ pub fn mod_files(cx: &Cx<'_>, game: &GameConfig, mod_id: u64) -> R<FilesView> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Fails when config_list stops carrying the metadata the GUI builds its controls from.
+    #[test]
+    fn config_entries_carry_kind_and_options() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = Paths::for_home(home.path());
+        let mut store = crate::store::Store::open_in_memory().unwrap();
+        let ui = crate::app::testing::Recorder::default();
+        let cx = Cx::new(&paths, &mut store, &ui);
+        let all = config_entries(&cx).unwrap();
+        let get = |k: &str| all.iter().find(|e| e.key == k).unwrap();
+        let dm = get("deploy-method");
+        assert_eq!(dm.kind, ValueKind::Enum);
+        assert_eq!(
+            dm.options,
+            ["auto", "hardlink", "reflink", "symlink", "copy"]
+        );
+        assert_eq!(get("auto-deploy").kind, ValueKind::Bool);
+        assert_eq!(get("auto-deploy").options, ["true", "false"]);
+        assert_eq!(get("jobs").kind, ValueKind::Number);
+        assert!(get("data-dir").options.is_empty());
+        let json = serde_json::to_value(get("fomod")).unwrap();
+        assert_eq!(json["kind"], "enum");
+        assert_eq!(
+            json["options"],
+            serde_json::json!(["auto", "ask", "default"])
+        );
+    }
 
     #[test]
     fn log_tail_returns_the_last_lines_or_nothing() {

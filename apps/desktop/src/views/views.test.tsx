@@ -46,7 +46,7 @@ describe("Overview", () => {
   it("Play that deployed first clears the deploy-due state", async () => {
     const env = await open("overview", { game_launch: () => ({ appid: 489830, deployed: true }) });
     act(() => useUi.getState().markDeployDue("skyrimspecialedition"));
-    expect(await screen.findByText(/you will be asked to deploy first/)).toBeInTheDocument();
+    expect(await screen.findByText(/Play asks to deploy them first/)).toBeInTheDocument();
     await env.user.click(screen.getByRole("button", { name: "Play" }));
     await waitFor(() => expect(useUi.getState().deployDue).toEqual({}));
   });

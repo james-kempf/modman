@@ -12,6 +12,7 @@ import type {
   AfterChange,
   Answer,
   AppInfo,
+  ArtKind,
   AutoupdateStatus,
   CollectionInfo,
   CollectionRemoved,
@@ -26,6 +27,7 @@ import type {
   Download,
   FilesView,
   GameConfig,
+  GameFolder,
   GameView,
   InstallResult,
   Launched,
@@ -75,6 +77,7 @@ export const COMMANDS = [
   "game_set",
   "game_launch",
   "game_art",
+  "open_folder",
   "mods_list",
   "mod_detail",
   "mods_set_enabled",
@@ -98,6 +101,7 @@ export const COMMANDS = [
   "profile_save",
   "profile_load",
   "profile_delete",
+  "collection_art",
   "collections_list",
   "collection_info",
   "collection_install",
@@ -165,8 +169,11 @@ export const gameSet = (key: string, value: string, game?: Game) =>
   call<GameConfig>("game_set", { game: game ?? null, key, value });
 /** Job: start the game through Steam (asks to deploy pending changes first). */
 export const gameLaunch = (game?: Game) => call<Launched>("game_launch", { game: game ?? null });
-/** Portrait library art (600x900) as a `data:` URL; null = none (show a monogram). */
-export const gameArt = (domain: string) => call<string | null>("game_art", { domain });
+/** Steam library art as a `data:` URL; null = none. kind: portrait (default, a monogram stands in) or wide hero. */
+export const gameArt = (domain: string, kind: ArtKind = "library_600x900") =>
+  call<string | null>("game_art", { domain, kind });
+/** Open the game folder or the Proton prefix in the file manager (the backend resolves the path). Resolves to the path. */
+export const openFolder = (game: string, which: GameFolder) => call<string>("open_folder", { game, which });
 
 // ── mods ────────────────────────────────────────────────────
 
@@ -283,6 +290,9 @@ export const profileDelete = (name: string, game?: Game) =>
 
 // ── collections ─────────────────────────────────────────────
 
+/** The collection's Nexus tile picture as a `data:` URL; null = none (show a monogram). */
+export const collectionArt = (game: string, slug: string) =>
+  call<string | null>("collection_art", { game, slug });
 export const collectionsList = (game?: Game) =>
   call<CollectionSummary[]>("collections_list", { game: game ?? null });
 /** reference: URL, nxm:// link or slug (of the active game). */

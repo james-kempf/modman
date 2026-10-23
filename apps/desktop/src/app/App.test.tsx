@@ -71,11 +71,14 @@ describe("experimental badge", () => {
 });
 
 describe("structured results", () => {
-  it("AfterChange.needs_deploy offers Deploy now, which deploys", async () => {
-    const m = mod({ name: "SkyUI", enabled: true });
+  // U02: fails when a mod change (enable, move) brings back the "not in the game yet" toast or the
+  // sidebar "Deploy changes" button; the deploy stays on the Overview's Deployment card.
+  it("AfterChange.needs_deploy marks the game out of sync without a notice; Overview deploys", async () => {
+    const [a, b] = [mod({ name: "SkyUI", enabled: true }), mod({ name: "USSEP", enabled: true, position: 2 })];
     const { renderApp, t } = await setup({
-      mods_list: () => ({ mods: [m], changed_since_deploy: false }),
+      mods_list: () => ({ mods: [a, b], changed_since_deploy: false }),
       mods_set_enabled: () => afterChange({ needs_deploy: true }),
+      mod_move: () => ({ uid: b.uid, from: 2, to: 1, of: 2, after: afterChange({ needs_deploy: true }) }),
       deploy: () => deployReport({ placed: 42 }),
     });
     renderApp();
@@ -83,8 +86,16 @@ describe("structured results", () => {
     const user = userEvent.setup();
     // The enable control is a switch (legacy toggle).
     await user.click(await screen.findByRole("switch", { name: "Disable SkyUI" }));
-    expect(t.callsOf("mods_set_enabled")).toEqual([{ game: null, ids: [m.id], enabled: false }]);
-    await user.click(await screen.findByRole("button", { name: "Deploy now" }));
+    expect(t.callsOf("mods_set_enabled")).toEqual([{ game: null, ids: [a.id], enabled: false }]);
+    await waitFor(() => expect(useUi.getState().deployDue.skyrimspecialedition).toBeDefined());
+    await user.click(screen.getByRole("button", { name: "Move USSEP up" }));
+    await waitFor(() => expect(t.callsOf("mod_move")).toHaveLength(1));
+    expect(useUi.getState().notices).toEqual([]);
+    expect(screen.queryByRole("button", { name: "Deploy changes" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Deploy now" })).toBeNull();
+    act(() => useUi.getState().setView("overview"));
+    expect(await screen.findByText("Changes waiting to be deployed")).toBeInTheDocument();
+    await user.click(within(screen.getByRole("main")).getByRole("button", { name: "Deploy" }));
     await waitFor(() => expect(t.callsOf("deploy")).toHaveLength(1));
     await screen.findByText(/Deployed 42 files/);
     expect(useUi.getState().deployDue).toEqual({});

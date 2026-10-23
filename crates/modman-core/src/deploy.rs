@@ -399,6 +399,10 @@ pub struct DeployStatus {
     pub dirs: usize,
     pub last_deployed_at: Option<i64>,
     pub interrupted: bool,
+    /// Enabled mods of the game.
+    pub enabled_mods: usize,
+    /// Enabled mods with at least one file in the current deployment.
+    pub deployed_mods: usize,
 }
 
 #[cfg(test)]
