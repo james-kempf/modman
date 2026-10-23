@@ -9,13 +9,13 @@ import { VIEWS, useUi } from "./store";
 const heading = (name: string) => screen.findByRole("heading", { level: 1, name });
 
 describe("keyboard-only navigation", () => {
-  it("reaches all 7 views from the tab rail with arrows + Enter", async () => {
+  it("reaches all 8 views from the tab rail with arrows + Enter", async () => {
     const { renderApp } = await setup();
     renderApp();
     const user = userEvent.setup();
-    // Focus starts on the current tab.
-    expect(document.activeElement).toHaveAttribute("data-tab", "overview");
-    await heading("Overview");
+    // The app opens on the Games library; focus starts on its tab.
+    expect(document.activeElement).toHaveAttribute("data-tab", "games");
+    await heading("Games");
     for (const v of VIEWS.slice(1)) {
       await user.keyboard("{ArrowDown}");
       expect(document.activeElement).toHaveAttribute("data-tab", v.id);
@@ -29,10 +29,10 @@ describe("keyboard-only navigation", () => {
     const { renderApp } = await setup();
     renderApp();
     const user = userEvent.setup();
-    await user.keyboard("{PageDown}");
+    await user.keyboard("{PageDown}{PageDown}");
     await heading("Mods");
     expect(document.activeElement).toHaveAttribute("data-tab", "mods");
-    await user.keyboard("{PageUp}{PageUp}");
+    await user.keyboard("{PageUp}{PageUp}{PageUp}");
     await heading("Settings");
     // Walk past the remaining tabs into the Settings content.
     const main = screen.getByRole("main");
@@ -46,7 +46,7 @@ describe("keyboard-only navigation", () => {
     const { renderApp } = await setup();
     renderApp();
     const tabs = within(screen.getByRole("navigation", { name: "Views" })).getAllByRole("button");
-    expect(tabs).toHaveLength(7);
+    expect(tabs).toHaveLength(8);
     tabs.forEach((t) => expect(t.className).toMatch(/min-h-12/));
   });
 });

@@ -78,8 +78,8 @@ describe("CT2 D01 dialogs", () => {
 
   // Fails when a dialog opened over another leaves the lower one interactive.
   it("a prompt over a dialog makes the lower dialog inert, and restores it", async () => {
-    const { user } = await open("overview");
-    await user.click(within(screen.getByRole("complementary", { name: "Sidebar" })).getByRole("button", { name: "Add game" }));
+    const { user } = await open("games");
+    await user.click(await within(main()).findByRole("button", { name: "Add game" }));
     const add = await screen.findByRole("dialog", { name: "Add a game" });
     act(() => useUi.getState().onPrompt({ id: 1, job: null, prompt: { type: "confirm", question: "Sure?", default_yes: true } }));
     await screen.findByRole("dialog", { name: "Confirm" });
@@ -347,8 +347,8 @@ describe("CT2 D10/D11 result notices", () => {
 describe("CT2 D12/D13 text handling", () => {
   // D12: fails when an invalid domain is sent to game_add.
   it("Add game validates the domain inline", async () => {
-    const { user, t } = await open("overview", { game_add: () => game() });
-    await user.click(within(screen.getByRole("complementary", { name: "Sidebar" })).getByRole("button", { name: "Add game" }));
+    const { user, t } = await open("games", { game_add: () => game() });
+    await user.click(await within(main()).findByRole("button", { name: "Add game" }));
     const field = await screen.findByLabelText("Nexus game domain");
     await user.type(field, "Skyrim SE");
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Add game" }));

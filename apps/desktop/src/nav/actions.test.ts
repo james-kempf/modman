@@ -76,6 +76,6 @@ describe("performNav", () => {
     dlg.setAttribute("data-nav-scope", "");
     document.body.appendChild(dlg);
     performNav({ type: "tab", delta: 1 });
-    expect(useUi.getState().view).toBe("overview");
+    expect(useUi.getState().view).toBe("games");
   });
 });

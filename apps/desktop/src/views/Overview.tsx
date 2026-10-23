@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Overview of the active game: play, deployment (deploy/purge/verify), mods,
 // requirements, recently installed mods, plugins (Bethesda games) and the
-// start-up auto-update check. Games are switched and added in the sidebar.
+// start-up auto-update check. Games are picked and added in the Games view.
 
 import {
   ArrowRightIcon,
   ArrowsClockwiseIcon,
   BroomIcon,
-  GameControllerIcon,
   PlayIcon,
-  PlusIcon,
   RocketLaunchIcon,
   ShieldCheckIcon,
   TrashIcon,
@@ -35,13 +33,13 @@ import {
 } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import type { GameView, ModView, PurgeReport, ReqRow, Skip, VerifyReport } from "../ipc/types";
+import { NoGame } from "../components/NoGame";
 
 /** How many mods "Recently installed" lists. */
 const RECENT = 5;
 
 export function Overview() {
   const { game, data: games, error } = useActiveGame();
-  const setAddGame = useUi((s) => s.setAddGame);
   return (
     // minmax(0, 1fr): long unbroken names truncate inside the cards instead of widening the page.
     <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
@@ -54,19 +52,11 @@ export function Overview() {
         // key: per-game results (Verify) do not carry over to another game.
         <GameCards key={game.domain} game={game} />
       ) : (
-        <Empty
-          icon={<GameControllerIcon size={28} weight="duotone" />}
-          title={games?.length ? "No game selected" : "No game yet"}
-          action={
-            <Button tone="primary" icon={<PlusIcon aria-hidden size={16} />} onClick={() => setAddGame(true)}>
-              Add game
-            </Button>
-          }
-        >
+        <NoGame title={games?.length ? "No game selected" : "No game yet"}>
           {games?.length
-            ? "Pick a game in the sidebar, or add another one."
-            : "Add a game to get started. modman keeps every mod in its own folder and links them into the game only when you deploy."}
-        </Empty>
+            ? "Pick a game in Games, or add another one."
+            : "Add a game in Games to get started. modman keeps every mod in its own folder and links them into the game only when you deploy."}
+        </NoGame>
       )}
     </div>
   );

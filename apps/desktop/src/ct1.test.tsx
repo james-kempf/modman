@@ -311,16 +311,15 @@ describe("CT1 D07 deploy-due notice", () => {
 });
 
 describe("CT1 D08/D09/D11/D18 layout guards", () => {
-  // D08: fails when a long game name widens the picker menu (sideways scroll) instead of truncating.
-  it("game picker menu items truncate", async () => {
-    const { user } = await open("overview", {}, [game({ name: "x".repeat(120) }), experimentalGame({ active: false })]);
-    await user.click(await screen.findByRole("button", { name: /^Game:/ }));
-    const menu = screen.getByRole("menu");
-    expect(menu.className).toMatch(/grid-cols-\[minmax\(0,1fr\)\]/);
-    expect(menu.className).toMatch(/overflow-x-hidden/);
-    const item = within(menu).getAllByRole("menuitemradio")[0];
-    expect(item.className).toMatch(/\bmin-w-0\b/);
-    expect(within(item).getByText("x".repeat(120)).className).toMatch(/\btruncate\b/);
+  // D08: fails when a long game name widens a library tile or the sidebar header instead of truncating.
+  it("long game names truncate in the library tiles and the sidebar header", async () => {
+    await open("games", {}, [game({ name: "x".repeat(120) }), experimentalGame({ active: false })]);
+    const tile = await within(main()).findByRole("button", { name: "x".repeat(120) });
+    expect(tile.className).toMatch(/\bmin-w-0\b/);
+    expect(tile.closest("li")!.className).toMatch(/\bmin-w-0\b/);
+    expect(within(tile).getByText("x".repeat(120)).className).toMatch(/\btruncate\b/);
+    const sidebar = screen.getByRole("complementary", { name: "Sidebar" });
+    expect(within(sidebar).getByText("x".repeat(120)).className).toMatch(/\btruncate\b/);
   });
 
   // D09: fails when the sidebar grows the page past the viewport on short windows.

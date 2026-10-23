@@ -41,6 +41,7 @@ import {
 } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import type { ModView, ProfileLoaded, UninstallResult, UpdateReport } from "../ipc/types";
+import { NoGame } from "../components/NoGame";
 
 const TABS = [
   { value: "list", label: "Mods" },
@@ -64,9 +65,7 @@ export function Mods() {
         <Segmented label="Show" value={tab} options={TABS} onChange={setTab} />
       </ViewHeader>
       {!game ? (
-        <Empty icon={<StackIcon size={28} weight="duotone" />} title="No active game">
-          Add one on the Overview.
-        </Empty>
+        <NoGame icon={<StackIcon size={28} weight="duotone" />} />
       ) : tab === "list" ? (
         <ModList game={game.domain} />
       ) : tab === "conflicts" ? (

@@ -15,6 +15,7 @@ import type {
 import type { StartupCheck } from "../ipc/types";
 
 export const VIEWS = [
+  { id: "games", label: "Games" },
   { id: "overview", label: "Overview" },
   { id: "mods", label: "Mods" },
   { id: "install", label: "Install" },
@@ -130,7 +131,7 @@ export interface UiState {
   openOsk(t: OskTarget): void;
   closeOsk(): void;
 
-  /** The add-game dialog (sidebar "Add game", Overview empty state) is open. */
+  /** The add-game dialog (the Games view's "Add game" tile) is open. */
   addGame: boolean;
   setAddGame(open: boolean): void;
 }
@@ -138,7 +139,7 @@ export interface UiState {
 let seq = 0;
 
 const initial = {
-  view: "overview" as ViewId,
+  view: "games" as ViewId,
   jobs: {},
   activity: [],
   prompts: [],

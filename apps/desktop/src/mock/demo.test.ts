@@ -33,6 +33,14 @@ describe("demo backend", () => {
     expect((await d.call<ReqRow[]>("deps")).find((r) => r.key === "skse-loader")?.acked).toBe(false);
   });
 
+  // Fails when the demo shows only one art path (both art tiles and monogram tiles must be reachable in the browser suites).
+  it("game_art: generated art for one game, none for another, rejects unknown games", async () => {
+    const d = demo();
+    expect(await d.call<string | null>("game_art", { domain: "skyrimspecialedition" })).toMatch(/^data:image\/svg\+xml;/);
+    expect(await d.call("game_art", { domain: "cyberpunk2077" })).toBeNull();
+    await expect(d.call("game_art", { domain: "nope" })).rejects.toEqual({ message: "no game 'nope'" });
+  });
+
   it("persists config_set", async () => {
     const d = demo();
     await d.call("config_set", { key: "deploy-method", value: "copy" });

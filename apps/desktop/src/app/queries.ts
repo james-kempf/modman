@@ -13,6 +13,12 @@ export function makeQueryClient(): QueryClient {
   });
 }
 
+/**
+ * Refresh after a command or job: every query except game art, which no
+ * command changes (its key holds the app id) and which may need the network.
+ */
+export const refreshAll = (qc: QueryClient) => qc.invalidateQueries({ predicate: (q) => q.queryKey[0] !== "art" });
+
 export const useGames = () => useQuery({ queryKey: ["games"], queryFn: ipc.gamesList });
 
 export function useActiveGame() {

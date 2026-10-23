@@ -74,6 +74,7 @@ export const COMMANDS = [
   "game_remove",
   "game_set",
   "game_launch",
+  "game_art",
   "mods_list",
   "mod_detail",
   "mods_set_enabled",
@@ -164,6 +165,8 @@ export const gameSet = (key: string, value: string, game?: Game) =>
   call<GameConfig>("game_set", { game: game ?? null, key, value });
 /** Job: start the game through Steam (asks to deploy pending changes first). */
 export const gameLaunch = (game?: Game) => call<Launched>("game_launch", { game: game ?? null });
+/** Portrait library art (600x900) as a `data:` URL; null = none (show a monogram). */
+export const gameArt = (domain: string) => call<string | null>("game_art", { domain });
 
 // ── mods ────────────────────────────────────────────────────
 

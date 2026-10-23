@@ -8,6 +8,7 @@ import { appReady } from "../ipc/commands";
 import { on } from "../ipc/events";
 import type { Unlisten } from "../ipc/transport";
 import type { ReadyInfo } from "../ipc/types";
+import { refreshAll } from "./queries";
 import { useUi } from "./store";
 
 let started: Promise<ReadyInfo | null> | null = null;
@@ -22,7 +23,7 @@ export function startBridge(qc: QueryClient): Promise<ReadyInfo | null> {
       on("modman:job", (e) => {
         ui.onJob(e);
         // Any job may change mods, games, deploy state or downloads.
-        if (e.state !== "started") void qc.invalidateQueries();
+        if (e.state !== "started") void refreshAll(qc);
       }),
       on("modman:prompt", (e) => ui.onPrompt(e)),
       on("modman:prompt-closed", (e) => ui.dropPrompt(e.id)),

@@ -10,6 +10,7 @@
 //! webview dialog or its defaults.
 
 pub mod actions;
+pub mod art;
 pub mod collection;
 pub mod deploy;
 pub mod games;

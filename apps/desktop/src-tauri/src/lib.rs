@@ -96,6 +96,7 @@ pub fn run() {
             commands::game_remove,
             commands::game_set,
             commands::game_launch,
+            commands::game_art,
             commands::mods_list,
             commands::mod_detail,
             commands::mods_set_enabled,

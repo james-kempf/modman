@@ -102,12 +102,14 @@ describe("Overview", () => {
     expect(t.callsOf("plugins_list")).toEqual([]);
   });
 
-  // Fails when the no-game state has no way to add one.
-  it("empty state offers Add game, which opens the add-game dialog", async () => {
+  // Fails when the no-game state does not lead back to the Games view (where games are added).
+  it("empty state points back to Games", async () => {
     const { user } = await open("overview", {}, []);
     await screen.findByRole("heading", { name: "No game yet" });
-    await user.click(within(screen.getByRole("main")).getByRole("button", { name: "Add game" }));
-    expect(await screen.findByRole("dialog", { name: "Add a game" })).toBeInTheDocument();
+    await user.click(within(screen.getByRole("main")).getByRole("button", { name: "Go to Games" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Games" })).toBeInTheDocument();
+    expect(document.activeElement).toHaveAttribute("data-tab", "games");
+    expect(within(screen.getByRole("main")).getByRole("button", { name: "Add game" })).toBeInTheDocument();
   });
 
   it("Purge is a single click (the backend confirms through a prompt)", async () => {

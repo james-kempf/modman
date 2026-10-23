@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Shell in the legacy layout: left sidebar (brand + active game header, the
-// tab rail with icons, account), the current view, and a bottom stack with
-// notices and the job island. Prompt dialogs and the on-screen keyboard sit
+// tab rail with icons, account), the current view (the Games library first),
+// and a bottom stack with notices and the job island. Prompt dialogs and the on-screen keyboard sit
 // on top. Installs keyboard + gamepad nav.
 
 import {
@@ -9,9 +9,9 @@ import {
   CheckCircleIcon,
   CheckIcon,
   DownloadSimpleIcon,
+  GameControllerIcon,
   GearSixIcon,
   InfoIcon,
-  PlusIcon,
   PuzzlePieceIcon,
   RocketLaunchIcon,
   SquaresFourIcon,
@@ -25,10 +25,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type JSX, type ReactNode } from "react";
 import { AddGameHost } from "../components/AddGameDialog";
 import { ViewBoundary } from "../components/ErrorBoundary";
-import { GamePicker } from "../components/GamePicker";
 import { OskHost } from "../components/Osk";
 import { PromptHost } from "../components/PromptDialog";
-import { Button, IconButton, SupportBadge, cx, type DotTone } from "../components/ui";
+import { Button, IconButton, StatusDot, SupportBadge, cx, type DotTone } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import { installKeyboardNav, performNav } from "../nav/actions";
 import { startGamepadLoop } from "../nav/gamepad";
@@ -36,6 +35,7 @@ import { installModalityTracking } from "../nav/modality";
 import { installFocusRecovery } from "../nav/spatial";
 import { Activity } from "../views/Activity";
 import { Collections } from "../views/Collections";
+import { Games } from "../views/Games";
 import { Install } from "../views/Install";
 import { Mods } from "../views/Mods";
 import { Overview } from "../views/Overview";
@@ -47,6 +47,7 @@ import { useBusy, useDeploy, useDeployDue } from "./run";
 import { VIEWS, useUi, type JobEntry, type NoticeTone, type ViewId } from "./store";
 
 const VIEW: Record<ViewId, () => JSX.Element> = {
+  games: Games,
   overview: Overview,
   mods: Mods,
   install: Install,
@@ -57,6 +58,7 @@ const VIEW: Record<ViewId, () => JSX.Element> = {
 };
 
 const ICON: Record<ViewId, ReactNode> = {
+  games: <GameControllerIcon aria-hidden size={20} weight="duotone" />,
   overview: <SquaresFourIcon aria-hidden size={20} weight="duotone" />,
   mods: <StackIcon aria-hidden size={20} weight="duotone" />,
   install: <DownloadSimpleIcon aria-hidden size={20} weight="duotone" />,
@@ -157,16 +159,15 @@ function Sidebar() {
 }
 
 /**
- * Brand + game picker (every added game; switching runs game_use) and
- * "Add game" below it. Part of the rail for spatial navigation: Down from
- * here reaches the tabs, not the view.
+ * Brand + the active game (picked in the Games view), with its deploy
+ * progress or "Deploy changes" when due. Part of the rail for spatial
+ * navigation: Down from here reaches the tabs, not the view.
  */
 function GameHeader() {
-  const { game, data: games, isLoading } = useActiveGame();
+  const { game, isLoading } = useActiveGame();
   const needsDeploy = useDeployDue(game?.domain ?? null);
   // Progress of a deploy of another game is not shown under this one (the job island shows it).
   const progress = useUi((s) => (s.deployGame && s.deployGame !== game?.domain ? null : s.deployProgress));
-  const setAddGame = useUi((s) => s.setAddGame);
   const deploy = useDeploy();
   const busy = useBusy("Deploy");
   const d = game?.deploy;
@@ -174,13 +175,22 @@ function GameHeader() {
   return (
     <header className="grid grid-cols-[minmax(0,1fr)] gap-5 px-6 pt-6 pb-4">
       <Brand />
-      {/* No "Game" eyebrow: the picker names itself ("Game: <name>"), and a short header keeps the tabs high. */}
       <div data-nav-rail className="grid grid-cols-[minmax(0,1fr)] gap-2">
         {isLoading ? (
           <span className="text-[14px] text-zinc-400">Loading…</span>
-        ) : games?.length ? (
-          <GamePicker games={games} tone={tone} />
-        ) : null}
+        ) : game ? (
+          <div className="flex min-h-12 min-w-0 items-center gap-3 rounded-xl border border-white/[0.06] bg-ink-2 px-3">
+            <StatusDot tone={tone} live={game.deploy.active} />
+            <span className="min-w-0 flex-1 truncate text-[14.5px] text-zinc-50" title={game.name}>
+              {game.name}
+            </span>
+            <span className="font-mono text-[11px] text-dim" title={`${game.mod_count} mods`}>
+              {game.mod_count}
+            </span>
+          </div>
+        ) : (
+          <span className="text-[14px] text-zinc-400">No game selected</span>
+        )}
         {game && <SupportBadge support={game.support} />}
         {progress && (
           <span className="grid gap-1.5 pt-1 font-mono text-[11px] text-dim">
@@ -200,15 +210,6 @@ function GameHeader() {
             Deploy changes
           </Button>
         )}
-        <Button
-          tone="ghost"
-          size="sm"
-          className="w-full justify-start"
-          icon={<PlusIcon aria-hidden size={16} />}
-          onClick={() => setAddGame(true)}
-        >
-          Add game
-        </Button>
       </div>
     </header>
   );

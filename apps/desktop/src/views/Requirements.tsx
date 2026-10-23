@@ -18,6 +18,7 @@ import {
 import { Badge, Button, Empty, ErrorNote, ViewHeader, cx } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import type { ReqRow, ReqStatus } from "../ipc/types";
+import { NoGame } from "../components/NoGame";
 
 const ORDER: ReqStatus[] = ["missing", "disabled", "external", "gone", "ok"];
 const LABEL: Record<ReqStatus, string> = {
@@ -73,9 +74,7 @@ export function Requirements() {
         </Button>
       </ViewHeader>
       {!game ? (
-        <Empty icon={<PuzzlePieceIcon size={28} weight="duotone" />} title="No active game">
-          Add one on the Overview.
-        </Empty>
+        <NoGame icon={<PuzzlePieceIcon size={28} weight="duotone" />} />
       ) : q.isLoading ? (
         <p className="px-1 py-6 text-[14px] text-zinc-400">Checking requirements…</p>
       ) : q.error ? (

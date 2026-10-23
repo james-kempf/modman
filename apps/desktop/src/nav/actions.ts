@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Navigation actions shared by the keyboard and the gamepad.
 
-import { useUi } from "../app/store";
+import { useUi, type ViewId } from "../app/store";
 import { focusables, isTextInput, moveFocus, navScope, type Dir } from "./spatial";
 
 export type NavAction =
@@ -15,6 +15,15 @@ export const BACK_EVENT = "modman:back";
 
 export function focusCurrentTab(doc: Document = document): void {
   doc.querySelector<HTMLElement>("[data-tab][aria-current='page']")?.focus();
+}
+
+/**
+ * Switch to `view` from a control inside the current view: its tab takes
+ * focus first, since the control unmounts with the old view.
+ */
+export function openView(view: ViewId, doc: Document = document): void {
+  doc.querySelector<HTMLElement>(`[data-tab='${view}']`)?.focus();
+  useUi.getState().setView(view);
 }
 
 export function performNav(action: NavAction, doc: Document = document): void {

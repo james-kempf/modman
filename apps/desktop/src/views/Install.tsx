@@ -14,7 +14,6 @@ import {
   CheckIcon,
   ClipboardTextIcon,
   DownloadSimpleIcon,
-  GameControllerIcon,
   LinkIcon,
   MagnifyingGlassIcon,
   ThumbsUpIcon,
@@ -29,6 +28,7 @@ function compact(n: number | null): string {
 import * as ipc from "../ipc/commands";
 import type { InstallResult, SearchView } from "../ipc/types";
 import { installKey } from "./Requirements";
+import { NoGame } from "../components/NoGame";
 
 const FOMOD = [
   { value: "ask", label: "Ask (wizard)" },
@@ -64,7 +64,6 @@ function insertAtSelection(input: HTMLInputElement, text: string): string {
 
 export function Install() {
   const { game, isLoading } = useActiveGame();
-  const setAddGame = useUi((s) => s.setAddGame);
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
       <ViewHeader
@@ -74,17 +73,7 @@ export function Install() {
       />
       {isLoading ? null : !game ? (
         // Every install goes into the active game.
-        <Empty
-          icon={<GameControllerIcon size={28} weight="duotone" />}
-          title="No active game"
-          action={
-            <Button tone="primary" onClick={() => setAddGame(true)}>
-              Add game
-            </Button>
-          }
-        >
-          Add a game first; mods are installed into the active game.
-        </Empty>
+        <NoGame>Pick or add a game in Games first; mods are installed into the active game.</NoGame>
       ) : (
         <>
           <section className="stagger grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">

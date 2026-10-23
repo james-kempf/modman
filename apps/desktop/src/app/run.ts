@@ -9,7 +9,7 @@ import * as ipc from "../ipc/commands";
 import type { AfterChange, CollectionResult, DeployReport, GameView } from "../ipc/types";
 import { errMsg } from "./bridge";
 import { isCancelError } from "./jobs";
-import { useMods } from "./queries";
+import { refreshAll, useMods } from "./queries";
 import { useUi } from "./store";
 
 /** The AfterChange inside a command result, if it has one. */
@@ -103,7 +103,7 @@ export function useRun(): Run {
       } finally {
         ui.setBusy(label, false);
         if (key) ui.setBusy(key, false);
-        void qc.invalidateQueries();
+        void refreshAll(qc);
       }
     },
     [qc],

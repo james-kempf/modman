@@ -118,18 +118,33 @@ pub fn fetch_into(
     url: &str,
     allow: impl Fn(&str) -> bool + Send + Sync + 'static,
 ) -> R<Vec<u8>> {
+    let dest = cache_path(dir, game, mod_id)?;
+    fetch_image(&dest, url, MAX_BYTES, allow)
+}
+
+/// Downloads an image from `url` to `dest` (parent dirs created): `allow`
+/// must accept the URL and every redirect hop, the body is capped at
+/// `max_bytes` while streaming, and only a sniffed image is kept. Each
+/// fetch writes a temp file of its own, renamed into place when complete.
+pub(crate) fn fetch_image(
+    dest: &Path,
+    url: &str,
+    max_bytes: u64,
+    allow: impl Fn(&str) -> bool + Send + Sync + 'static,
+) -> R<Vec<u8>> {
     if !allow(url) {
         fail!(
             "refusing to fetch a picture from {}",
             super::nxm::redact_url(url)
         );
     }
-    let dest = cache_path(dir, game, mod_id)?;
-    std::fs::create_dir_all(dest.parent().unwrap_or(dir))?;
-    let tmp = temp_path(&dest);
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = temp_path(dest);
     let fetcher = Fetcher::new()?
         .with_retry(1, std::time::Duration::ZERO)
-        .with_max_bytes(MAX_BYTES)
+        .with_max_bytes(max_bytes)
         .with_redirect_check(Arc::new(allow))?;
     let fetched = block_on(fetcher.fetch(FetchRequest {
         url,
@@ -141,14 +156,14 @@ pub fn fetch_into(
     .map_err(|e| AppError::Msg(format!("cannot start the async runtime: {e}")))?;
     let res = (|| -> R<Vec<u8>> {
         let f = fetched?;
-        if f.size > MAX_BYTES {
+        if f.size > max_bytes {
             fail!("picture too large ({} bytes)", f.size);
         }
         let bytes = std::fs::read(&f.path)?;
         if sniff(&bytes).is_none() {
             fail!("not an image");
         }
-        std::fs::rename(&f.path, &dest)?;
+        std::fs::rename(&f.path, dest)?;
         Ok(bytes)
     })();
     let _ = std::fs::remove_file(&tmp);

@@ -23,7 +23,7 @@ use modman_core::app::mods::{
 use modman_core::app::nexus::{self as appnx, AccountInfo, LoginResult};
 use modman_core::app::updates::{self as appup, UpdateReport};
 use modman_core::app::views::{self, ConfigChange, ConfigEntry, FilesView, SearchView};
-use modman_core::app::{actions, games_hint, plugins as appplug, thumbs, Cx, R};
+use modman_core::app::{actions, art, games_hint, plugins as appplug, thumbs, Cx, R};
 use modman_core::autoupdate::{self, LiveHost, RunLogEntry, StartupCheck, Status};
 use modman_core::collections::{self, CollectionSummary};
 use modman_core::deploy::{self, DeployReport, DeployStatus, PurgeReport, VerifyReport};
@@ -376,6 +376,13 @@ pub async fn mod_reinstall(
         appinst::reinstall(cx, &g, &reference, fomod.as_deref(), ask)
     })
     .await
+}
+
+/// The game's portrait library art (600x900) as a `data:` URL: the local
+/// Steam cache, else modman's cache of Steam's CDN copy; `None` = no art.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn game_art(app: AppHandle, state: St<'_>, domain: String) -> CmdResult<Option<String>> {
+    query(app, &state, None, move |cx| art::game_art(cx, &domain)).await
 }
 
 /// The mod's picture as a `data:` URL (cached; `None` when it has none).

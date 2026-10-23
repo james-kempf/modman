@@ -20,6 +20,7 @@ import {
 import { Badge, Button, Card, Empty, ErrorNote, Segmented, TextField, Toggle, ViewHeader, bytes, monogram, when } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import type { CollectionInfo, CollectionRemoved, CollectionResult } from "../ipc/types";
+import { NoGame } from "../components/NoGame";
 
 const OPTIONAL = [
   { value: "ask", label: "Ask" },
@@ -59,9 +60,7 @@ export function Collections() {
         description="A collection installs a curated set of mods with the curator's installer choices and load order."
       />
       {!game ? (
-        <Empty icon={<BooksIcon size={28} weight="duotone" />} title="No active game">
-          Add one on the Overview.
-        </Empty>
+        <NoGame icon={<BooksIcon size={28} weight="duotone" />} />
       ) : (
         <>
           {/* key: a looked-up collection belongs to one game. */}

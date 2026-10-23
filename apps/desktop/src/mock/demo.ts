@@ -185,6 +185,12 @@ export function createDemoBackend(): FakeTransport {
         if (g.active && games[0]) games[0].active = true;
         return true;
       }),
+    // Generated portrait art for the first game; the others have none (monogram tiles), so both paths show.
+    game_art: (a: Args) => {
+      const g = games.find((x) => x.domain === a!.domain);
+      if (!g) throw { message: `no game '${String(a!.domain)}'` };
+      return g.domain === "skyrimspecialedition" ? placeholderArt(g.name) : null;
+    },
     game_launch: () =>
       job("launch", async (id) => {
         const g = active();
@@ -506,6 +512,17 @@ export function createDemoBackend(): FakeTransport {
     };
   }
   return t;
+}
+
+/** A flat 600x900 SVG poster with the game's name, as a data: URL (stands in for Steam's library art). */
+export function placeholderArt(name: string): string {
+  const esc = name.replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`);
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="900" viewBox="0 0 600 900">` +
+    `<rect width="600" height="900" fill="#1d2a33"/><rect x="40" y="40" width="520" height="820" fill="none" stroke="#3b5566" stroke-width="4"/>` +
+    `<circle cx="300" cy="360" r="120" fill="#2c4250"/>` +
+    `<text x="300" y="640" fill="#e4eef2" font-family="sans-serif" font-size="44" text-anchor="middle">${esc}</text></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
 /** Slug from a collection URL, nxm link or bare slug. */
