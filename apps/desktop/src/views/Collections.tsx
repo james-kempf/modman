@@ -8,7 +8,7 @@ import { useState } from "react";
 import { errMsg } from "../app/bridge";
 import { useActiveGame } from "../app/queries";
 import { useBusy, useRun } from "../app/run";
-import { useUi } from "../app/store";
+import { useUi, type NoticeTone } from "../app/store";
 import {
   ArrowsClockwiseIcon,
   BooksIcon,
@@ -19,7 +19,7 @@ import {
 } from "@phosphor-icons/react";
 import { Badge, Button, Card, Empty, ErrorNote, Segmented, TextField, Toggle, ViewHeader, bytes, monogram, when } from "../components/ui";
 import * as ipc from "../ipc/commands";
-import type { CollectionInfo, CollectionResult } from "../ipc/types";
+import type { CollectionInfo, CollectionRemoved, CollectionResult } from "../ipc/types";
 
 const OPTIONAL = [
   { value: "ask", label: "Ask" },
@@ -35,6 +35,19 @@ export function collectionText(r: CollectionResult): string {
   if (r.failed.length) parts.push(`${r.failed.length} failed`);
   return parts.join(", ");
 }
+
+/** Notice tone of a collection result: a cancel is neutral, failures warn. */
+export function collectionTone(r: CollectionResult): NoticeTone {
+  return r.cancelled ? "info" : r.failed.length ? "warn" : "success";
+}
+
+export function removedText(slug: string, r: CollectionRemoved): string {
+  if (!r.removed) return `Collection ${slug} was kept.`;
+  return r.uninstalled ? `Removed collection ${slug} and ${r.uninstalled} mods` : `Removed collection ${slug}`;
+}
+
+/** The look-up field (focus goes there when the focused collection row is removed). */
+const LOOKUP_NAME = "collection-ref";
 
 export function Collections() {
   const { game } = useActiveGame();
@@ -65,6 +78,19 @@ function Installed({ game }: { game: string }) {
   const run = useRun();
   const notify = useUi((s) => s.notify);
   const list = q.data ?? [];
+  const remove = async (slug: string, keepMods: boolean) => {
+    const r = await run("Remove collection", () => ipc.collectionRemove(slug, keepMods), { key: `Collection ${slug}` });
+    if (!r) return;
+    notify(r.removed ? "success" : "info", removedText(slug, r));
+    if (!r.removed) return;
+    // The row (and the button that had focus) goes away: keep focus in the view.
+    await q.refetch();
+    requestAnimationFrame(() => {
+      const a = document.activeElement;
+      if (a && a !== document.body && a.isConnected && a.closest("main")) return;
+      document.querySelector<HTMLInputElement>(`main input[name=${LOOKUP_NAME}]`)?.focus();
+    });
+  };
   return (
     <section aria-labelledby="installed-collections" className="grid gap-5">
       <h2 id="installed-collections" className="eyebrow px-1">
@@ -113,20 +139,15 @@ function Installed({ game }: { game: string }) {
                     const r = await run("Update collection", () => ipc.collectionUpdate({ reference: c.slug }), {
                       key: `Collection ${c.slug}`,
                     });
-                    if (r) notify(r.failed.length ? "warn" : "success", collectionText(r));
+                    if (r) notify(collectionTone(r), collectionText(r));
                   }}
                 >
                   Update
                 </Button>
-                <Button
-                  size="sm"
-                  tone="danger"
-                  icon={<TrashIcon aria-hidden size={14} />}
-                  onClick={() => run("Remove collection", () => ipc.collectionRemove(c.slug, false), { key: `Collection ${c.slug}` })}
-                >
+                <Button size="sm" tone="danger" icon={<TrashIcon aria-hidden size={14} />} onClick={() => remove(c.slug, false)}>
                   Remove
                 </Button>
-                <Button size="sm" tone="ghost" onClick={() => run("Remove collection", () => ipc.collectionRemove(c.slug, true), { key: `Collection ${c.slug}` })}>
+                <Button size="sm" tone="ghost" onClick={() => remove(c.slug, true)}>
                   Remove, keep mods
                 </Button>
               </div>
@@ -154,7 +175,13 @@ function Lookup() {
       () => ipc.collectionInstall({ reference: info.slug, game: info.game, optional, deploy, revision: info.revision.number }),
       { key: "Install collection" },
     );
-    if (r) notify(r.failed.length ? "warn" : "success", collectionText(r));
+    if (!r) return;
+    notify(collectionTone(r), collectionText(r));
+    // The panel shows the installed revision now ("Install this revision").
+    if (!r.cancelled) {
+      const fresh = await ipc.collectionInfo(info.slug, info.game).catch(() => null);
+      if (fresh) setInfo((cur) => (cur?.slug === fresh.slug ? fresh : cur));
+    }
   };
   return (
     <Card title="Add a collection">
@@ -167,6 +194,7 @@ function Lookup() {
       >
         <TextField
           label="Collection URL, nxm link or slug"
+          name={LOOKUP_NAME}
           value={ref}
           onChange={(e) => setRef(e.target.value)}
           className="min-w-0 flex-[1_1_18rem]"

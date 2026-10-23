@@ -14,6 +14,17 @@ import * as ipc from "../ipc/commands";
 import { Dialog } from "./Dialog";
 import { Button, Empty, ErrorNote, SupportBadge, TextField } from "./ui";
 
+/** A Nexus Mods game domain: lowercase letters and digits (e.g. skyrimspecialedition, fallout4). */
+const DOMAIN = /^[a-z0-9]+$/;
+
+/** null = valid; else the inline error for the domain field. */
+export function domainProblem(raw: string): string | null {
+  const d = raw.trim();
+  if (!d) return "Enter the game's Nexus Mods domain.";
+  if (!DOMAIN.test(d)) return "A Nexus domain uses only lowercase letters and digits, e.g. stardewvalley.";
+  return null;
+}
+
 /** Rendered by the shell while `addGame` is set in the UI store. */
 export function AddGameHost() {
   const open = useUi((s) => s.addGame);
@@ -28,6 +39,7 @@ export function AddGameDialog() {
   const fresh = detect.data?.filter((d) => !d.configured) ?? [];
   const [domain, setDomain] = useState("");
   const [folder, setFolder] = useState("");
+  const [domainError, setDomainError] = useState<string | null>(null);
 
   const add = async (a: { domain: string; path?: string | null }) => {
     const r = await run("Add game", () => ipc.gameAdd(a));
@@ -35,7 +47,14 @@ export function AddGameDialog() {
   };
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (domain.trim()) void add({ domain: domain.trim(), path: folder.trim() || null });
+    const problem = domainProblem(domain);
+    setDomainError(problem);
+    if (problem) {
+      // The domain field is the form's first input.
+      (e.currentTarget as HTMLFormElement).querySelector("input")?.focus();
+      return;
+    }
+    void add({ domain: domain.trim(), path: folder.trim() || null });
   };
 
   return (
@@ -100,7 +119,11 @@ export function AddGameDialog() {
           placeholder="e.g. stardewvalley"
           helper="The part after nexusmods.com/ in the game's URL."
           value={domain}
-          onChange={(e) => setDomain(e.target.value)}
+          error={domainError}
+          onChange={(e) => {
+            setDomain(e.target.value);
+            setDomainError(null);
+          }}
         />
         <TextField
           label="Game folder (optional)"

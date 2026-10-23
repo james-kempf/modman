@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Modal dialog: a spatial-navigation scope that takes focus on open, traps
 // Tab, closes on "back" (Escape / gamepad B) and restores focus on close.
+// Rendered in a portal on <body>: a transformed ancestor (the view's entry
+// animation) would otherwise be the containing block of its fixed backdrop.
+// While open, everything else on <body> (the app, lower dialogs) is inert.
 
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { BACK_EVENT } from "../nav/actions";
 import { focusables, navScope, recoverFocus } from "../nav/spatial";
 import { cx } from "./ui";
@@ -18,6 +22,27 @@ const chains = new WeakMap<Element, HTMLElement[]>();
  * dialog opening in the next commit (focus is on <body> by then) inherits them.
  */
 let restoring: HTMLElement[] | null = null;
+
+/** Open dialog backdrops, bottom to top. */
+const stack: HTMLElement[] = [];
+/** <body> children this module made inert (others may be inert for their own reasons). */
+const madeInert = new Set<Element>();
+
+/** Everything on <body> but the top dialog is inert; nothing when no dialog is open. */
+function syncInert(): void {
+  const top = stack[stack.length - 1];
+  const want = new Set(top ? Array.from(document.body.children).filter((el) => el !== top) : []);
+  for (const el of madeInert)
+    if (!want.has(el)) {
+      el.removeAttribute("inert");
+      madeInert.delete(el);
+    }
+  for (const el of want)
+    if (!el.hasAttribute("inert")) {
+      el.setAttribute("inert", "");
+      madeInert.add(el);
+    }
+}
 
 /** What has focus now, plus the openers of the dialog it sits in (nearest first). */
 function captureOpeners(): HTMLElement[] {
@@ -44,6 +69,7 @@ export function Dialog({
   returnFocus?: HTMLElement | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const backdrop = useRef<HTMLDivElement>(null);
   const back = useRef(onBack);
   back.current = onBack;
   const titleId = useId();
@@ -52,6 +78,17 @@ export function Dialog({
   const [openers] = useState(captureOpeners);
   const ret = useRef(returnFocus);
   ret.current = returnFocus;
+
+  // Layout effect: the background is inert before the dialog takes focus.
+  useLayoutEffect(() => {
+    const el = backdrop.current!;
+    stack.push(el);
+    syncInert();
+    return () => {
+      stack.splice(stack.indexOf(el), 1);
+      syncInert();
+    };
+  }, []);
 
   useEffect(() => {
     const el = ref.current!;
@@ -89,8 +126,12 @@ export function Dialog({
     all[j].focus();
   };
 
-  return (
-    <div className="fixed inset-0 z-50 grid animate-fade place-items-center bg-ink/70 p-6 backdrop-blur-sm">
+  return createPortal(
+    // Fixed to the viewport; the dialog scrolls inside and always fits (also at 800x480).
+    <div
+      ref={backdrop}
+      className="fixed inset-0 z-50 grid animate-fade place-items-center overflow-y-auto overscroll-contain bg-ink/70 p-4 backdrop-blur-sm sm:p-6"
+    >
       <div
         ref={ref}
         role="dialog"
@@ -98,7 +139,10 @@ export function Dialog({
         aria-labelledby={titleId}
         data-nav-scope
         onKeyDown={onKeyDown}
-        className={cx("glass max-h-[92vh] w-full animate-pop overflow-y-auto rounded-3xl p-7", wide ? "max-w-5xl" : "max-w-2xl")}
+        className={cx(
+          "glass max-h-[calc(100vh-2rem)] w-full animate-pop overflow-y-auto overscroll-contain rounded-3xl p-5 sm:max-h-[calc(100vh-3rem)] sm:p-7",
+          wide ? "max-w-5xl" : "max-w-2xl",
+        )}
       >
         <h2 id={titleId} className="text-xl font-medium tracking-tight wrap-anywhere text-zinc-50">
           {title}
@@ -106,6 +150,7 @@ export function Dialog({
         {subtitle && <p className="mt-1.5 text-[14.5px] leading-relaxed wrap-anywhere text-zinc-400">{subtitle}</p>}
         <div className="mt-6">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

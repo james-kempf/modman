@@ -300,13 +300,13 @@ describe("CT1 D07 deploy-due notice", () => {
       deploy: () => ({ dry_run: false, method: "auto", mods: 1, skipped: [], conflicts: [], placed: 3, backed_up: 0, new_dirs: 0, by_method: {}, purged: null, recovered: null, plugins: null }),
     });
     act(() => {
-      useUi.getState().setNeedsDeploy(true);
-      useUi.getState().notify("warn", "Changes are not in the game yet.", true);
+      useUi.getState().markDeployDue("skyrimspecialedition");
+      useUi.getState().notify("warn", "Changes are not in the game yet.", "skyrimspecialedition");
     });
     expect(useUi.getState().notices.some((n) => n.deploy)).toBe(true);
     await user.click(await within(main()).findByRole("button", { name: "Deploy" }));
     await waitFor(() => expect(useUi.getState().notices.some((n) => n.deploy)).toBe(false));
-    expect(useUi.getState().notices.map((n) => n.text)).toContain("Deployed 3 files from 1 mods");
+    expect(useUi.getState().notices.map((n) => n.text)).toContain("Skyrim Special Edition: Deployed 3 files from 1 mods");
   });
 });
 

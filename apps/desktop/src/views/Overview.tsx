@@ -18,7 +18,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { errMsg } from "../app/bridge";
 import { useActiveGame, useMods } from "../app/queries";
-import { useBusy, useDeploy, useRun } from "../app/run";
+import { useBusy, useDeploy, useDeployDue, useRun } from "../app/run";
 import { useUi, type ViewId } from "../app/store";
 import {
   Badge,
@@ -74,8 +74,7 @@ export function Overview() {
 
 function GameCards({ game }: { game: GameView }) {
   const mods = useMods(game.domain);
-  const needsDeploy = useUi((s) => s.needsDeploy);
-  const outOfSync = needsDeploy || !!mods.data?.changed_since_deploy;
+  const outOfSync = useDeployDue(game.domain);
   const bethesda = game.profile === "bethesda";
   return (
     <>
@@ -117,7 +116,7 @@ function PlayCard({ game, outOfSync }: { game: GameView; outOfSync: boolean }) {
     const r = await run("Play", () => ipc.gameLaunch(), { key: "Play" });
     if (!r) return;
     const ui = useUi.getState();
-    if (r.deployed) ui.setNeedsDeploy(false);
+    if (r.deployed) ui.clearDeployDue(game.domain);
     ui.notify("success", `Starting ${game.name} through Steam.`);
   };
   return (
@@ -205,7 +204,7 @@ function DeploymentCard({ game, outOfSync }: { game: GameView; outOfSync: boolea
           className="w-full"
           busy={deploying}
           icon={<RocketLaunchIcon aria-hidden size={19} weight="duotone" />}
-          onClick={deploy}
+          onClick={() => void deploy()}
         >
           Deploy
         </Button>

@@ -126,4 +126,43 @@ describe("demo backend", () => {
     expect(await r).toBeNull();
     expect(d.jobs[d.jobs.length - 1]).toMatchObject({ kind: "purge", state: "finished" });
   });
+
+  // CT2 D16: fails when a reinstalled collection adds its mods a second time.
+  it("collection_install skips mods already present", async () => {
+    const d = demo();
+    for (let i = 0; i < 2; i++) {
+      const r = d.call("collection_install", { reference: "abc", deploy: false });
+      await d.answer({ type: "confirm", yes: true });
+      await r;
+    }
+    const names = (await d.call<ModsView>("mods_list")).mods.map((m) => m.name);
+    expect(names.filter((n) => n.startsWith("abc mod"))).toEqual(["abc mod 1", "abc mod 2"]);
+  });
+
+  // CT2 D16: fails when updates_install ignores the updates that updates_check reported.
+  it("updates_install installs the reported updates", async () => {
+    const d = demo();
+    const m = (await d.call<ModsView>("mods_list")).mods[0];
+    d.t.handlers.updates_check = () => ({
+      checked: 3, fetched: 1, stopped_early: false, installed: 0,
+      updates: [{ mod: m, file: { file_id: 9, name: "SkyUI 6.0", version: "6.0" }, pinned: false }],
+    });
+    expect(await d.call("updates_install", {})).toMatchObject({ installed: 1, updates: [] });
+    const after = await d.call<ModsView>("mods_list");
+    expect(after.mods[0].version).toBe("6.0");
+    expect(after.changed_since_deploy).toBe(true);
+  });
+
+  // CT2 D16: fails when mods, the changed-since-deploy flag or collections are shared by every game.
+  it("keeps mods, the dirty flag and collections per game", async () => {
+    const d = demo();
+    const sky = (await d.call<ModsView>("mods_list")).mods;
+    await d.call("mods_set_enabled", { ids: [sky[0].id], enabled: false });
+    expect((await d.call<ModsView>("mods_list", { game: "skyrimspecialedition" })).changed_since_deploy).toBe(true);
+    const cp = await d.call<ModsView>("mods_list", { game: "cyberpunk2077" });
+    expect(cp).toEqual({ mods: [], changed_since_deploy: false });
+    await d.call("deploy", { game: "cyberpunk2077" });
+    expect((await d.call<ModsView>("mods_list")).changed_since_deploy).toBe(true);
+    expect(await d.call("collections_list", { game: "cyberpunk2077" })).toEqual([]);
+  });
 });

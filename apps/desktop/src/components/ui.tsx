@@ -184,17 +184,45 @@ export function TextField({
   label,
   hideLabel,
   helper,
+  error,
   className,
   ...rest
-}: InputHTMLAttributes<HTMLInputElement> & { label: string; hideLabel?: boolean; helper?: ReactNode }) {
+}: InputHTMLAttributes<HTMLInputElement> & {
+  label: string;
+  hideLabel?: boolean;
+  helper?: ReactNode;
+  /** Inline validation error (marks the input aria-invalid and describes it). */
+  error?: string | null;
+}) {
   const id = useId();
+  const helpId = `${id}-help`;
+  const errId = `${id}-err`;
+  const described = [error && errId, helper && helpId].filter(Boolean).join(" ") || undefined;
   return (
     <div className={cx("grid gap-2", className)}>
       <label htmlFor={id} className={cx("text-[13px] font-medium text-zinc-300", hideLabel && "sr-only")}>
         {label}
       </label>
-      <input id={id} type="text" autoComplete="off" spellCheck={false} {...rest} className="input" />
-      {helper && <p className="text-[12.5px] leading-relaxed text-dim">{helper}</p>}
+      <input
+        id={id}
+        type="text"
+        autoComplete="off"
+        spellCheck={false}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={described}
+        {...rest}
+        className="input"
+      />
+      {error && (
+        <p id={errId} className="text-[13px] leading-relaxed text-rose-300">
+          {error}
+        </p>
+      )}
+      {helper && (
+        <p id={helpId} className="text-[12.5px] leading-relaxed text-dim">
+          {helper}
+        </p>
+      )}
     </div>
   );
 }
@@ -276,13 +304,14 @@ export function ViewHeader({
   children?: ReactNode;
 }) {
   return (
-    <header className="flex flex-col gap-5 pb-2 md:flex-row md:items-end md:justify-between">
-      <div className="min-w-0">
+    // Wraps instead of squeezing: the title keeps ~24rem, and the actions go below it when both do not fit.
+    <header className="flex flex-wrap items-end justify-between gap-x-8 gap-y-5 pb-2">
+      <div className="min-w-0 flex-[1_1_24rem]">
         {eyebrow && <div className="eyebrow mb-3">{eyebrow}</div>}
         <h1 className="text-3xl font-medium tracking-tighter text-zinc-50 md:text-[40px] md:leading-none">{title}</h1>
         {description && <div className="mt-3 max-w-[65ch] text-[15px] leading-relaxed text-zinc-400">{description}</div>}
       </div>
-      {children && <div className="flex shrink-0 flex-wrap items-center gap-2">{children}</div>}
+      {children && <div className="flex max-w-full min-w-0 flex-wrap items-center gap-2">{children}</div>}
     </header>
   );
 }
@@ -413,7 +442,8 @@ export function MsgLine({ msg }: { msg: Msg }) {
     <span className={LEVEL[msg.level]}>
       {msg.spans.map((s, i) => (
         <span key={i} className={SPAN[s.style]}>
-          {s.text}
+          {/* Streamed events stay in the session log: one malformed span must not break Activity for good. */}
+          {typeof s.text === "string" ? s.text : JSON.stringify(s.text)}
         </span>
       ))}
     </span>
@@ -423,16 +453,30 @@ export function MsgLine({ msg }: { msg: Msg }) {
 /** Deterministic flat colour class + initials for a name (legacy monogram fallback). */
 export function monogram(name: string): { cls: string; initials: string } {
   const h = [...name].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 997, 7);
+  // Words of letters/digits in any script (marks belong to their letter); the
+  // initial is a word's first grapheme without its combining marks.
+  const words = name.match(/[\p{L}\p{N}][\p{L}\p{M}\p{N}]*/gu) ?? [];
+  const initial = (w: string) => {
+    const g = graphemes(w)[0] ?? "";
+    return g.replace(/\p{M}+/gu, "") || g;
+  };
   const initials =
-    name
-      .replace(/[^A-Za-z0-9 ]/g, " ")
-      .split(/\s+/)
-      .filter(Boolean)
+    words
       .slice(0, 2)
-      .map((w) => w[0])
+      .map(initial)
       .join("")
-      .toUpperCase() || "?";
+      .toLocaleUpperCase() ||
+    // No letters (e.g. only emoji): the first grapheme as is.
+    graphemes(name.trim())[0] ||
+    "?";
   return { cls: `mono-${h % 8}`, initials };
+}
+
+/** User-perceived characters (an emoji ZWJ sequence or a letter with its marks is one). */
+function graphemes(s: string): string[] {
+  if (typeof Intl !== "undefined" && "Segmenter" in Intl)
+    return Array.from(new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(s), (x) => x.segment);
+  return Array.from(s);
 }
 
 /** Mod picture: a data: URL from the backend cache (no remote images under the CSP), else a monogram. */

@@ -4,26 +4,47 @@
 // changes persist for the session, and cancel semantics follow the real
 // backend: a declined confirm finishes the job ("Cancelled."), a cancelled
 // FOMOD wizard fails it with "FOMOD installer cancelled", and a withdrawn
-// prompt counts as cancel.
+// prompt counts as cancel. Mods, the "changed since deploy" flag, profiles
+// and collections are kept per game.
 
-import type { Answer, CollectionRecord, ConfigEntry, Msg, ProfileSummary, Prompt, ReqRow } from "../ipc/types";
+import type { Answer, CollectionRecord, ConfigEntry, ModView, Msg, ProfileSummary, Prompt, ReqRow, UpdateReport } from "../ipc/types";
 import { createFakeTransport, type Args, type FakeTransport } from "./fake";
 import { afterChange, autoupdateStatus, deployReport, experimentalGame, game, mod } from "./fixtures";
 
 export function createDemoBackend(): FakeTransport {
   const games = [game(), experimentalGame({ active: false, mod_count: 0 })];
-  const mods = [
-    mod({ name: "SkyUI", nexus_mod_id: 12604 }),
-    mod({ name: "Unofficial Patch", nexus_mod_id: 266 }),
-    mod({ name: "Immersive Armors", enabled: false }),
-  ];
+  type Profile = ProfileSummary & { set: { uid: string; enabled: boolean }[] };
+  interface GameState {
+    mods: ModView[];
+    /** The mod set changed since the last deploy. */
+    dirty: boolean;
+    profiles: Profile[];
+    collections: CollectionRecord[];
+  }
+  const state = new Map<string, GameState>();
+  state.set(games[0].domain, {
+    mods: [
+      mod({ name: "SkyUI", nexus_mod_id: 12604 }),
+      mod({ name: "Unofficial Patch", nexus_mod_id: 266 }),
+      mod({ name: "Immersive Armors", enabled: false }),
+    ],
+    dirty: false,
+    profiles: [],
+    collections: [],
+  });
+  /** The state of the named game (a command's `game` argument), else the active one. */
+  const st = (a?: Args): GameState => {
+    const d = typeof a?.game === "string" && a.game ? a.game : active().domain;
+    let g = state.get(d);
+    if (!g) state.set(d, (g = { mods: [], dirty: false, profiles: [], collections: [] }));
+    return g;
+  };
   let jobSeq = 0;
   let promptSeq = 0;
+  let collSeq = 0;
   const waiting = new Map<number, (a: Answer) => void>();
   let loggedIn = false;
   let timer = false;
-  /** The mod set changed since the last deploy. */
-  let dirty = false;
   const config: ConfigEntry[] = [
     { key: "deploy-method", value: "auto", description: "hardlink, reflink, symlink, copy or auto" },
     { key: "autoupdate-interval", value: "0", description: "hours between auto-update runs (0 = hourly)" },
@@ -32,8 +53,6 @@ export function createDemoBackend(): FakeTransport {
     { status: "missing", key: "skse", name: "SKSE64", hint: "install 30379", urls: [], by: ["SkyUI"], detail: "", acked: false },
     { status: "external", key: "skse-loader", name: "SKSE loader", hint: "", urls: ["https://skse.silverlock.org"], by: ["SkyUI"], detail: "", acked: false },
   ];
-  const profiles: (ProfileSummary & { set: { uid: string; enabled: boolean }[] })[] = [];
-  const collections: CollectionRecord[] = [];
 
   const t = createFakeTransport();
   const say = (job: number, text: string, level: Msg["level"] = "info") =>
@@ -58,12 +77,14 @@ export function createDemoBackend(): FakeTransport {
   };
   const active = () => games.find((g) => g.active)!;
   const now = () => Math.floor(Date.now() / 1000);
-  const renumber = () => mods.forEach((m, k) => (m.position = k + 1));
-  renumber();
+  const renumber = (g: GameState) => g.mods.forEach((m, k) => (m.position = k + 1));
+  state.forEach(renumber);
   /** A mod-set change: deploy is due, or done when the command asked for it. */
-  const changed = (deployNow = false) => {
-    dirty = !deployNow;
-    return deployNow ? afterChange({ deployed: deployReport({ mods: mods.filter((m) => m.enabled).length }), needs_deploy: false }) : afterChange();
+  const changed = (g: GameState, deployNow = false) => {
+    g.dirty = !deployNow;
+    return deployNow
+      ? afterChange({ deployed: deployReport({ mods: g.mods.filter((m) => m.enabled).length }), needs_deploy: false })
+      : afterChange();
   };
   const cancelled = () => ({ message: "FOMOD installer cancelled" });
   const fomod = (id: number, module: string) =>
@@ -170,29 +191,36 @@ export function createDemoBackend(): FakeTransport {
         say(id, `Launching ${g.name} (Steam app ${g.appid})...`);
         return { appid: g.appid, deployed: false };
       }),
-    mods_list: () => ({ mods: mods.map((m) => ({ ...m })), changed_since_deploy: dirty }),
+    mods_list: (a: Args) => {
+      const g = st(a);
+      return { mods: g.mods.map((m) => ({ ...m })), changed_since_deploy: g.dirty };
+    },
     mod_detail: (a: Args) => {
-      const m = mods.find((x) => x.uid === a!.reference)!;
+      const m = st(a).mods.find((x) => x.uid === a!.reference)!;
       return { mod: m, collections: [], fomod: [], wins: 0, loses: 0, url: null };
     },
     mods_set_enabled: (a: Args) =>
       job("enable", async () => {
-        mods.forEach((m) => (a!.ids as number[]).includes(m.id) && (m.enabled = a!.enabled as boolean));
-        return changed();
+        const g = st(a);
+        g.mods.forEach((m) => (a!.ids as number[]).includes(m.id) && (m.enabled = a!.enabled as boolean));
+        return changed(g);
       }),
     mod_move: (a: Args) =>
       job("move", async () => {
+        const g = st(a);
+        const mods = g.mods;
         const i = mods.findIndex((m) => m.uid === a!.reference);
         if (i < 0) throw { message: `no mod '${String(a!.reference)}'` };
         const j = a!.spec === "up" ? i - 1 : a!.spec === "down" ? i + 1 : i;
         if (j < 0 || j >= mods.length) throw { message: `${mods[i].name} is already ${j < 0 ? "first" : "last"}` };
         [mods[i], mods[j]] = [mods[j], mods[i]];
-        renumber();
-        return { uid: a!.reference, from: i + 1, to: j + 1, of: mods.length, after: changed() };
+        renumber(g);
+        return { uid: a!.reference, from: i + 1, to: j + 1, of: mods.length, after: changed(g) };
       }),
     thumbnail: () => null,
     install: (a: Args) =>
       job("install", async (id) => {
+        const g = st(a);
         say(id, `Downloading ${a!.target}…`);
         const answer = await fomod(id, "Demo Mod");
         if (answer.type === "cancel") throw cancelled();
@@ -200,49 +228,52 @@ export function createDemoBackend(): FakeTransport {
           say(id, "Cancelled.");
           return { game: active().domain, installed: null, collection: null, after: afterChange({ needs_deploy: false }) };
         }
-        const m = mod({ name: `Demo Mod ${a!.target}`, installed_at: now(), position: mods.length + 1 });
-        mods.push(m);
-        renumber();
+        const m = mod({ name: `Demo Mod ${a!.target}`, game: active().domain, installed_at: now(), position: g.mods.length + 1 });
+        g.mods.push(m);
+        renumber(g);
         say(id, `Installed ${m.name}`, "success");
         return {
           game: active().domain,
           installed: { mod_id: m.id, uid: m.uid, name: m.name, files: 3, size: 1000, fomod_found: true, replaced: null, warnings: [] },
           collection: null,
-          after: changed(a!.deploy === true),
+          after: changed(g, a!.deploy === true),
         };
       }),
     mod_reinstall: (a: Args) =>
       job("mod_reinstall", async (id) => {
-        const m = mods.find((x) => x.uid === a!.reference);
+        const g = st(a);
+        const m = g.mods.find((x) => x.uid === a!.reference);
         if (!m) throw { message: `no mod '${String(a!.reference)}'` };
         if ((await fomod(id, m.name)).type === "cancel") throw cancelled();
         m.installed_at = now();
         say(id, `Reinstalled ${m.name}`, "success");
         return {
           installed: { mod_id: m.id, uid: m.uid, name: m.name, files: m.file_count, size: m.size, fomod_found: true, replaced: m.uid, warnings: [] },
-          after: changed(),
+          after: changed(g),
         };
       }),
     mods_uninstall: (a: Args) =>
       job("mods_uninstall", async (id) => {
         const refs = a!.refs as string[];
-        const gone = mods.filter((m) => refs.includes(m.uid));
+        const g = st(a);
+        const gone = g.mods.filter((m) => refs.includes(m.uid));
         if (!gone.length) throw { message: `no mod matches ${refs.join(", ")}` };
         if (!(await confirm(id, `Uninstall ${gone.length} mod(s)?`))) {
           say(id, "Cancelled.");
           return { done: false, mods: 0, archives: [], after: afterChange({ needs_deploy: false }) };
         }
-        gone.forEach((m) => mods.splice(mods.indexOf(m), 1));
-        renumber();
-        return { done: true, mods: gone.length, archives: [], after: changed() };
+        gone.forEach((m) => g.mods.splice(g.mods.indexOf(m), 1));
+        renumber(g);
+        return { done: true, mods: gone.length, archives: [], after: changed(g) };
       }),
     nxm_submit: (a: Args) => ({ row: 1, link: String(a!.url).split("?")[0], kind: "mod" }),
     downloads_list: () => [],
-    deploy: () =>
+    deploy: (a: Args) =>
       job("deploy", async (id) => {
+        const g = st(a);
         for (let d = 0; d <= 20; d += 5) t.emit("modman:deploy-progress", { job: id, done: d, total: 20 });
-        dirty = false;
-        return deployReport();
+        g.dirty = false;
+        return deployReport({ mods: g.mods.filter((m) => m.enabled).length });
       }),
     purge: () =>
       job("purge", async (id) => {
@@ -255,16 +286,17 @@ export function createDemoBackend(): FakeTransport {
       }),
     verify: () => ({ intact: 20, issues: [], interrupted: false }),
     deploy_status: () => active().deploy,
-    conflicts: () => ({
-      files: [{ rel_path: "textures/sky.dds", winner: mods[1], losers: [mods[0]], plugin: false }],
-      plugins: [],
-    }),
+    conflicts: (a: Args) => {
+      const m = st(a).mods;
+      return { files: m.length >= 2 ? [{ rel_path: "textures/sky.dds", winner: m[1], losers: [m[0]], plugin: false }] : [], plugins: [] };
+    },
     deps: () => deps.map((d) => ({ ...d })),
     deps_ack: (a: Args) => setAck(String(a!.name), true),
     deps_unack: (a: Args) => setAck(String(a!.name), false),
-    profiles_list: () => profiles.map(({ set: _, ...p }) => ({ ...p })),
+    profiles_list: (a: Args) => st(a).profiles.map(({ set: _, ...p }) => ({ ...p })),
     profile_save: (a: Args) =>
       job("profile_save", async (id) => {
+        const { mods, profiles } = st(a);
         const name = String(a!.name).trim();
         if (!name) throw { message: "profile name is empty" };
         const old = profiles.findIndex((p) => p.name === name);
@@ -282,7 +314,9 @@ export function createDemoBackend(): FakeTransport {
       }),
     profile_load: (a: Args) =>
       job("profile_load", async () => {
-        const p = profiles.find((x) => x.name === a!.name);
+        const g = st(a);
+        const mods = g.mods;
+        const p = g.profiles.find((x) => x.name === a!.name);
         if (!p) throw { message: `no profile '${String(a!.name)}'` };
         let missing = 0;
         for (const e of p.set) {
@@ -293,9 +327,10 @@ export function createDemoBackend(): FakeTransport {
         const listed = new Set(p.set.map((e) => e.uid));
         const extra = mods.filter((m) => !listed.has(m.uid));
         extra.forEach((m) => (m.enabled = false));
-        return { missing, added_disabled: extra.length, after: changed() };
+        return { missing, added_disabled: extra.length, after: changed(g) };
       }),
     profile_delete: (a: Args) => {
+      const profiles = st(a).profiles;
       const i = profiles.findIndex((x) => x.name === a!.name);
       if (i < 0) throw { message: `no profile '${String(a!.name)}'` };
       profiles.splice(i, 1);
@@ -307,11 +342,13 @@ export function createDemoBackend(): FakeTransport {
       { name: "Unofficial Skyrim Special Edition Patch.esp", active: true, managed: true },
       { name: "SkyUI_SE.esp", active: false, managed: true },
     ],
-    collections_list: () =>
-      collections.map((c) => ({ record: { ...c }, enabled: mods.filter((m) => c.mods.includes(m.id) && m.enabled).length })),
+    collections_list: (a: Args) => {
+      const { collections, mods } = st(a);
+      return collections.map((c) => ({ record: { ...c }, enabled: mods.filter((m) => c.mods.includes(m.id) && m.enabled).length }));
+    },
     collection_info: (a: Args) => {
       const slug = collectionSlug(String(a!.reference));
-      const installed = collections.find((c) => c.slug === slug) ?? null;
+      const installed = st(a).collections.find((c) => c.slug === slug) ?? null;
       return {
         game: active().domain,
         slug,
@@ -340,13 +377,24 @@ export function createDemoBackend(): FakeTransport {
           say(id, "Cancelled.");
           return { ...base, cancelled: true };
         }
-        const added = [1, 2].map((n) =>
-          mod({ name: `${slug} mod ${n}`, installed_at: now(), position: mods.length + n, collections: [slug] }),
-        );
-        mods.push(...added);
-        renumber();
+        const g = st(a);
+        // Mods the game already has (an earlier install, or another collection) are not added twice.
+        const members: ModView[] = [];
+        const added: ModView[] = [];
+        for (const n of [1, 2]) {
+          const name = `${slug} mod ${n}`;
+          const have = g.mods.find((m) => m.name === name);
+          if (have) members.push(have);
+          else {
+            const m = mod({ name, game: active().domain, installed_at: now(), position: g.mods.length + 1, collections: [slug] });
+            g.mods.push(m);
+            added.push(m);
+            members.push(m);
+          }
+        }
+        renumber(g);
         const rec: CollectionRecord = {
-          id: collections.length + 1,
+          id: ++collSeq,
           game: active().domain,
           slug,
           name: `Demo collection ${slug}`,
@@ -355,18 +403,24 @@ export function createDemoBackend(): FakeTransport {
           dir: null,
           failed: [],
           installed_at: now(),
-          mods: added.map((m) => m.id),
+          mods: members.map((m) => m.id),
         };
-        const old = collections.findIndex((c) => c.slug === slug);
-        if (old >= 0) collections[old] = rec;
-        else collections.push(rec);
-        const after = changed(a!.deploy === true);
-        return { ...base, installed: added.length, deployed: after.deployed };
+        const old = g.collections.findIndex((c) => c.slug === slug);
+        if (old >= 0) g.collections[old] = rec;
+        else g.collections.push(rec);
+        const deploy = a!.deploy === true;
+        if (added.length || deploy) changed(g, deploy);
+        return {
+          ...base,
+          installed: added.length,
+          present: members.length - added.length,
+          deployed: deploy ? deployReport({ mods: g.mods.filter((m) => m.enabled).length }) : null,
+        };
       }),
     collection_update: (a: Args) =>
       job("collection_update", async () => {
         const slug = collectionSlug(String(a!.reference));
-        const c = collections.find((x) => x.slug === slug);
+        const c = st(a).collections.find((x) => x.slug === slug);
         if (!c) throw { message: `collection ${slug} is not installed` };
         const up = c.revision >= 3;
         c.revision = 3;
@@ -375,6 +429,8 @@ export function createDemoBackend(): FakeTransport {
     collection_remove: (a: Args) =>
       job("collection_remove", async (id) => {
         const slug = collectionSlug(String(a!.reference));
+        const g = st(a);
+        const { collections, mods } = g;
         const c = collections.find((x) => x.slug === slug);
         if (!c) throw { message: `collection ${slug} is not installed` };
         const keep = a!.keep_mods === true;
@@ -392,12 +448,28 @@ export function createDemoBackend(): FakeTransport {
               uninstalled++;
             }
           }
-        renumber();
-        return { removed: true, uninstalled, after: keep ? afterChange({ needs_deploy: false }) : changed() };
+        renumber(g);
+        return { removed: true, uninstalled, after: keep ? afterChange({ needs_deploy: false }) : changed(g) };
       }),
-    updates_check: () => ({ checked: mods.length, fetched: 0, stopped_early: false, updates: [], installed: 0 }),
-    updates_install: () =>
-      job("updates_install", async () => ({ checked: mods.length, fetched: 0, stopped_early: false, updates: [], installed: 0 })),
+    updates_check: (a: Args) => ({ checked: st(a).mods.length, fetched: 0, stopped_early: false, updates: [], installed: 0 }),
+    // Installs what updates_check reports (tests and the CT suites replace updates_check).
+    updates_install: (a: Args) =>
+      job("updates_install", async (id) => {
+        const g = st(a);
+        const rep = (await t.handlers.updates_check(a)) as UpdateReport;
+        let installed = 0;
+        for (const u of rep.updates) {
+          if (u.pinned) continue;
+          const m = g.mods.find((x) => x.id === u.mod.id);
+          if (!m) continue;
+          m.version = u.file.version ?? u.file.name;
+          m.installed_at = now();
+          installed++;
+          say(id, `Updated ${m.name} to ${m.version}`, "success");
+        }
+        if (installed) changed(g);
+        return { ...rep, updates: rep.updates.filter((u) => u.pinned), installed };
+      }),
     search: () => ({ total: 0, mods: [] }),
     autoupdate_status: () =>
       autoupdateStatus({ timer: { installed: timer, active: timer ? "active" : null, next_elapse: null, every_hours: 1 } }),

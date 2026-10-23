@@ -40,7 +40,7 @@ import {
   when,
 } from "../components/ui";
 import * as ipc from "../ipc/commands";
-import type { ModView, UpdateReport } from "../ipc/types";
+import type { ModView, ProfileLoaded, UninstallResult, UpdateReport } from "../ipc/types";
 
 const TABS = [
   { value: "list", label: "Mods" },
@@ -176,8 +176,26 @@ function ModList({ game }: { game: string }) {
   );
 }
 
+export function uninstalledText(r: UninstallResult, name: string): string {
+  if (!r.done) return `${name} was not uninstalled.`;
+  return r.mods === 1 ? `Uninstalled ${name}` : `Uninstalled ${r.mods} mods`;
+}
+
+export function profileLoadedText(name: string, r: ProfileLoaded): string {
+  const parts = [`Loaded profile ${name}`];
+  if (r.missing) parts.push(`${r.missing} of its mods are no longer installed`);
+  if (r.added_disabled) parts.push(`${r.added_disabled} mods not in it were disabled`);
+  return parts.join("; ");
+}
+
+export function updatesInstalledText(r: UpdateReport): string {
+  if (!r.installed) return "No updates were installed.";
+  return `Installed ${r.installed} ${r.installed === 1 ? "update" : "updates"}`;
+}
+
 function ModDetailDialog({ mod, game, onClose }: { mod: ModView; game: string; onClose: () => void }) {
   const run = useRun();
+  const notify = useUi((s) => s.notify);
   const q = useQuery({ queryKey: ["mod", game, mod.uid], queryFn: () => ipc.modDetail(mod.uid, game) });
   const d = q.data;
   return (
@@ -206,9 +224,10 @@ function ModDetailDialog({ mod, game, onClose }: { mod: ModView; game: string; o
       <div className="mt-7 flex flex-wrap justify-end gap-2">
         <Button
           icon={<ArrowsClockwiseIcon aria-hidden size={15} />}
-          onClick={() => {
+          onClick={async () => {
             onClose();
-            void run("Reinstall", () => ipc.modReinstall(mod.uid, { fomod: "ask" }));
+            const r = await run("Reinstall", () => ipc.modReinstall(mod.uid, { fomod: "ask" }));
+            if (r) notify("success", `Reinstalled ${r.installed.name} (${r.installed.files} files)`);
           }}
         >
           Reinstall (choose FOMOD options)
@@ -216,10 +235,11 @@ function ModDetailDialog({ mod, game, onClose }: { mod: ModView; game: string; o
         <Button
           tone="danger"
           icon={<TrashIcon aria-hidden size={15} />}
-          onClick={() => {
+          onClick={async () => {
             onClose();
             // The backend asks for confirmation.
-            void run("Uninstall", () => ipc.modsUninstall([mod.uid], false));
+            const r = await run("Uninstall", () => ipc.modsUninstall([mod.uid], false));
+            if (r) notify(r.done ? "success" : "info", uninstalledText(r, mod.name));
           }}
         >
           Uninstall
@@ -284,6 +304,7 @@ function Conflicts({ game }: { game: string }) {
 
 function Updates() {
   const run = useRun();
+  const notify = useUi((s) => s.notify);
   const checking = useBusy("Check updates");
   const installing = useBusy("Install updates");
   const [report, setReport] = useState<UpdateReport | null>(null);
@@ -301,7 +322,12 @@ function Updates() {
             busy={installing}
             icon={<DownloadSimpleIcon aria-hidden size={15} />}
             disabled={!report?.updates.length}
-            onClick={async () => setReport((await run("Install updates", () => ipc.updatesInstall())) ?? null)}
+            onClick={async () => {
+              const r = await run("Install updates", () => ipc.updatesInstall());
+              if (!r) return;
+              setReport(r);
+              notify(r.installed ? "success" : "info", updatesInstalledText(r));
+            }}
           >
             Install updates
           </Button>
@@ -340,6 +366,7 @@ function Updates() {
 function Profiles({ game }: { game: string }) {
   const q = useQuery({ queryKey: ["profiles", game], queryFn: () => ipc.profilesList(game) });
   const run = useRun();
+  const notify = useUi((s) => s.notify);
   const saving = useBusy("Save profile");
   const [name, setName] = useState("");
   // Deleting is not confirmed by the backend: press twice.
@@ -351,9 +378,13 @@ function Profiles({ game }: { game: string }) {
         onSubmit={async (e) => {
           e.preventDefault();
           if (!name.trim()) return;
-          const r = await run("Save profile", () => ipc.profileSave(name.trim()), { key: "Save profile" });
-          // undefined = failed (error notice shown): keep the name to retry.
-          if (r !== undefined) setName("");
+          const n = name.trim();
+          const r = await run("Save profile", () => ipc.profileSave(n), { key: "Save profile" });
+          // undefined = failed (error notice shown), null = overwrite declined: keep the name either way.
+          if (r === undefined) return;
+          if (r === null) return notify("info", `Profile ${n} was not overwritten.`);
+          notify("success", `Saved profile ${n} (${r} ${r === 1 ? "mod" : "mods"})`);
+          setName("");
         }}
       >
         <TextField label="Save the current mod set as" value={name} onChange={(e) => setName(e.target.value)} className="min-w-0 flex-[1_1_18rem]" />
@@ -375,7 +406,14 @@ function Profiles({ game }: { game: string }) {
                   {p.enabled}/{p.mods} enabled · saved {when(p.saved_at)}
                 </span>
               </span>
-              <Button size="sm" tone="primary" onClick={() => run("Load profile", () => ipc.profileLoad(p.name), { key: "Load profile" })}>
+              <Button
+                size="sm"
+                tone="primary"
+                onClick={async () => {
+                  const r = await run("Load profile", () => ipc.profileLoad(p.name), { key: "Load profile" });
+                  if (r) notify("success", profileLoadedText(p.name, r));
+                }}
+              >
                 Load
               </Button>
               <Button

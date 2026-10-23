@@ -43,7 +43,7 @@ import { Requirements } from "../views/Requirements";
 import { Settings } from "../views/Settings";
 import { jobLabel, jobOutcome } from "./jobs";
 import { useAccount, useActiveGame } from "./queries";
-import { useBusy, useDeploy } from "./run";
+import { useBusy, useDeploy, useDeployDue } from "./run";
 import { VIEWS, useUi, type JobEntry, type NoticeTone, type ViewId } from "./store";
 
 const VIEW: Record<ViewId, () => JSX.Element> = {
@@ -77,7 +77,6 @@ const ISLAND_LINGER = 5000;
 
 export function App() {
   const view = useUi((s) => s.view);
-  const modal = useUi((s) => s.prompts.length > 0 || s.osk !== null);
 
   useEffect(() => {
     const stopKeys = installKeyboardNav();
@@ -94,13 +93,14 @@ export function App() {
     };
   }, []);
 
-  const noticeCount = useUi((s) => s.notices.length);
+  const noticeCount = useVisibleNotices().length;
   const island = useIslandJob();
   const View = VIEW[view];
   const stack = noticeCount + (island ? 1 : 0);
   return (
     <>
-      <div inert={modal} className="flex h-full">
+      {/* Dialogs render in a portal on <body> and make everything else inert while open. */}
+      <div className="flex h-full">
         <Sidebar />
         <main className={cx("min-h-0 min-w-0 flex-1 overflow-y-auto", STACK_ROOM[stack] ?? STACK_ROOM[4])}>
           {/* key: each view enters with the short legacy fade/rise. */}
@@ -163,8 +163,9 @@ function Sidebar() {
  */
 function GameHeader() {
   const { game, data: games, isLoading } = useActiveGame();
-  const needsDeploy = useUi((s) => s.needsDeploy);
-  const progress = useUi((s) => s.deployProgress);
+  const needsDeploy = useDeployDue(game?.domain ?? null);
+  // Progress of a deploy of another game is not shown under this one (the job island shows it).
+  const progress = useUi((s) => (s.deployGame && s.deployGame !== game?.domain ? null : s.deployProgress));
   const setAddGame = useUi((s) => s.setAddGame);
   const deploy = useDeploy();
   const busy = useBusy("Deploy");
@@ -194,7 +195,7 @@ function GameHeader() {
             className="mt-1 w-full"
             busy={busy}
             icon={<RocketLaunchIcon aria-hidden size={16} weight="duotone" />}
-            onClick={deploy}
+            onClick={() => void deploy()}
           >
             Deploy changes
           </Button>
@@ -303,9 +304,16 @@ const NOTICE_TONE: Record<NoticeTone, { border: string; icon: ReactNode }> = {
   error: { border: "border-rose-400/40", icon: <XCircleIcon aria-hidden size={18} weight="duotone" className="text-rose-300" /> },
 };
 
+/** Notices to show: a "Deploy now" notice belongs to its game and is hidden while another game is active. */
+function useVisibleNotices() {
+  const all = useUi((s) => s.notices);
+  const { game } = useActiveGame();
+  return all.filter((n) => !n.game || n.game === game?.domain);
+}
+
 /** Fixed bottom stack centred under the content (legacy JobIsland position): notices, then the job island. */
 function BottomStack({ island }: { island: JobEntry | null }) {
-  const notices = useUi((s) => s.notices);
+  const notices = useVisibleNotices();
   const dismiss = useUi((s) => s.dismiss);
   const deploy = useDeploy();
   if (!notices.length && !island) return null;
@@ -330,7 +338,7 @@ function BottomStack({ island }: { island: JobEntry | null }) {
                   size="sm"
                   onClick={() => {
                     dismiss(n.id);
-                    void deploy();
+                    void deploy(n.game);
                   }}
                 >
                   Deploy now

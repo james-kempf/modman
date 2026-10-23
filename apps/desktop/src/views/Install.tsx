@@ -49,6 +49,19 @@ export function installedText(r: InstallResult): string {
   return "Nothing installed";
 }
 
+/** The non-empty lines/words of pasted text (nxm links never contain whitespace). */
+export function splitLinks(text: string): string[] {
+  return text.split(/\s+/).filter(Boolean);
+}
+
+/** Insert `text` over the input's selection; returns the new value. */
+function insertAtSelection(input: HTMLInputElement, text: string): string {
+  const v = input.value;
+  const a = input.selectionStart ?? v.length;
+  const b = input.selectionEnd ?? v.length;
+  return v.slice(0, a) + text + v.slice(b);
+}
+
 export function Install() {
   const { game, isLoading } = useActiveGame();
   const setAddGame = useUi((s) => s.setAddGame);
@@ -117,6 +130,19 @@ function InstallCard() {
           label="Mod id, Nexus URL, collection URL or archive path"
           value={target}
           onChange={(e) => setTarget(e.target.value)}
+          onPaste={(e) => {
+            // A text input drops line breaks and glues the lines together ("266\n267" -> "266267"):
+            // keep the first line and say so.
+            const lines = e.clipboardData
+              .getData("text")
+              .split(/\r?\n/)
+              .map((l) => l.trim())
+              .filter(Boolean);
+            if (lines.length < 2) return;
+            e.preventDefault();
+            setTarget(insertAtSelection(e.currentTarget, lines[0]));
+            notify("warn", `Pasted the first of ${lines.length} lines; install one mod at a time.`);
+          }}
           data-osk-submit="Install"
           placeholder="e.g. 266 or https://www.nexusmods.com/skyrimspecialedition/mods/266"
         />
@@ -145,14 +171,23 @@ function NxmCard() {
   const notify = useUi((s) => s.notify);
   const busy = useBusy("Queue link");
   const [url, setUrl] = useState("");
-  const submit = async (link: string) => {
-    if (!link.trim()) return;
-    const r = await run("Queue link", () => ipc.nxmSubmit(link.trim()));
-    if (r) {
-      notify("success", `Queued ${r.kind} link ${r.link}`);
-      setUrl("");
+  // Several links (a multi-line paste) are queued one by one; the field shows them space-separated,
+  // exactly what is sent, and keeps the ones that failed.
+  const submit = async (text: string) => {
+    const links = splitLinks(text);
+    if (!links.length) return;
+    const failed: string[] = [];
+    const queued: string[] = [];
+    for (const link of links) {
+      const r = await run("Queue link", () => ipc.nxmSubmit(link));
+      if (r) queued.push(`${r.kind} link ${r.link}`);
+      else failed.push(link);
     }
+    if (queued.length === 1) notify("success", `Queued ${queued[0]}`);
+    else if (queued.length > 1) notify("success", `Queued ${queued.length} links`);
+    setUrl(failed.join(" "));
   };
+  const setLinks = (text: string) => setUrl(splitLinks(text).join(" "));
   return (
     <Card title="Mod Manager Download link">
       <p className="mb-5 text-[14px] leading-relaxed text-zinc-400">
@@ -165,14 +200,25 @@ function NxmCard() {
           void submit(url);
         }}
       >
-        <TextField label="nxm link" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="nxm://…" />
+        <TextField
+          label="nxm link"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          onPaste={(e) => {
+            const text = e.clipboardData.getData("text");
+            if (!/\s/.test(text.trim())) return;
+            e.preventDefault();
+            setUrl(insertAtSelection(e.currentTarget, splitLinks(text).join(" ")));
+          }}
+          placeholder="nxm://…"
+        />
         <div className="flex flex-wrap gap-3">
           <Button
             icon={<ClipboardTextIcon aria-hidden size={16} />}
             onClick={async () => {
               const t = await readClipboard();
               if (t === null) notify("warn", "Clipboard not readable here; paste into the field with Ctrl+V.");
-              else setUrl(t.trim());
+              else setLinks(t);
             }}
           >
             Paste

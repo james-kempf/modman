@@ -54,6 +54,8 @@ export interface Notice {
   text: string;
   /** Offer a "Deploy now" button. */
   deploy?: boolean;
+  /** The game (domain) a "Deploy now" notice is about: shown and acted on only for it. */
+  game?: string;
 }
 
 /** The input the on-screen keyboard types into. */
@@ -63,6 +65,8 @@ export interface OskTarget {
 }
 
 const MAX_ACTIVITY = 500;
+/** Jobs kept for Activity; past this the oldest finished ones are dropped. */
+export const MAX_JOBS = 200;
 const MAX_NOTICES = 3;
 /** Auto-dismiss after (ms); null = stays until dismissed. "Deploy now" notices always stay. */
 const NOTICE_TTL: Record<NoticeTone, number | null> = { info: 6000, success: 6000, warn: 10000, error: null };
@@ -87,6 +91,9 @@ export interface UiState {
 
   deployProgress: DeployProgressEvent | null;
   onDeployProgress(e: DeployProgressEvent): void;
+  /** The game a deploy started from the UI runs for (null: none, or started elsewhere). */
+  deployGame: string | null;
+  setDeployGame(game: string | null): void;
 
   nxm: NxmEvent[];
   onNxm(e: NxmEvent): void;
@@ -96,12 +103,24 @@ export interface UiState {
   setStartupCheck(c: StartupCheck | null): void;
 
   notices: Notice[];
-  notify(tone: NoticeTone, text: string, deploy?: boolean): void;
+  /** `game`: a "Deploy now" notice for that game (domain). */
+  notify(tone: NoticeTone, text: string, game?: string): void;
   dismiss(id: number): void;
 
-  /** A mod-set change left the game out of sync with staging. */
-  needsDeploy: boolean;
-  setNeedsDeploy(v: boolean): void;
+  /**
+   * Per game (domain): a mod-set change left it out of sync with staging,
+   * with the stamp of that change. Absent = nothing pending from this session
+   * (the backend's changed_since_deploy still counts, see useDeployDue).
+   */
+  deployDue: Record<string, number>;
+  markDeployDue(game: string): void;
+  /**
+   * In sync again (a deploy of `game` succeeded). With `since` (a stamp taken
+   * when the deploy started), a change marked after it stays pending.
+   */
+  clearDeployDue(game: string, since?: number): void;
+  /** A fresh ordering stamp (compare with deployDue values). */
+  stamp(): number;
 
   /** Running command labels (button busy state). */
   busy: Record<string, number>;
@@ -125,10 +144,11 @@ const initial = {
   prompts: [],
   downloads: {},
   deployProgress: null,
+  deployGame: null,
   nxm: [],
   startupCheck: undefined,
   notices: [],
-  needsDeploy: false,
+  deployDue: {},
   busy: {},
   osk: null,
   addGame: false,
@@ -157,8 +177,18 @@ export const useUi = create<UiState>()((set, get) => ({
         startedAt: prev?.startedAt ?? now,
         finishedAt: e.state === "started" ? null : now,
       };
-      const patch: Partial<UiState> = { jobs: { ...s.jobs, [e.id]: entry } };
-      if (e.state !== "started" && s.deployProgress?.job === e.id) patch.deployProgress = null;
+      const patch: Partial<UiState> = { jobs: capJobs({ ...s.jobs, [e.id]: entry }) };
+      if (e.state !== "started") {
+        if (s.deployProgress?.job === e.id) patch.deployProgress = null;
+        // A question from a job that ended can no longer be answered: withdraw it.
+        const orphans = s.prompts.filter((p) => p.job === e.id);
+        if (orphans.length) {
+          patch.prompts = s.prompts.filter((p) => p.job !== e.id);
+          queueMicrotask(() =>
+            get().notify("info", `${orphans.length === 1 ? "A question" : "Questions"} from job #${e.id} closed: the job ended.`),
+          );
+        }
+      }
       return patch;
     }),
 
@@ -191,16 +221,19 @@ export const useUi = create<UiState>()((set, get) => ({
     }),
 
   onDeployProgress: (e) => set({ deployProgress: e }),
+  setDeployGame: (deployGame) => set({ deployGame }),
 
   onNxm: (e) => set((s) => ({ nxm: [e, ...s.nxm].slice(0, 50) })),
 
   setStartupCheck: (c) => set({ startupCheck: c }),
 
-  notify: (tone, text, deploy) => {
+  notify: (tone, text, game) => {
     const id = ++seq;
+    const deploy = game !== undefined;
+    const notice: Notice = deploy ? { id, tone, text, deploy, game } : { id, tone, text };
     set((s) => ({
       // The same notice again replaces the old one (moved to the end, fresh timeout) instead of stacking.
-      notices: [...s.notices.filter((n) => !(n.tone === tone && n.text === text)), { id, tone, text, deploy }].slice(
+      notices: [...s.notices.filter((n) => !(n.tone === tone && n.text === text && n.game === game)), notice].slice(
         -MAX_NOTICES,
       ),
     }));
@@ -209,8 +242,18 @@ export const useUi = create<UiState>()((set, get) => ({
   },
   dismiss: (id) => set((s) => ({ notices: s.notices.filter((n) => n.id !== id) })),
 
-  // In sync again: a "Deploy now" notice would offer a deploy that is no longer due.
-  setNeedsDeploy: (v) => set((s) => ({ needsDeploy: v, notices: v ? s.notices : s.notices.filter((n) => !n.deploy) })),
+  markDeployDue: (game) => set((s) => ({ deployDue: { ...s.deployDue, [game]: ++seq } })),
+  clearDeployDue: (game, since) =>
+    set((s) => {
+      const at = s.deployDue[game];
+      // Changed again while the deploy ran: still due, keep its notice.
+      if (at !== undefined && since !== undefined && at > since) return s;
+      const deployDue = { ...s.deployDue };
+      delete deployDue[game];
+      // A "Deploy now" notice for this game would offer a deploy that is no longer due.
+      return { deployDue, notices: s.notices.filter((n) => !(n.deploy && n.game === game)) };
+    }),
+  stamp: () => ++seq,
 
   setBusy: (label, on) =>
     set((s) => {
@@ -226,6 +269,19 @@ export const useUi = create<UiState>()((set, get) => ({
 
   setAddGame: (open) => set({ addGame: open }),
 }));
+
+/** Drop the oldest finished jobs past MAX_JOBS (running ones always stay). */
+function capJobs(jobs: Record<number, JobEntry>): Record<number, JobEntry> {
+  const ids = Object.keys(jobs).map(Number);
+  if (ids.length <= MAX_JOBS) return jobs;
+  const drop = ids
+    .filter((id) => jobs[id].state !== "started")
+    .sort((a, b) => a - b)
+    .slice(0, ids.length - MAX_JOBS);
+  const out = { ...jobs };
+  for (const id of drop) delete out[id];
+  return out;
+}
 
 /** Test helper: back to the initial state. */
 export function resetUi(): void {

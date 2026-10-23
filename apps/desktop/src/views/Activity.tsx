@@ -46,11 +46,16 @@ function Jobs() {
       {!list.length ? (
         <Empty>No jobs yet in this session.</Empty>
       ) : (
-        <ul className="grid content-start gap-1" aria-label="Jobs">
+        // One tab stop for the whole list (a scroll region), not one per row; at most MAX_JOBS rows.
+        <ul
+          className="grid max-h-[min(28rem,60vh)] content-start gap-1 overflow-y-auto overscroll-contain"
+          aria-label="Jobs"
+          tabIndex={0}
+        >
           {list.map((j) => {
             const o = jobOutcome(j);
             return (
-              <li key={j.id} tabIndex={0} className="flex flex-wrap items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-white/[0.03]">
+              <li key={j.id} className="flex flex-wrap items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-white/[0.03]">
                 <StatusDot tone={o === "running" ? "accent" : o === "failed" ? "rose" : "zinc"} live={o === "running"} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[14px] text-zinc-200">{jobLabel(j.kind)}</span>

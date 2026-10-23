@@ -87,7 +87,7 @@ describe("structured results", () => {
     await user.click(await screen.findByRole("button", { name: "Deploy now" }));
     await waitFor(() => expect(t.callsOf("deploy")).toHaveLength(1));
     await screen.findByText(/Deployed 42 files/);
-    expect(useUi.getState().needsDeploy).toBe(false);
+    expect(useUi.getState().deployDue).toEqual({});
   });
 
   it("command errors become a notice with the CmdError message", async () => {
