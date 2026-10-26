@@ -75,8 +75,8 @@ describe("Overview", () => {
     await waitFor(() => expect(mods).toHaveTextContent("3installed2enabled"));
     expect(mods).toHaveTextContent("Changes since the last deploy");
     const reqs = screen.getByRole("region", { name: "Requirements" });
-    await waitFor(() => expect(reqs).toHaveTextContent("2missing2ok"));
-    expect(reqs).toHaveTextContent("1 external tool to check by hand");
+    await waitFor(() => expect(reqs).toHaveTextContent("3missing2ok"));
+    expect(reqs).toHaveTextContent("Includes 1 external tool to check by hand");
     const plugins = screen.getByRole("region", { name: "Plugins" });
     await waitFor(() => expect(plugins).toHaveTextContent("2active3in plugins.txt"));
     await userEvent.setup().click(within(reqs).getByRole("button", { name: "Open Requirements" }));

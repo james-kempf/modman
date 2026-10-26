@@ -330,11 +330,18 @@ function SearchCard() {
   );
 }
 
+const DOWNLOADS_SHOWN = 10;
+
 function DownloadsCard() {
+  const [cap, setCap] = useState(DOWNLOADS_SHOWN);
   const q = useQuery({ queryKey: ["downloads"], queryFn: ipc.downloadsList });
   const live = useUi((s) => s.downloads);
   const rows = q.data ?? [];
-  const liveOnly = Object.values(live).filter((d) => d.last.type !== "finished" && !rows.some((r) => r.file_name === d.name));
+  const liveAll = Object.values(live).filter((d) => d.last.type !== "finished" && !rows.some((r) => r.file_name === d.name));
+  const total = liveAll.length + rows.length;
+  // Running downloads come first, so the cap trims the queue's tail.
+  const liveOnly = liveAll.slice(0, cap);
+  const shown = rows.slice(0, Math.max(0, cap - liveOnly.length));
   return (
     <Card title="Downloads">
       {q.isError && (
@@ -359,10 +366,10 @@ function DownloadsCard() {
               </span>
             </li>
           ))}
-          {rows.map((r) => {
+          {shown.map((r) => {
             const l = r.file_name ? live[r.file_name] : undefined;
             const done = l?.done ?? r.bytes_done;
-            const total = l?.total ?? r.size;
+            const size = l?.total ?? r.size;
             return (
               <li key={r.id} tabIndex={0} className="grid gap-2 rounded-lg py-3">
                 <span className="flex flex-wrap items-center gap-2">
@@ -371,15 +378,20 @@ function DownloadsCard() {
                   </span>
                   <Badge tone={r.status === "failed" ? "rose" : r.status === "done" ? "accent" : "zinc"}>{r.status}</Badge>
                 </span>
-                {r.status === "downloading" && <progress aria-label="progress" max={total ?? 1} value={total ? done : undefined} />}
+                {r.status === "downloading" && <progress aria-label="progress" max={size ?? 1} value={size ? done : undefined} />}
                 <span className="font-mono text-[11.5px] text-dim">
-                  {bytes(done)} / {bytes(total)} · {r.source}
+                  {bytes(done)} / {bytes(size)} · {r.source}
                   {r.error && ` · ${r.error}`}
                 </span>
               </li>
             );
           })}
         </ul>
+      )}
+      {total > cap && (
+        <Button size="sm" tone="ghost" className="mt-3" onClick={() => setCap(cap + DOWNLOADS_SHOWN)}>
+          Show more ({Math.min(DOWNLOADS_SHOWN, total - cap)})
+        </Button>
       )}
     </Card>
   );

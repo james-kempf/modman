@@ -181,6 +181,9 @@ export const modsList = (game?: Game) => call<ModsView>("mods_list", { game: gam
 /** reference: #position, uid, name, Nexus id or a unique name part. */
 export const modDetail = (reference: string, game?: Game) =>
   call<ModDetail>("mod_detail", { game: game ?? null, reference });
+/** Opens the mod's Nexus page in the browser; returns the URL. */
+export const modOpenPage = (reference: string, game?: Game) =>
+  call<string>("mod_open_page", { game: game ?? null, reference });
 /** Job (auto-deploy may run). ids = ModRecord.id. */
 export const modsSetEnabled = (ids: number[], enabled: boolean, game?: Game) =>
   call<AfterChange>("mods_set_enabled", { game: game ?? null, ids, enabled });

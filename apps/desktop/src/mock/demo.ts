@@ -253,7 +253,7 @@ export function createDemoBackend(): FakeTransport {
     open_folder: (a: Args) => {
       const g = games.find((x) => x.domain === a!.game);
       if (!g) throw { message: `no game '${String(a!.game)}'` };
-      const p = a!.which === "prefix" ? g.prefix : a!.which === "game" ? g.folder : undefined;
+      const p = a!.which === "prefix" ? g.prefix : a!.which === "game" ? g.folder : a!.which === "mods" ? `~/.local/share/modman/${g.domain}/staging` : undefined;
       if (p === undefined) throw { message: `unknown folder '${String(a!.which)}'` };
       if (!p) throw { message: `${g.domain}: no ${a!.which === "prefix" ? "Proton prefix" : "game folder"} is set` };
       return p;

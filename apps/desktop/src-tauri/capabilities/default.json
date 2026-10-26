@@ -29,6 +29,7 @@
     "allow-open-folder",
     "allow-mods-list",
     "allow-mod-detail",
+    "allow-mod-open-page",
     "allow-mods-set-enabled",
     "allow-mod-move",
     "allow-mods-uninstall",

@@ -356,7 +356,21 @@ function ModDetailDialog({ mod, game, onClose }: { mod: ModView; game: string; o
         <Fact k="Files" v={`${mod.file_count} · ${bytes(mod.size)}`} />
         <Fact k="Conflicts" v={d ? `wins ${d.wins} · loses ${d.loses}` : "…"} />
       </dl>
-      {d?.url && <p className="mt-5 font-mono text-[12.5px] break-all text-zinc-400 select-all">{d.url}</p>}
+      {d?.url && (
+        <p className="mt-5 font-mono text-[12.5px] break-all">
+          <a
+            href={d.url}
+            className="text-accent-300 underline underline-offset-4 hover:text-accent-200"
+            onClick={(e) => {
+              // The webview must not navigate: the backend opens the page in the browser.
+              e.preventDefault();
+              void run("Open Nexus page", () => ipc.modOpenPage(mod.uid, game), { key: "Open Nexus page" });
+            }}
+          >
+            {d.url}
+          </a>
+        </p>
+      )}
       {d && d.fomod.length > 0 && (
         <div className="mt-5">
           <h3 className="eyebrow mb-2">Installer choices</h3>

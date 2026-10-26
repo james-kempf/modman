@@ -5,9 +5,9 @@
 // makes that game active (game_use) and opens its Overview. Tiles are plain
 // buttons in a grid, so spatial navigation moves between them in 2D.
 
-import { CheckIcon, FlaskIcon, PlusIcon, RocketLaunchIcon } from "@phosphor-icons/react";
+import { CheckIcon, FlaskIcon, MagnifyingGlassIcon, PlusIcon, RocketLaunchIcon } from "@phosphor-icons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useId } from "react";
+import { useId, useState } from "react";
 import { errMsg } from "../app/bridge";
 import { useGames } from "../app/queries";
 import { useDeployDue, useRun } from "../app/run";
@@ -25,19 +25,39 @@ const TILE =
 
 export function Games() {
   const games = useGames();
-  const list = games.data ?? [];
+  const all = games.data ?? [];
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const list = q ? all.filter((g) => g.name.toLowerCase().includes(q) || g.domain.toLowerCase().includes(q)) : all;
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-8">
-      <ViewHeader title="Games" description="Pick a game to manage its mods. Its Overview opens with it as the active game." />
+      <ViewHeader title="Games">
+        {all.length > 0 && (
+          <div role="search" aria-label="Filter games" className="relative">
+            <MagnifyingGlassIcon aria-hidden size={18} className="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 text-zinc-400" />
+            <input
+              type="search"
+              name="game-search"
+              aria-label="Search games"
+              autoComplete="off"
+              spellCheck={false}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="input w-56 pl-10"
+            />
+          </div>
+        )}
+      </ViewHeader>
       {games.error ? (
         <ErrorNote>Could not load games: {errMsg(games.error)}</ErrorNote>
       ) : games.isPending ? (
         <p className="text-[14px] text-zinc-400">Loading games…</p>
       ) : (
         <>
-          {!list.length && (
+          {!all.length && (
             <p className="text-[15px] text-zinc-400">No games yet. Add one from your Steam library or by its Nexus Mods domain.</p>
           )}
+          {all.length > 0 && !list.length && <p className="text-[15px] text-zinc-400">No games match “{query.trim()}”.</p>}
           {/* auto-fill: 2 columns at 900px wide up to 6 at 1920px; tiles stay large gamepad targets. */}
           <ul aria-label="Game library" className="grid grid-cols-[repeat(auto-fill,minmax(176px,1fr))] gap-5">
             {list.map((g) => (

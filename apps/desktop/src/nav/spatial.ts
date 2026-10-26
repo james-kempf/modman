@@ -174,6 +174,8 @@ export function recoverFocus(doc: Document = document): void {
 export function installFocusRecovery(doc: Document = document): () => void {
   const onOut = (e: FocusEvent) => {
     if (e.relatedTarget || !(e.target instanceof HTMLElement) || e.target.closest("[data-nav-scope]")) return;
+    // Clicking away from a text field is meant to leave it: do not pull focus back to a neighbour.
+    if (doc.documentElement.dataset.input === "pointer" && e.target.matches("input, textarea")) return;
     lastLost = box(e.target);
     requestAnimationFrame(() => {
       if (doc.activeElement === doc.body && doc.hasFocus()) recoverFocus(doc);

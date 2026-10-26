@@ -5,6 +5,7 @@
 //! Argument names are snake_case on the JS side too. Contract mirrored in
 //! `src/ipc/commands.ts`.
 
+use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -314,6 +315,22 @@ pub async fn mod_detail(
     query(app, &state, game, move |cx| {
         let g = cx.need_game()?;
         appmods::mod_detail(cx, &g, &reference)
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn mod_open_page(
+    app: AppHandle,
+    state: St<'_>,
+    game: Option<String>,
+    reference: String,
+) -> CmdResult<String> {
+    query(app, &state, game, move |cx| {
+        let g = cx.need_game()?;
+        appmods::open_mod_page(cx, &g, &reference, |url| {
+            appgames::launch_opener(OsStr::new(url))
+        })
     })
     .await
 }

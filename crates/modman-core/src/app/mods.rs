@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use super::deploy::{after_change, AfterChange};
 use super::install::AfterChangeView;
-use super::{staging_lock, Cx, Msg, R};
+use super::{fail, staging_lock, Cx, Msg, R};
 use crate::deploy;
 use crate::fomod::FomodChoices;
 use crate::games::GameConfig;
@@ -229,6 +229,36 @@ pub struct ModDetail {
     pub url: Option<String>,
 }
 
+/// The mod's Nexus Mods page (its files tab, on the mod's file when known);
+/// `None` for a mod that did not come from Nexus.
+fn nexus_page_url(domain: &str, m: &ModRecord) -> Option<String> {
+    m.nexus_mod_id.map(|mi| {
+        format!(
+            "https://www.nexusmods.com/{domain}/mods/{mi}?tab=files{}",
+            m.nexus_file_id
+                .map_or(String::new(), |f| format!("&file_id={f}"))
+        )
+    })
+}
+
+/// Opens the mod's Nexus page with `open`, which gets the URL built here
+/// (never a URL from the webview). Returns the URL; a mod with no Nexus id
+/// has no page to open.
+pub fn open_mod_page(
+    cx: &Cx<'_>,
+    game: &GameConfig,
+    reference: &str,
+    open: impl FnOnce(&str) -> R<()>,
+) -> R<String> {
+    let m = mods::resolve(cx.store.conn(), &game.domain, reference)?;
+    let url = match nexus_page_url(&game.domain, &m) {
+        Some(url) => url,
+        None => fail!("{} has no Nexus Mods page.", m.name),
+    };
+    open(&url)?;
+    Ok(url)
+}
+
 pub fn mod_detail(cx: &Cx<'_>, game: &GameConfig, reference: &str) -> R<ModDetail> {
     let m = mods::resolve(cx.store.conn(), &game.domain, reference)?;
     let fomod = mods::fomod_choices(cx.store.conn(), m.id)?
@@ -250,14 +280,7 @@ pub fn mod_detail(cx: &Cx<'_>, game: &GameConfig, reference: &str) -> R<ModDetai
             }
         }
     }
-    let url = m.nexus_mod_id.map(|mi| {
-        format!(
-            "https://www.nexusmods.com/{}/mods/{mi}?tab=files{}",
-            game.domain,
-            m.nexus_file_id
-                .map_or(String::new(), |f| format!("&file_id={f}"))
-        )
-    });
+    let url = nexus_page_url(&game.domain, &m);
     Ok(ModDetail {
         collections: mods::collections_of(cx.store.conn(), m.id)?,
         record: m,

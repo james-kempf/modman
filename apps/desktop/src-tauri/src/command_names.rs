@@ -26,6 +26,7 @@ pub const COMMANDS: &[&str] = &[
     "open_folder",
     "mods_list",
     "mod_detail",
+    "mod_open_page",
     "mods_set_enabled",
     "mod_move",
     "mods_uninstall",

@@ -63,7 +63,7 @@ export interface Detected {
 /** game_art: portrait (library tiles) or wide hero (Overview background). */
 export type ArtKind = "library_600x900" | "library_hero";
 /** open_folder: the game's install folder or its Proton prefix. */
-export type GameFolder = "game" | "prefix";
+export type GameFolder = "game" | "prefix" | "mods";
 
 /** game_launch result. */
 export interface Launched {

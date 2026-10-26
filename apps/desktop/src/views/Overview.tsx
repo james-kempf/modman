@@ -35,7 +35,16 @@ import {
   when,
 } from "../components/ui";
 import * as ipc from "../ipc/commands";
-import type { DeployStatus, GameFolder, GameView, ModView, PurgeReport, ReqRow, Skip, VerifyReport } from "../ipc/types";
+import type {
+  DeployStatus,
+  GameFolder,
+  GameView,
+  ModView,
+  PurgeReport,
+  ReqRow,
+  Skip,
+  VerifyReport,
+} from "../ipc/types";
 import { NoGame } from "../components/NoGame";
 
 /** How many mods "Recently installed" lists. */
@@ -82,10 +91,16 @@ function GameCards({ game }: { game: GameView }) {
         className={cx(
           "stagger grid grid-cols-[minmax(0,1fr)] gap-6 md:grid-cols-[repeat(2,minmax(0,1fr))]",
           // Three cards in a row from xl; with Plugins, two rows of two until there is room for four.
-          bethesda ? "2xl:grid-cols-[repeat(4,minmax(0,1fr))]" : "xl:grid-cols-[repeat(3,minmax(0,1fr))]",
+          bethesda
+            ? "2xl:grid-cols-[repeat(4,minmax(0,1fr))]"
+            : "xl:grid-cols-[repeat(3,minmax(0,1fr))]",
         )}
       >
-        <ModsCard mods={mods.data?.mods} outOfSync={outOfSync} />
+        <ModsCard
+          mods={mods.data?.mods}
+          deploy={game.deploy}
+          outOfSync={outOfSync}
+        />
         <CollectionsCard game={game.domain} />
         <RequirementsCard game={game.domain} />
         {bethesda && <PluginsCard game={game.domain} />}
@@ -117,23 +132,32 @@ function PlayCard({ game, outOfSync }: { game: GameView; outOfSync: boolean }) {
   return (
     <div className="panel flex min-w-0 flex-col justify-between gap-8 p-7 md:p-9">
       <div>
-        <div data-testid="game-tags" className="flex flex-wrap items-center gap-2.5">
+        <div
+          data-testid="game-tags"
+          className="flex flex-wrap items-center gap-2.5"
+        >
           {game.appid !== null && <Badge>App {game.appid}</Badge>}
           <Badge>{game.profile}</Badge>
+          {game.folder && <Badge>{game.prefix ? "Proton" : "Native"}</Badge>}
           <SupportBadge support={game.support} />
           <span className="flex items-center gap-2.5">
             <StatusDot tone={status.tone} live={d.active} />
             <span className="text-[13.5px] text-zinc-300">{status.text}</span>
           </span>
         </div>
-        <h2 className="mt-6 text-4xl leading-none font-medium tracking-tighter wrap-anywhere text-zinc-50 md:text-5xl">{game.name}</h2>
+        <h2 className="mt-6 text-4xl leading-none font-medium tracking-tighter wrap-anywhere text-zinc-50 md:text-5xl">
+          {game.name}
+        </h2>
         <div className="mt-4 flex flex-wrap gap-2">
           {game.folder ? (
             <FolderButton game={game} which="game" label="Game folder" />
           ) : (
             <p className="font-mono text-[12.5px] text-dim">no folder set</p>
           )}
-          {game.prefix && <FolderButton game={game} which="prefix" label="Proton folder" />}
+          {game.prefix && (
+            <FolderButton game={game} which="prefix" label="Proton folder" />
+          )}
+          <FolderButton game={game} which="mods" label="Mods folder" />
         </div>
       </div>
       <div className="grid gap-3">
@@ -163,7 +187,15 @@ function PlayCard({ game, outOfSync }: { game: GameView; outOfSync: boolean }) {
 }
 
 /** Opens a folder of the game in the file manager; the backend resolves the path from the game's settings. */
-function FolderButton({ game, which, label }: { game: GameView; which: GameFolder; label: string }) {
+function FolderButton({
+  game,
+  which,
+  label,
+}: {
+  game: GameView;
+  which: GameFolder;
+  label: string;
+}) {
   const run = useRun();
   const key = `Open ${label}`;
   const busy = useBusy(key);
@@ -172,9 +204,17 @@ function FolderButton({ game, which, label }: { game: GameView; which: GameFolde
       size="sm"
       tone="ghost"
       busy={busy}
-      title={which === "game" ? (game.folder ?? undefined) : (game.prefix ?? undefined)}
+      title={
+        which === "game"
+          ? (game.folder ?? undefined)
+          : which === "prefix"
+            ? (game.prefix ?? undefined)
+            : undefined
+      }
       icon={<FolderOpenIcon aria-hidden size={16} />}
-      onClick={() => void run(key, () => ipc.openFolder(game.domain, which), { key })}
+      onClick={() =>
+        void run(key, () => ipc.openFolder(game.domain, which), { key })
+      }
     >
       {label}
     </Button>
@@ -189,14 +229,24 @@ function RemoveGame({ game }: { game: GameView }) {
       tone="ghost"
       size="lg"
       icon={<TrashIcon aria-hidden size={17} />}
-      onClick={() => run("Remove game", () => ipc.gameRemove(game.domain, false), { key: "Remove game" })}
+      onClick={() =>
+        run("Remove game", () => ipc.gameRemove(game.domain, false), {
+          key: "Remove game",
+        })
+      }
     >
       Remove game
     </Button>
   );
 }
 
-function DeploymentCard({ game, outOfSync }: { game: GameView; outOfSync: boolean }) {
+function DeploymentCard({
+  game,
+  outOfSync,
+}: {
+  game: GameView;
+  outOfSync: boolean;
+}) {
   const run = useRun();
   const deploy = useDeploy();
   const deploying = useBusy("Deploy");
@@ -215,11 +265,14 @@ function DeploymentCard({ game, outOfSync }: { game: GameView; outOfSync: boolea
               : "Link every enabled mod into the game folder. Original files are backed up first."}
           </p>
         )}
-        <DeployTracker d={d} outOfSync={outOfSync} />
         <dl className="mt-6 grid grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] gap-4">
           <Stat label="Files" value={d.files.toLocaleString()} />
           <Stat label="Method" value={game.method ?? "auto"} />
-          <Stat label="Last deploy" value={ago(d.last_deployed_at)} title={when(d.last_deployed_at)} />
+          <Stat
+            label="Last deploy"
+            value={ago(d.last_deployed_at)}
+            title={when(d.last_deployed_at)}
+          />
         </dl>
       </div>
       <div className="grid gap-3">
@@ -237,7 +290,12 @@ function DeploymentCard({ game, outOfSync }: { game: GameView; outOfSync: boolea
           <Button
             busy={verifying}
             icon={<ShieldCheckIcon aria-hidden size={16} />}
-            onClick={async () => setVerified((await run("Verify", () => ipc.verify(), { key: "Verify" })) ?? null)}
+            onClick={async () =>
+              setVerified(
+                (await run("Verify", () => ipc.verify(), { key: "Verify" })) ??
+                  null,
+              )
+            }
           >
             Verify
           </Button>
@@ -249,7 +307,13 @@ function DeploymentCard({ game, outOfSync }: { game: GameView; outOfSync: boolea
             onClick={async () => {
               const r = await run("Purge", () => ipc.purge(), { key: "Purge" });
               // null: declined at the confirmation.
-              if (r) useUi.getState().notify(r.nothing_deployed ? "info" : "success", purgedText(r));
+              if (r)
+                useUi
+                  .getState()
+                  .notify(
+                    r.nothing_deployed ? "info" : "success",
+                    purgedText(r),
+                  );
             }}
           >
             Purge
@@ -266,7 +330,10 @@ function DeploymentCard({ game, outOfSync }: { game: GameView; outOfSync: boolea
  * when in sync (a mod whose every file lost a conflict is still part of
  * the deploy); else the ones with files in the current deployment.
  */
-export function deployTracker(d: DeployStatus, outOfSync: boolean): { deployed: number; enabled: number; pct: number } {
+export function deployTracker(
+  d: DeployStatus,
+  outOfSync: boolean,
+): { deployed: number; enabled: number; pct: number } {
   const enabled = d.enabled_mods ?? 0;
   if (!d.active) return { deployed: 0, enabled, pct: 0 };
   if (!outOfSync) return { deployed: enabled, enabled, pct: 100 };
@@ -276,16 +343,30 @@ export function deployTracker(d: DeployStatus, outOfSync: boolean): { deployed: 
   return { deployed, enabled, pct };
 }
 
-function DeployTracker({ d, outOfSync }: { d: DeployStatus; outOfSync: boolean }) {
+function DeployTracker({
+  d,
+  outOfSync,
+}: {
+  d: DeployStatus;
+  outOfSync: boolean;
+}) {
   const t = deployTracker(d, outOfSync);
   return (
     <div data-testid="deploy-tracker" className="mt-5 grid gap-2">
       <div className="flex items-center gap-3">
-        <progress aria-label="Enabled mods deployed" className="flex-1" max={100} value={t.pct} />
-        <span className="w-12 text-right font-mono text-[13px] text-zinc-200">{t.pct}%</span>
+        <progress
+          aria-label="Enabled mods deployed"
+          className="flex-1"
+          max={100}
+          value={t.pct}
+        />
+        <span className="w-12 text-right font-mono text-[13px] text-zinc-200">
+          {t.pct}%
+        </span>
       </div>
       <p className="font-mono text-[12px] text-zinc-400">
-        {t.deployed} of {t.enabled} enabled {t.enabled === 1 ? "mod" : "mods"} deployed
+        {t.deployed} of {t.enabled} enabled {t.enabled === 1 ? "mod" : "mods"}{" "}
+        deployed
       </p>
     </div>
   );
@@ -293,11 +374,15 @@ function DeployTracker({ d, outOfSync }: { d: DeployStatus; outOfSync: boolean }
 
 export function purgedText(r: PurgeReport): string {
   if (r.nothing_deployed) return "Nothing was deployed; nothing to purge.";
-  const parts = [`Purged: removed ${r.removed} files`, `restored ${r.restored} originals`];
+  const parts = [
+    `Purged: removed ${r.removed} files`,
+    `restored ${r.restored} originals`,
+  ];
   if (r.missing) parts.push(`${r.missing} already missing`);
   if (r.changed) parts.push(`${r.changed} changed in the game folder`);
   if (r.kept) parts.push(`${r.kept} kept`);
-  if (r.plugins?.state === "failed") parts.push(`plugins.txt failed: ${r.plugins.detail}`);
+  if (r.plugins?.state === "failed")
+    parts.push(`plugins.txt failed: ${r.plugins.detail}`);
   return parts.join(", ");
 }
 
@@ -305,7 +390,12 @@ function VerifyResult({ r }: { r: VerifyReport }) {
   const bad = r.issues.length > 0;
   return (
     <div role="status" className="grid gap-2 pt-1">
-      <p className={cx("flex items-center gap-2 text-[14px]", bad ? "text-amber-300" : "text-accent-300")}>
+      <p
+        className={cx(
+          "flex items-center gap-2 text-[14px]",
+          bad ? "text-amber-300" : "text-accent-300",
+        )}
+      >
         <ShieldCheckIcon aria-hidden size={17} weight="duotone" />
         {r.intact} files intact, {r.issues.length} issues
       </p>
@@ -322,11 +412,21 @@ function VerifyResult({ r }: { r: VerifyReport }) {
   );
 }
 
-function Stat({ label, value, title }: { label: string; value: string; title?: string }) {
+function Stat({
+  label,
+  value,
+  title,
+}: {
+  label: string;
+  value: string;
+  title?: string;
+}) {
   return (
     <div className="min-w-0" title={title}>
       <dt className="eyebrow">{label}</dt>
-      <dd className="mt-2 font-mono text-lg font-medium tracking-tight break-words text-zinc-50">{value}</dd>
+      <dd className="mt-2 font-mono text-lg font-medium tracking-tight break-words text-zinc-50">
+        {value}
+      </dd>
     </div>
   );
 }
@@ -345,7 +445,10 @@ function SummaryCard({
 }) {
   const setView = useUi((s) => s.setView);
   return (
-    <section aria-label={title} className="surface flex min-w-0 flex-col gap-5 p-6">
+    <section
+      aria-label={title}
+      className="surface flex min-w-0 flex-col gap-5 p-6"
+    >
       <h2 className="eyebrow">{title}</h2>
       <div className="flex-1">{children}</div>
       <Button
@@ -361,16 +464,39 @@ function SummaryCard({
   );
 }
 
-function Count({ n, label, tone }: { n: number | string; label: string; tone?: string }) {
+function Count({
+  n,
+  label,
+  tone,
+}: {
+  n: number | string;
+  label: string;
+  tone?: string;
+}) {
   return (
     <div className="min-w-0">
-      <div className={cx("font-mono text-3xl font-medium tracking-tight", tone ?? "text-zinc-50")}>{n}</div>
+      <div
+        className={cx(
+          "font-mono text-3xl font-medium tracking-tight",
+          tone ?? "text-zinc-50",
+        )}
+      >
+        {n}
+      </div>
       <div className="mt-1 text-[13px] text-dim">{label}</div>
     </div>
   );
 }
 
-function ModsCard({ mods, outOfSync }: { mods: ModView[] | undefined; outOfSync: boolean }) {
+function ModsCard({
+  mods,
+  deploy,
+  outOfSync,
+}: {
+  mods: ModView[] | undefined;
+  deploy: DeployStatus;
+  outOfSync: boolean;
+}) {
   const list = mods ?? [];
   const on = list.filter((m) => m.enabled).length;
   return (
@@ -379,9 +505,12 @@ function ModsCard({ mods, outOfSync }: { mods: ModView[] | undefined; outOfSync:
         <Count n={list.length} label="installed" />
         <Count n={on} label="enabled" />
       </div>
+      <DeployTracker d={deploy} outOfSync={outOfSync} />
       <p className="mt-5 flex items-center gap-2 text-[13.5px] text-zinc-400">
         <StatusDot tone={outOfSync ? "amber" : "zinc"} />
-        {outOfSync ? "Changes since the last deploy" : "No changes since the last deploy"}
+        {outOfSync
+          ? "Changes since the last deploy"
+          : "No changes since the last deploy"}
       </p>
     </SummaryCard>
   );
@@ -389,25 +518,39 @@ function ModsCard({ mods, outOfSync }: { mods: ModView[] | undefined; outOfSync:
 
 function CollectionsCard({ game }: { game: string }) {
   // Same query as the Collections view, so both share the cache.
-  const q = useQuery({ queryKey: ["collections", game], queryFn: () => ipc.collectionsList(game) });
+  const q = useQuery({
+    queryKey: ["collections", game],
+    queryFn: () => ipc.collectionsList(game),
+  });
   const list = q.data ?? [];
   const members = list.reduce((n, c) => n + c.record.mods.length, 0);
   const enabled = list.reduce((n, c) => n + c.enabled, 0);
   return (
-    <SummaryCard title="Collections" view="collections" linkLabel="Open Collections">
+    <SummaryCard
+      title="Collections"
+      view="collections"
+      linkLabel="Open Collections"
+    >
       {q.isError ? (
         <ErrorNote>{errMsg(q.error)}</ErrorNote>
       ) : q.isPending ? (
         <p className="text-[14px] text-zinc-400">Reading collections…</p>
       ) : !list.length ? (
-        <p className="text-[14px] text-zinc-400">No collections installed. Add one from the Collections tab.</p>
+        <p className="text-[14px] text-zinc-400">
+          No collections installed. Add one from the Collections tab.
+        </p>
       ) : (
         <>
           <div className="grid grid-cols-2 gap-4">
             <Count n={list.length} label="installed" />
             <Count n={`${enabled}/${members}`} label="mods enabled" />
           </div>
-          <progress aria-label="Collection mods enabled" className="mt-5" max={members || 1} value={enabled} />
+          <progress
+            aria-label="Collection mods enabled"
+            className="mt-5"
+            max={members || 1}
+            value={enabled}
+          />
         </>
       )}
     </SummaryCard>
@@ -415,17 +558,31 @@ function CollectionsCard({ game }: { game: string }) {
 }
 
 /** A requirement still needs the user (acknowledged external tools count as done). */
-const open = (r: ReqRow) => !r.acked && r.status !== "ok" && r.status !== "gone";
+const open = (r: ReqRow) =>
+  !r.acked && r.status !== "ok" && r.status !== "gone";
 
 function RequirementsCard({ game }: { game: string }) {
   // Same query as the Requirements view, so both share the cache.
-  const q = useQuery({ queryKey: ["deps", game], queryFn: () => ipc.deps({}, game) });
+  const q = useQuery({
+    queryKey: ["deps", game],
+    queryFn: () => ipc.deps({}, game),
+  });
   const rows = q.data ?? [];
-  const missing = rows.filter((r) => open(r) && (r.status === "missing" || r.status === "disabled")).length;
-  const external = rows.filter((r) => open(r) && r.status === "external").length;
-  const ok = rows.length - missing - external;
+  const external = rows.filter(
+    (r) => open(r) && r.status === "external",
+  ).length;
+  // Open external tools can't be verified, so they count as missing until acknowledged.
+  const missing =
+    rows.filter(
+      (r) => open(r) && (r.status === "missing" || r.status === "disabled"),
+    ).length + external;
+  const ok = rows.length - missing;
   return (
-    <SummaryCard title="Requirements" view="requirements" linkLabel="Open Requirements">
+    <SummaryCard
+      title="Requirements"
+      view="requirements"
+      linkLabel="Open Requirements"
+    >
       {q.isError ? (
         <ErrorNote>{errMsg(q.error)}</ErrorNote>
       ) : q.isPending ? (
@@ -433,12 +590,16 @@ function RequirementsCard({ game }: { game: string }) {
       ) : (
         <>
           <div className="grid grid-cols-2 gap-4">
-            <Count n={missing} label="missing" tone={missing ? "text-rose-300" : undefined} />
+            <Count
+              n={missing}
+              label="missing"
+              tone={missing ? "text-rose-300" : undefined}
+            />
             <Count n={ok} label="ok" />
           </div>
           <p className="mt-5 text-[13.5px] text-zinc-400">
             {external
-              ? `${external} external tool${external === 1 ? "" : "s"} to check by hand.`
+              ? `Includes ${external} external tool${external === 1 ? "" : "s"} to check by hand.`
               : rows.length
                 ? "Nothing left to check by hand."
                 : "Your enabled mods list no requirements."}
@@ -450,7 +611,10 @@ function RequirementsCard({ game }: { game: string }) {
 }
 
 function PluginsCard({ game }: { game: string }) {
-  const q = useQuery({ queryKey: ["plugins", game], queryFn: () => ipc.pluginsList(game) });
+  const q = useQuery({
+    queryKey: ["plugins", game],
+    queryFn: () => ipc.pluginsList(game),
+  });
   const lines = q.data ?? [];
   const active = lines.filter((p) => p.active).length;
   const managed = lines.filter((p) => p.managed).length;
@@ -461,28 +625,45 @@ function PluginsCard({ game }: { game: string }) {
       ) : q.isPending ? (
         <p className="text-[14px] text-zinc-400">Reading plugins.txt…</p>
       ) : q.data === null ? (
-        <p className="text-[14px] text-zinc-400">No plugins.txt yet. Deploy mods, or start the game once.</p>
+        <p className="text-[14px] text-zinc-400">
+          No plugins.txt yet. Deploy mods, or start the game once.
+        </p>
       ) : (
         <>
           <div className="grid grid-cols-2 gap-4">
             <Count n={active} label="active" />
             <Count n={lines.length} label="in plugins.txt" />
           </div>
-          <p className="mt-5 text-[13.5px] text-zinc-400">{managed} written by modman for your mods.</p>
+          <p className="mt-5 text-[13.5px] text-zinc-400">
+            {managed} written by modman for your mods.
+          </p>
         </>
       )}
     </SummaryCard>
   );
 }
 
-function RecentCard({ game, mods }: { game: string; mods: ModView[] | undefined }) {
+function RecentCard({
+  game,
+  mods,
+}: {
+  game: string;
+  mods: ModView[] | undefined;
+}) {
   const setView = useUi((s) => s.setView);
-  const recent = [...(mods ?? [])].sort((a, b) => b.installed_at - a.installed_at).slice(0, RECENT);
+  const recent = [...(mods ?? [])]
+    .sort((a, b) => b.installed_at - a.installed_at)
+    .slice(0, RECENT);
   return (
     <Card
       title="Recently installed"
       actions={
-        <Button size="sm" tone="ghost" icon={<ArrowRightIcon aria-hidden size={15} />} onClick={() => setView("install")}>
+        <Button
+          size="sm"
+          tone="ghost"
+          icon={<ArrowRightIcon aria-hidden size={15} />}
+          onClick={() => setView("install")}
+        >
           Install mods
         </Button>
       }
@@ -495,7 +676,9 @@ function RecentCard({ game, mods }: { game: string; mods: ModView[] | undefined 
             <li key={m.id} className="flex items-center gap-4 py-3">
               <Thumb game={game} modId={m.nexus_mod_id} name={m.name} />
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[14.5px] text-zinc-100">{m.name}</span>
+                <span className="block truncate text-[14.5px] text-zinc-100">
+                  {m.name}
+                </span>
                 <span className="block truncate font-mono text-[11.5px] text-dim">
                   {m.version ?? "no version"} · installed {ago(m.installed_at)}
                 </span>
@@ -521,7 +704,8 @@ export function HeroBackdrop() {
     enabled: !!game && game.appid !== null,
     staleTime: Infinity,
   });
-  const src = game && q.data && q.data.startsWith("data:image/") ? q.data : null;
+  const src =
+    game && q.data && q.data.startsWith("data:image/") ? q.data : null;
   if (!src) return null;
   return (
     <img
@@ -575,8 +759,11 @@ function StartupCheckCard() {
       <ul className="rows">
         {check.pending.map((p) => (
           <li key={p.domain} className="py-3 text-[14px] text-zinc-400">
-            <span className="text-zinc-100">{p.name}</span>: {p.reasons.join(", ")}
-            {p.blocked ? ` (waiting: ${skipText(p.blocked)})` : " (the next run will update and redeploy)"}
+            <span className="text-zinc-100">{p.name}</span>:{" "}
+            {p.reasons.join(", ")}
+            {p.blocked
+              ? ` (waiting: ${skipText(p.blocked)})`
+              : " (the next run will update and redeploy)"}
           </li>
         ))}
       </ul>

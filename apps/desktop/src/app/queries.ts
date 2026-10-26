@@ -16,9 +16,13 @@ export function makeQueryClient(): QueryClient {
 /** Picture queries: no command changes them (game art's key holds the app id) and they may need the network. */
 const PICTURES = new Set(["art", "collection-art"]);
 
-/** Refresh after a command or job: every query except pictures. */
+/**
+ * Refresh after a command or job: every query except pictures. `refetchType: "all"`
+ * also refetches queries whose view is not mounted (the Overview counts), so they
+ * are current when the user switches to that view instead of only after it mounts.
+ */
 export const refreshAll = (qc: QueryClient) =>
-  qc.invalidateQueries({ predicate: (q) => !PICTURES.has(String(q.queryKey[0])) });
+  qc.invalidateQueries({ predicate: (q) => !PICTURES.has(String(q.queryKey[0])), refetchType: "all" });
 
 export const useGames = () => useQuery({ queryKey: ["games"], queryFn: ipc.gamesList });
 

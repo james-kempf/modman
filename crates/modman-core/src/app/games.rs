@@ -2,6 +2,7 @@
 //! Game setup (legacy `game_add_flow` L4019-4078) and read-only overviews of
 //! the configured games for the front ends.
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -351,16 +352,23 @@ pub enum GameFolder {
     Game,
     /// The Proton (Wine) prefix.
     Prefix,
+    /// modman's staging folder for the game's mods.
+    Mods,
 }
 
 /// The folder's path, taken only from the game's stored configuration: an
 /// existing directory, as an absolute canonical path.
-pub fn folder_path(game: &GameConfig, which: GameFolder) -> R<PathBuf> {
-    let target = match which {
-        GameFolder::Game => Target::GameDir,
-        GameFolder::Prefix => Target::PrefixDir,
+pub fn folder_path(game: &GameConfig, data_dir: &Path, which: GameFolder) -> R<PathBuf> {
+    let root = match which {
+        GameFolder::Game => deploy::target_root(game, Target::GameDir)?,
+        GameFolder::Prefix => deploy::target_root(game, Target::PrefixDir)?,
+        GameFolder::Mods => {
+            let dir = deploy::staging_root(game, data_dir);
+            // Nothing is staged until the first install.
+            std::fs::create_dir_all(&dir)?;
+            dir
+        }
     };
-    let root = deploy::target_root(game, target)?;
     Ok(root.canonicalize()?)
 }
 
@@ -373,27 +381,32 @@ pub fn open_folder(
     open: impl FnOnce(&Path) -> R<()>,
 ) -> R<PathBuf> {
     let g = games::require_game(cx.store.conn(), domain)?;
-    let p = folder_path(&g, which)?;
+    let p = folder_path(&g, &cx.paths.data_dir, which)?;
     open(&p)?;
     Ok(p)
 }
 
-/// Shows `dir` in the desktop's file manager (`xdg-open`, else `gio open`),
-/// detached: no shell, output discarded, the child reaped in the background.
+/// Shows `dir` in the desktop's file manager.
 pub fn launch_file_manager(dir: &Path) -> R<()> {
+    launch_opener(dir.as_os_str())
+}
+
+/// Opens a folder or URL with the desktop's opener (`xdg-open`, else `gio open`),
+/// detached: no shell, output discarded, the child reaped in the background.
+pub fn launch_opener(target: &OsStr) -> R<()> {
     let (prog, pre): (PathBuf, &[&str]) = match super::which("xdg-open") {
         Some(x) => (x, &[]),
         None => match super::which("gio") {
             Some(g) => (g, &["open"]),
             None => fail!(
                 "Neither xdg-open nor gio was found to open {}.",
-                dir.display()
+                target.to_string_lossy()
             ),
         },
     };
     let mut child = std::process::Command::new(prog)
         .args(pre)
-        .arg(dir)
+        .arg(target)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())

@@ -100,6 +100,7 @@ pub fn run() {
             commands::open_folder,
             commands::mods_list,
             commands::mod_detail,
+            commands::mod_open_page,
             commands::mods_set_enabled,
             commands::mod_move,
             commands::mods_uninstall,
