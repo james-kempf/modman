@@ -251,3 +251,87 @@ fn deploy_and_purge_refused_while_game_process_runs() {
     res.unwrap();
     env.run(&["-y", "purge"]).success();
 }
+
+/// Fails if `clean-backups` changes anything without an explicit yes, or if
+/// the quarantine and its restore do not round-trip through the CLI.
+#[test]
+fn clean_backups_dry_run_prompt_apply_and_restore_quarantine() {
+    let env = Env::new();
+    // The game already holds the mod's bytes: deploy backs them up (no
+    // modman record), which is an ambiguous poisoned backup.
+    std::fs::write(env.game_dir().join("Data/same.txt"), "same").unwrap();
+    env.add_mod("m", 0, &[("Data/same.txt", "same")]);
+    env.run(&["deploy"]).success();
+    let held = || -> i64 {
+        env.store()
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM backups WHERE restored_at IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+    };
+    env.store()
+        .conn()
+        .execute(
+            "INSERT INTO mod_files (mod_id, path, size, sha256)
+             SELECT m.id, 'Data/same.txt', 4, b.sha256 FROM mods m, backups b WHERE m.uid = 'm'",
+            [],
+        )
+        .unwrap();
+    assert_eq!(held(), 1);
+    let before = snapshot(&env.game_dir());
+
+    env.run(&["deploy", "clean-backups"])
+        .success()
+        .stdout(contains("Data/same.txt").and(contains("ambiguous")))
+        .stdout(contains("Nothing was changed"));
+    // Confirmed entries only by default: nothing to do, no prompt.
+    env.run(&["-y", "deploy", "clean-backups", "--apply"])
+        .success()
+        .stdout(contains("Nothing to quarantine"));
+    // No terminal and no -y: the prompt defaults to no.
+    env.cmd()
+        .args(["deploy", "clean-backups", "--apply", "--include-ambiguous"])
+        .write_stdin("")
+        .assert()
+        .success()
+        .stdout(contains("Cancelled"));
+    assert_eq!(held(), 1);
+
+    let out = env
+        .run(&[
+            "-y",
+            "deploy",
+            "clean-backups",
+            "--apply",
+            "--include-ambiguous",
+        ])
+        .success()
+        .stdout(contains("Quarantined 1 backup(s)"));
+    assert_eq!(held(), 0);
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    let id = stdout
+        .split("restore-quarantine ")
+        .nth(1)
+        .and_then(|s| s.split_whitespace().next())
+        .expect("quarantine id in output")
+        .to_string();
+    assert_eq!(snapshot(&env.game_dir()), before, "deployed file stays");
+
+    env.cmd()
+        .args(["deploy", "restore-quarantine", &id])
+        .write_stdin("")
+        .assert()
+        .success()
+        .stdout(contains("Cancelled"));
+    assert_eq!(held(), 0);
+    env.run(&["-y", "deploy", "restore-quarantine", &id])
+        .success()
+        .stdout(contains("Restored quarantine"));
+    assert_eq!(held(), 1);
+    env.run(&["-y", "deploy", "restore-quarantine", "../x"])
+        .failure()
+        .stderr(contains("invalid quarantine id"));
+}

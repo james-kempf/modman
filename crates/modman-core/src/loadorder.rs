@@ -14,6 +14,8 @@
 //!   uses the cached copy, so deploy never touches the network. The LOOT
 //!   masterlist is community data downloaded at runtime and not bundled; its
 //!   licence was not verified (spikes.md §1).
+//! - UE4SS `mods.txt` (`[[shared_files]]`) is merged on deploy and
+//!   restored on purge (`ue4ss_mods_txt`); mods' copies are never placed.
 //! - [`conflict_data`] gives the GUI per-file winners/losers and the plugin
 //!   view (provider, overrides, load index, active, managed).
 
@@ -21,6 +23,7 @@ mod conflicts;
 mod loot;
 mod plugins_txt;
 mod rules;
+mod ue4ss_mods_txt;
 
 use std::path::{Path, PathBuf};
 
@@ -34,6 +37,9 @@ pub use plugins_txt::{
     PluginStage, PluginsFiles, PluginsReport, SkipReason, SortMethod,
 };
 pub use rules::apply_rules;
+pub(crate) use ue4ss_mods_txt::{
+    apply as merge_shared_files, revert as revert_shared_files, shared_paths,
+};
 
 use crate::store::StoreError;
 

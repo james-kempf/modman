@@ -72,6 +72,8 @@ pub enum Commands {
     Uninstall(mods::UninstallArgs),
     /// Re-extract a mod.
     Reinstall(install::ReinstallArgs),
+    /// Mod maintenance: restage staged files in the current layout.
+    Mods(mods::ModsArgs),
     /// Change mod priority.
     #[command(visible_aliases = ["move", "mv"])]
     Order(mods::OrderArgs),
@@ -89,7 +91,7 @@ pub enum Commands {
     /// Save / restore load order and enabled state.
     #[command(visible_alias = "profiles")]
     Profile(mods::ProfileArgs),
-    /// Link enabled mods into the game folder.
+    /// Link enabled mods into the game folder; clean-backups / restore-quarantine.
     Deploy(deploy::DeployArgs),
     /// Remove deployed files and restore original game files.
     #[command(visible_alias = "undeploy")]

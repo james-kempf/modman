@@ -11,6 +11,7 @@
 
 pub mod actions;
 pub mod art;
+pub mod backups;
 pub mod collection;
 pub mod deploy;
 pub mod games;
@@ -19,6 +20,7 @@ pub mod mods;
 pub mod nexus;
 pub mod nxm;
 pub mod plugins;
+pub mod restage;
 pub mod thumbs;
 pub mod updates;
 pub mod views;
