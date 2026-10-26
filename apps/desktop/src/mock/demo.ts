@@ -10,6 +10,7 @@
 import type { Answer, CollectionRecord, ConfigEntry, ModView, Msg, ProfileSummary, Prompt, ReqRow, UpdateReport } from "../ipc/types";
 import { createFakeTransport, type Args, type FakeTransport } from "./fake";
 import { afterChange, autoupdateStatus, deployReport, experimentalGame, game, mod } from "./fixtures";
+import { demoPoisoned, repairHandlers } from "./repair";
 
 export function createDemoBackend(): FakeTransport {
   const games = [
@@ -561,6 +562,20 @@ export function createDemoBackend(): FakeTransport {
     },
     autoupdate_runs: () => [],
   });
+  // Poisoned backups, quarantines and restage (the first game starts with poisoned backups).
+  Object.assign(
+    t.handlers,
+    repairHandlers(
+      {
+        job,
+        say: (id, text) => say(id, text),
+        domain: (a) => (typeof a?.game === "string" && a.game ? a.game : active().domain),
+        mods: (a) => st(a).mods,
+        changed: (a) => void (st(a).dirty = true),
+      },
+      { [games[0].domain]: demoPoisoned() },
+    ),
+  );
   function setAck(key: string, acked: boolean): ReqRow {
     const d = deps.find((x) => x.key === key);
     if (!d || d.status !== "external") throw { message: `'${key}' is not an external requirement` };

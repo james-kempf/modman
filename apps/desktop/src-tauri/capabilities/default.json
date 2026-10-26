@@ -65,6 +65,11 @@
     "allow-autoupdate-status",
     "allow-autoupdate-enable",
     "allow-autoupdate-disable",
-    "allow-autoupdate-runs"
+    "allow-autoupdate-runs",
+    "allow-backups-poisoned",
+    "allow-backups-clean",
+    "allow-quarantines-list",
+    "allow-quarantine-restore",
+    "allow-restage"
   ]
 }

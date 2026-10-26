@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Settings: Nexus account (API key entry with paste + on-screen keyboard),
-// auto-update toggle with status and last-run log, config keys, app paths.
+// auto-update toggle with status and last-run log, the active game's
+// backup cleanup and restage, config keys, app paths.
 
 import { useQuery } from "@tanstack/react-query";
 import { useRef, useState, type ReactNode } from "react";
@@ -26,6 +27,7 @@ import {
 } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import type { ConfigEntry, RunLogEntry } from "../ipc/types";
+import { GameRepairCard } from "./GameRepair";
 
 export function Settings() {
   return (
@@ -33,6 +35,7 @@ export function Settings() {
       <ViewHeader title="Settings" description="Changes are saved by modman as soon as you make them." />
       <AccountCard />
       <AutoUpdateCard />
+      <GameRepairCard />
       <ConfigCard />
       <AppInfoCard />
     </div>
