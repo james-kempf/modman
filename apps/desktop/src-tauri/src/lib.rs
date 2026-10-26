@@ -138,6 +138,11 @@ pub fn run() {
             commands::autoupdate_enable,
             commands::autoupdate_disable,
             commands::autoupdate_runs,
+            commands::backups_poisoned,
+            commands::backups_clean,
+            commands::quarantines_list,
+            commands::quarantine_restore,
+            commands::restage,
         ])
         .run(tauri::generate_context!());
     if let Err(e) = result {

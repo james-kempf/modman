@@ -184,6 +184,8 @@ pub fn install_archive(
     let mut opts = LayoutOptions::new(profile, &name);
     opts.preset_variant = meta.variant.as_deref().filter(|v| !v.is_empty());
     opts.paks_dir = game.paks_dir.as_deref();
+    let ue4ss_dir = crate::games::ue4ss_mods_dir(game, game.folder.as_deref());
+    opts.ue4ss_mods_dir = ue4ss_dir.as_deref();
     opts.choose_variant = choose_variant;
     if fomod_run.is_some() {
         // Legacy normalize_layout "$fomod_out" ... 0 0 (L1395).

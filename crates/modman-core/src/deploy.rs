@@ -23,6 +23,8 @@ mod engine;
 mod place;
 mod plan;
 mod probe;
+mod provenance;
+mod quarantine;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -31,6 +33,11 @@ use std::sync::Arc;
 pub use engine::{deploy, purge, recover, status, verify};
 pub use plan::{build_plan, conflicts, Conflict, ModRef, Plan, PlanItem, SkippedMod};
 pub use probe::{GameProbe, NeverRunning, ProcProbe};
+pub use quarantine::{
+    list_quarantines, poisoned_backups, quarantine_poisoned, restore_quarantine, BackupRecord,
+    PoisonClass, PoisonedBackup, QuarantineItem, QuarantineManifest, QuarantineOrigin,
+    QuarantineReport, RestoreReport,
+};
 
 /// Checks a game-relative folder setting (`subdir`, `paks_dir`): relative,
 /// no `.`/`..` components, no NUL. `.` alone and a leading `./` (legacy
@@ -73,6 +80,12 @@ pub enum DeployError {
         path: PathBuf,
         source: std::io::Error,
     },
+    /// A backup cleanup or quarantine restore was called without the user's
+    /// confirmation (the front end asks; the core never does).
+    #[error("not confirmed: backups and game files were left unchanged")]
+    NotConfirmed,
+    #[error("{0}")]
+    Quarantine(String),
     /// Test fault injection: the process "crashed" and left the journal open.
     #[error("simulated crash (fault injection)")]
     InjectedCrash,

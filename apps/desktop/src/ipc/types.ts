@@ -627,3 +627,68 @@ export type Answer =
 export interface CmdError {
   message: string;
 }
+
+// ── backup cleanup and restage ──────────────────────────────
+
+/** confirmed: modman placed the path before the backup was taken; ambiguous: no earlier record. */
+export type PoisonClass = "confirmed" | "ambiguous";
+
+/** A held backup holding the bytes a mod ships for the same path (`backups_poisoned`). */
+export interface PoisonedBackup {
+  backup_id: number;
+  target: Target;
+  /** Relative to the target root. */
+  path: string;
+  sha256: string;
+  class: PoisonClass;
+  reason: string;
+  /** Mod uids shipping these bytes at this path. */
+  mods: string[];
+  deployed: boolean;
+  /** Placed by an enabled mod: the game file stays, only the backup goes. */
+  deployed_by_enabled_mod: boolean;
+}
+
+export interface QuarantineReport {
+  /** null = nothing was quarantined. */
+  id: string | null;
+  dir: string | null;
+  backups: number;
+  game_files: number;
+  skipped_ambiguous: number;
+}
+
+export interface QuarantineItem {
+  path: string;
+  target: Target;
+  sha256: string;
+  origin: "backup" | "game_file";
+  class: PoisonClass;
+  reason: string;
+  backup: { id: number; size: number; mode: number; mtime_ns: number | null; created_at: number } | null;
+  deployment_ids: number[];
+}
+
+export interface QuarantineManifest {
+  id: string;
+  game: string;
+  created_at: number;
+  restored_at: number | null;
+  items: QuarantineItem[];
+}
+
+export interface RestoreReport {
+  id: string;
+  backups: number;
+  game_files: number;
+}
+
+export interface RestageReport {
+  restaged: { id: number; uid: string; files: number; carried: { from: string; to: string }[]; backed_up: string[] }[];
+  /** Mod uids whose archive is gone. */
+  no_archive: string[];
+  failed: { uid: string; error: string }[];
+  backup_dir: string | null;
+  poisoned_confirmed: number;
+  poisoned_ambiguous: number;
+}

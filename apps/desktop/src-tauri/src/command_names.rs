@@ -64,4 +64,9 @@ pub const COMMANDS: &[&str] = &[
     "autoupdate_enable",
     "autoupdate_disable",
     "autoupdate_runs",
+    "backups_poisoned",
+    "backups_clean",
+    "quarantines_list",
+    "quarantine_restore",
+    "restage",
 ];

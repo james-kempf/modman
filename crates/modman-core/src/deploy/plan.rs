@@ -58,6 +58,9 @@ pub struct Plan {
     pub mods: Vec<ModRef>,
     /// In order of first appearance.
     pub items: Vec<PlanItem>,
+    /// Copies of modman-owned shared files (UE4SS `mods.txt`): merged by
+    /// deploy, never placed, never a conflict.
+    pub shared: Vec<PlanItem>,
     pub skipped: Vec<SkippedMod>,
 }
 
@@ -82,7 +85,7 @@ impl Plan {
 
 /// `subdir` as a path prefix: empty for `.`, else `<subdir>/`
 /// (legacy `deploy_base_rel`, L380-385).
-fn base_prefix(subdir: &str) -> String {
+pub(super) fn base_prefix(subdir: &str) -> String {
     let s = subdir.trim_start_matches("./").trim_matches('/');
     if s.is_empty() || s == "." {
         String::new()
@@ -119,6 +122,7 @@ pub fn build_plan(conn: &Connection, game: &GameConfig) -> Result<Plan, DeployEr
         target: game.target,
         mods: Vec::new(),
         items: Vec::new(),
+        shared: Vec::new(),
         skipped: Vec::new(),
     };
     let mut index: HashMap<String, usize> = HashMap::new();
@@ -182,6 +186,14 @@ pub fn build_plan(conn: &Connection, game: &GameConfig) -> Result<Plan, DeployEr
                 }
             }
         }
+    }
+    let shared = crate::loadorder::shared_paths(game);
+    if !shared.is_empty() {
+        let (owned, items) = std::mem::take(&mut plan.items)
+            .into_iter()
+            .partition(|i| shared.contains(&i.rel_path.to_lowercase()));
+        plan.shared = owned;
+        plan.items = items;
     }
     Ok(plan)
 }

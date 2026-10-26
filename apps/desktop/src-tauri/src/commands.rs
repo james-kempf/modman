@@ -937,3 +937,96 @@ pub async fn autoupdate_runs(
     })
     .await
 }
+
+// ── backup cleanup and restage ──────────────────────────────
+
+use modman_core::app::backups as appbk;
+use modman_core::app::restage::{self as apprs, RestageReport, RestageRequest};
+use modman_core::deploy::{PoisonedBackup, QuarantineManifest, QuarantineReport, RestoreReport};
+
+/// Held backups that hold mod files instead of game originals (dry run of
+/// `deploy clean-backups`; changes nothing).
+#[tauri::command(rename_all = "snake_case")]
+pub async fn backups_poisoned(
+    app: AppHandle,
+    state: St<'_>,
+    game: Option<String>,
+) -> CmdResult<Vec<PoisonedBackup>> {
+    query(app, &state, game, |cx| {
+        let g = cx.need_game()?;
+        Ok(deploy::poisoned_backups(cx.store.conn(), &g)?)
+    })
+    .await
+}
+
+/// Quarantines the poisoned backups. The webview asks first and passes
+/// `confirmed`; the core refuses without it (a GUI prompt never answers
+/// for the user here).
+#[tauri::command(rename_all = "snake_case")]
+pub async fn backups_clean(
+    app: AppHandle,
+    state: St<'_>,
+    game: Option<String>,
+    include_ambiguous: bool,
+    confirmed: bool,
+) -> CmdResult<QuarantineReport> {
+    job(app, &state, "backups_clean", game, move |cx| {
+        let g = cx.need_game()?;
+        appbk::apply(cx, &g, include_ambiguous, confirmed)
+    })
+    .await
+}
+
+/// Quarantines of the game, oldest first.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn quarantines_list(
+    app: AppHandle,
+    state: St<'_>,
+    game: Option<String>,
+) -> CmdResult<Vec<QuarantineManifest>> {
+    query(app, &state, game, |cx| {
+        let g = cx.need_game()?;
+        appbk::list_quarantines(cx, &g)
+    })
+    .await
+}
+
+/// Puts quarantine `id` back; refused unless `confirmed`.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn quarantine_restore(
+    app: AppHandle,
+    state: St<'_>,
+    game: Option<String>,
+    id: String,
+    confirmed: bool,
+) -> CmdResult<RestoreReport> {
+    job(app, &state, "quarantine_restore", game, move |cx| {
+        let g = cx.need_game()?;
+        appbk::restore_quarantine(cx, &g, &id, confirmed)
+    })
+    .await
+}
+
+/// Re-stages mods from their archives (the outdated ones, `ids`, or `all`).
+/// Fails while confirmed poisoned backups exist unless `ignore_poisoned`.
+/// Does not deploy.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn restage(
+    app: AppHandle,
+    state: St<'_>,
+    game: Option<String>,
+    ids: Vec<i64>,
+    all: bool,
+    ignore_poisoned: bool,
+) -> CmdResult<RestageReport> {
+    job(app, &state, "restage", game, move |cx| {
+        let g = cx.need_game()?;
+        let req = RestageRequest {
+            ids,
+            all,
+            ignore_poisoned,
+        };
+        apprs::restage(cx, &g, &req)
+    })
+    .await
+}

@@ -23,6 +23,7 @@ use super::backup::{Blob, BlobStore};
 use super::confine::{confine, is_escape, Confined};
 use super::place::{is_ours, mtime_ns, place, tmp_path, Placed};
 use super::plan::{build_plan, CaseResolver, Plan};
+use super::provenance::{placed_by_modman, untracked_placements};
 use super::{
     io_err, target_root, DeployEnv, DeployError, DeployOptions, DeployReport, DeployStatus, Method,
     Progress, PurgeReport, RecoveryOutcome, RecoveryReport, VerifyIssue, VerifyKind, VerifyReport,
@@ -33,7 +34,7 @@ use crate::store::{now, DeployLock, Store, StoreError};
 const DEFAULT_BATCH: usize = 256;
 
 /// Refuses while the game runs, then takes the deploy lock.
-fn guard(game: &GameConfig, env: &DeployEnv) -> Result<DeployLock, DeployError> {
+pub(super) fn guard(game: &GameConfig, env: &DeployEnv) -> Result<DeployLock, DeployError> {
     if env.probe.is_running(game) {
         return Err(DeployError::GameRunning(game.name.clone()));
     }
@@ -53,7 +54,7 @@ fn confined(root: &Path, rel: &str, create_parents: bool) -> Result<Confined, De
     confine(root, rel, create_parents).map_err(|e| confine_err(root, rel, e))
 }
 
-fn confine_err(root: &Path, rel: &str, e: io::Error) -> DeployError {
+pub(super) fn confine_err(root: &Path, rel: &str, e: io::Error) -> DeployError {
     if is_escape(&e) {
         DeployError::PathConflict {
             rel: rel.to_string(),
@@ -171,12 +172,20 @@ fn dry_run(
             Ok((r.get::<_, String>(0)?.to_lowercase(), r.get(1)?))
         })?
         .collect::<Result<_, _>>()?;
+    // A real deploy purges an active deployment first, which ends the
+    // provenance of every earlier placement.
+    let ours = if games::deployment_active(conn, &game.domain)? {
+        Default::default()
+    } else {
+        untracked_placements(conn, &game.domain, plan.target.as_str())?
+    };
     report.placed = pre.items.len();
     report.new_dirs = pre.new_dirs.len();
     report.backed_up = pre
         .items
         .iter()
         .filter(|p| p.original && *deployed.get(&p.rel.to_lowercase()).unwrap_or(&true))
+        .filter(|p| !placed_by_modman(&ours, &p.rel, &root.join(&p.rel)))
         .count();
     Ok(())
 }
@@ -198,6 +207,9 @@ fn run_deploy(
         root: &env.backup_dir,
     };
     let crash = |n: usize| env.faults.crash_after_files == Some(n);
+    // Runs after the purge of the previous deployment, so only placements
+    // whose tracking was lost remain (see `untracked_placements`).
+    let ours = untracked_placements(store.conn(), &game.domain, target)?;
 
     let journal = {
         let tx = store.conn_mut().transaction()?;
@@ -233,12 +245,19 @@ fn run_deploy(
         .items
         .chunks(env.faults.batch_size.unwrap_or(DEFAULT_BATCH).max(1))
     {
-        // (A) Backups are durable before any game file is replaced.
+        // (A) Backups are durable before any game file is replaced. A file
+        // the journal says modman placed is not an original: backing it up
+        // would make purge "restore" mod bytes (a poisoned backup).
         let mut chunk_blobs = Vec::with_capacity(chunk.len());
         for p in chunk {
             chunk_blobs.push(if p.original {
                 let c = confined(root, &p.rel, false)?;
-                Some(blobs.store(&c.path).map_err(io_err(&root.join(&p.rel)))?)
+                if placed_by_modman(&ours, &p.rel, &c.path) {
+                    tracing::warn!(path = %p.rel, "not backing up a file modman placed earlier (tracking was lost)");
+                    None
+                } else {
+                    Some(blobs.store(&c.path).map_err(io_err(&root.join(&p.rel)))?)
+                }
             } else {
                 None
             });
@@ -270,18 +289,28 @@ fn run_deploy(
                     None => None,
                 };
                 let item = &plan.items[p.plan_idx];
+                let mod_id = plan.mods[item.winner].id;
+                let sha: Option<String> = tx
+                    .query_row(
+                        "SELECT sha256 FROM mod_files WHERE mod_id = ?1 AND path = ?2",
+                        params![mod_id, item.staged_path],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
                 seq += 1;
+                // `sha256` is what was placed: provenance checks compare it.
                 let detail = serde_json::json!({
                     "source": item.source.to_string_lossy(),
-                    "mod_id": plan.mods[item.winner].id,
+                    "mod_id": mod_id,
                     "backup_id": backup_id,
+                    "sha256": sha,
                 });
                 tx.execute(
                     "INSERT INTO deploy_journal_steps (journal_id, seq, action, target, rel_path, detail)
                      VALUES (?1, ?2, 'place', ?3, ?4, ?5)",
                     params![journal, seq, target, p.rel, detail.to_string()],
                 )?;
-                steps.push((tx.last_insert_rowid(), backup_id));
+                steps.push((tx.last_insert_rowid(), backup_id, sha));
             }
             tx.commit()?;
         }
@@ -316,16 +345,9 @@ fn run_deploy(
         }
         // (D) Record.
         let tx = store.conn_mut().transaction()?;
-        for ((p, (method, meta)), (step, backup_id)) in chunk.iter().zip(&rows).zip(&steps) {
+        for ((p, (method, meta)), (step, backup_id, sha)) in chunk.iter().zip(&rows).zip(&steps) {
             let item = &plan.items[p.plan_idx];
             let m = &plan.mods[item.winner];
-            let sha: Option<String> = tx
-                .query_row(
-                    "SELECT sha256 FROM mod_files WHERE mod_id = ?1 AND path = ?2",
-                    params![m.id, item.staged_path],
-                    |r| r.get(0),
-                )
-                .optional()?;
             tx.execute(
                 "INSERT INTO deployments (game, target, rel_path, mod_id, method, source, dev, inode, size, mtime_ns, sha256, backup_id, deployed_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
@@ -351,7 +373,28 @@ fn run_deploy(
             )?;
         }
         tx.commit()?;
-        report.backed_up += steps.iter().filter(|(_, b)| b.is_some()).count();
+        report.backed_up += steps.iter().filter(|(_, b, _)| b.is_some()).count();
+    }
+    // Shared files (UE4SS mods.txt) are merged inside the journal: a crash
+    // before the commit below rolls them back with the placed files. The
+    // crash point after the last placement (`crash_after_files` = all
+    // files) therefore falls between the mods.txt write and the commit.
+    let placed_rels: Vec<&str> = pre.items.iter().map(|p| p.rel.as_str()).collect();
+    let merged = crate::loadorder::merge_shared_files(
+        &env.game_data_dir(),
+        game,
+        root,
+        &placed_rels,
+        &plan.shared,
+    )?;
+    for m in merged {
+        seq += 1;
+        let detail = serde_json::to_string(&m).expect("merge record serializes");
+        store.conn().execute(
+            "INSERT INTO deploy_journal_steps (journal_id, seq, action, target, rel_path, detail, done)
+             VALUES (?1, ?2, 'merge', ?3, ?4, ?5, 1)",
+            params![journal, seq, target, m.rel_path, detail],
+        )?;
     }
     if crash(placed) {
         return Err(DeployError::InjectedCrash);
@@ -616,7 +659,7 @@ fn move_out(src: &Path, dest: &Path) -> io::Result<()> {
 }
 
 /// Deletes a blob once no held backup refers to it.
-fn release_blob(conn: &Connection, blob: &Blob) -> Result<(), DeployError> {
+pub(super) fn release_blob(conn: &Connection, blob: &Blob) -> Result<(), DeployError> {
     let held: bool = conn.query_row(
         "SELECT EXISTS (SELECT 1 FROM backups WHERE sha256 = ?1 AND restored_at IS NULL)",
         [&blob.sha256],
@@ -858,6 +901,12 @@ fn undo_all(
         release_blob(store.conn(), &b)?;
     }
 
+    // Shared files (UE4SS mods.txt) before the folders: one modman created
+    // is removed, so its folder can go too.
+    if let Ok(root) = target_root(game, game.target) {
+        crate::loadorder::revert_shared_files(&env.game_data_dir(), &root)?;
+    }
+
     // Created folders, deepest first; non-empty ones stay (legacy L1727-1732).
     let dirs: Vec<(String, String)> = {
         let mut stmt = store.conn().prepare(
@@ -881,7 +930,7 @@ fn undo_all(
     Ok(())
 }
 
-fn interrupted(conn: &Connection, domain: &str) -> Result<bool, DeployError> {
+pub(super) fn interrupted(conn: &Connection, domain: &str) -> Result<bool, DeployError> {
     Ok(conn.query_row(
         "SELECT EXISTS (SELECT 1 FROM deploy_journal WHERE game = ?1 AND state = 'started')",
         [domain],

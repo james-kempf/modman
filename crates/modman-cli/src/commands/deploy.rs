@@ -3,7 +3,8 @@
 //! `cmd_deploy` L1738, `cmd_purge` L1899, `cmd_verify` L1949, `cmd_status`).
 
 use anyhow::{bail, Result};
-use clap::Args;
+use clap::{Args, Subcommand};
+use modman_core::app::backups;
 use modman_core::app::deploy::{methods_summary, run_deploy, run_purge};
 use modman_core::deploy::{self, DeployStatus, VerifyKind};
 use modman_core::games;
@@ -11,13 +12,41 @@ use modman_core::games;
 use crate::context::Ctx;
 
 #[derive(Args, Debug)]
+#[command(args_conflicts_with_subcommands = true)]
 pub struct DeployArgs {
+    #[command(subcommand)]
+    pub action: Option<DeployAction>,
     /// Show what would be deployed and backed up; change nothing.
     #[arg(short = 'n', long)]
     pub dry_run: bool,
     /// Deploy method for this run: auto, hardlink, reflink, symlink or copy.
     #[arg(long, value_name = "METHOD")]
     pub method: Option<String>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DeployAction {
+    /// List held backups that contain mod files instead of game originals
+    /// (dry run); with --apply, move them to a quarantine.
+    CleanBackups(CleanBackupsArgs),
+    /// Put a quarantine from clean-backups back.
+    RestoreQuarantine(RestoreQuarantineArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct CleanBackupsArgs {
+    /// Quarantine the listed backups (asks first; nothing is deleted).
+    #[arg(long)]
+    pub apply: bool,
+    /// Also quarantine ambiguous entries (UE4SS files, no deploy record).
+    #[arg(long, requires = "apply")]
+    pub include_ambiguous: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct RestoreQuarantineArgs {
+    /// Quarantine id printed by clean-backups --apply.
+    pub id: String,
 }
 
 #[derive(Args, Debug)]
@@ -33,6 +62,11 @@ pub struct StatusArgs {}
 const MAX_PROBLEMS: usize = 40;
 
 pub fn deploy(ctx: &mut Ctx, args: DeployArgs) -> Result<()> {
+    match args.action {
+        Some(DeployAction::CleanBackups(a)) => return clean_backups(ctx, a),
+        Some(DeployAction::RestoreQuarantine(a)) => return restore_quarantine(ctx, a),
+        None => {}
+    }
     let game = ctx.need_game()?;
     let ui = ctx.ui();
     run_deploy(
@@ -41,6 +75,57 @@ pub fn deploy(ctx: &mut Ctx, args: DeployArgs) -> Result<()> {
         args.method.as_deref(),
         args.dry_run,
     )?;
+    Ok(())
+}
+
+/// Dry run by default. `--apply` asks (default no; `-y` answers yes) and
+/// only then passes `confirmed = true` to the core.
+fn clean_backups(ctx: &mut Ctx, args: CleanBackupsArgs) -> Result<()> {
+    use modman_core::deploy::PoisonClass;
+    let game = ctx.need_game()?;
+    let ui = ctx.ui();
+    let mut cx = ctx.cx(&ui);
+    let entries = backups::dry_run(&mut cx, &game)?;
+    if !args.apply {
+        return Ok(());
+    }
+    let n = entries
+        .iter()
+        .filter(|e| args.include_ambiguous || e.class == PoisonClass::Confirmed)
+        .count();
+    if n == 0 {
+        cx.ui.info("Nothing to quarantine.");
+        return Ok(());
+    }
+    if !cx.ui.confirm(
+        &format!(
+            "Move {n} backup(s) of {} (and untracked copies in the game folder) to a quarantine?",
+            game.name
+        ),
+        false,
+    ) {
+        cx.ui.info("Cancelled. Nothing was changed.");
+        return Ok(());
+    }
+    backups::apply(&mut cx, &game, args.include_ambiguous, true)?;
+    Ok(())
+}
+
+fn restore_quarantine(ctx: &mut Ctx, args: RestoreQuarantineArgs) -> Result<()> {
+    let game = ctx.need_game()?;
+    let ui = ctx.ui();
+    let mut cx = ctx.cx(&ui);
+    if !cx.ui.confirm(
+        &format!(
+            "Put quarantine {} back into the backups and game folder of {}?",
+            args.id, game.name
+        ),
+        false,
+    ) {
+        cx.ui.info("Cancelled. Nothing was changed.");
+        return Ok(());
+    }
+    backups::restore_quarantine(&mut cx, &game, &args.id, true)?;
     Ok(())
 }
 

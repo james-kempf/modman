@@ -516,6 +516,20 @@ pub fn detect_installed(home: &Path, defs: &[GameDefinition]) -> Vec<DetectedGam
         .collect()
 }
 
+/// Resolved UE4SS mods folder of `game` (relative to its deploy folder),
+/// from its built-in definition's `[ue4ss]` block. The current/legacy
+/// probe looks under `game_root.join(subdir)`; no root: the default folder.
+/// `None` when the definition has no `[ue4ss]` block.
+pub(crate) fn ue4ss_mods_dir(game: &GameConfig, game_root: Option<&Path>) -> Option<String> {
+    let defs = builtin_definitions();
+    let u = find_definition(&defs, game.definition.as_deref()?)?
+        .ue4ss
+        .as_ref()?;
+    let root = game_root.map(|r| r.join(&game.subdir));
+    let exists = |rel: &str| root.as_ref().is_some_and(|r| r.join(rel).exists());
+    Some(u.resolve_mods_dir(exists).to_string())
+}
+
 /// Fills Steam-derived fields (library, prefix, plugins file) of `g` from a
 /// detected app when they are unset.
 pub fn apply_steam_app(g: &mut GameConfig, app: &steam::SteamApp) {

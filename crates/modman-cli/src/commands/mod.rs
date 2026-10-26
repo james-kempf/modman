@@ -36,6 +36,7 @@ pub fn dispatch(ctx: &mut Ctx, command: Commands) -> Result<()> {
         C::Disable(a) => mods::disable(ctx, a),
         C::Uninstall(a) => mods::uninstall(ctx, a),
         C::Reinstall(a) => install::reinstall(ctx, a),
+        C::Mods(a) => mods::run(ctx, a),
         C::Order(a) => mods::order(ctx, a),
         C::Conflicts(a) => mods::conflicts(ctx, a),
         C::Deps(a) => mods::deps(ctx, a),

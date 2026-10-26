@@ -38,12 +38,17 @@ import type {
   NxmReceived,
   PluginLine,
   PluginStage,
+  PoisonedBackup,
   ProfileLoaded,
   ProfileSummary,
   PurgeReport,
+  QuarantineManifest,
+  QuarantineReport,
   ReadyInfo,
   Reinstalled,
   ReqRow,
+  RestageReport,
+  RestoreReport,
   RunLogEntry,
   SearchView,
   StartupCheck,
@@ -117,6 +122,11 @@ export const COMMANDS = [
   "autoupdate_enable",
   "autoupdate_disable",
   "autoupdate_runs",
+  "backups_poisoned",
+  "backups_clean",
+  "quarantines_list",
+  "quarantine_restore",
+  "restage",
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
 
@@ -376,3 +386,30 @@ export const autoupdateDisable = () => call<boolean>("autoupdate_disable");
 /** Last-run log, newest first. */
 export const autoupdateRuns = (limit?: number) =>
   call<RunLogEntry[]>("autoupdate_runs", { limit: limit ?? null });
+
+// ── backup cleanup and restage ──────────────────────────────
+
+/** Dry run of clean-backups: changes nothing. */
+export const backupsPoisoned = (game?: Game) =>
+  call<PoisonedBackup[]>("backups_poisoned", { game: game ?? null });
+/** Job. The caller asks the user first; the backend refuses unless confirmed is true. */
+export const backupsClean = (opts: { includeAmbiguous: boolean; confirmed: boolean }, game?: Game) =>
+  call<QuarantineReport>("backups_clean", {
+    game: game ?? null,
+    include_ambiguous: opts.includeAmbiguous,
+    confirmed: opts.confirmed,
+  });
+/** Oldest first. */
+export const quarantinesList = (game?: Game) =>
+  call<QuarantineManifest[]>("quarantines_list", { game: game ?? null });
+/** Job. Refused unless confirmed is true. */
+export const quarantineRestore = (id: string, confirmed: boolean, game?: Game) =>
+  call<RestoreReport>("quarantine_restore", { game: game ?? null, id, confirmed });
+/** Job. Fails while confirmed poisoned backups exist (unless ignorePoisoned). Does not deploy. */
+export const restage = (opts: { ids?: number[]; all?: boolean; ignorePoisoned?: boolean } = {}, game?: Game) =>
+  call<RestageReport>("restage", {
+    game: game ?? null,
+    ids: opts.ids ?? [],
+    all: opts.all ?? false,
+    ignore_poisoned: opts.ignorePoisoned ?? false,
+  });

@@ -90,6 +90,60 @@ pub struct PluginsDef {
     pub appdata_folder: String,
 }
 
+/// UE4SS settings for ue-profile games (`[ue4ss]` in the game TOML). All
+/// paths are relative to the deploy root.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Ue4ssDef {
+    /// Mods folder of current UE4SS releases (`ue4ss/Mods`).
+    pub mods_dir: String,
+    /// Mods folder of older UE4SS releases (next to the game binary).
+    pub legacy_mods_dir: String,
+    /// File whose presence marks a current UE4SS install.
+    pub probe: String,
+}
+
+impl Ue4ssDef {
+    /// The mods folder in use. `exists` answers "does this deploy-root
+    /// relative path exist?" and is injected so tests never touch a real
+    /// game folder. Current probe present -> `mods_dir`; only the legacy
+    /// folder present -> `legacy_mods_dir`; nothing found -> `mods_dir`.
+    pub fn resolve_mods_dir(&self, exists: impl Fn(&str) -> bool) -> &str {
+        if !exists(&self.probe) && exists(&self.legacy_mods_dir) {
+            &self.legacy_mods_dir
+        } else {
+            &self.mods_dir
+        }
+    }
+}
+
+/// Folder a shared file lives in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SharedFileBase {
+    /// The resolved UE4SS mods folder (see [`Ue4ssDef::resolve_mods_dir`]).
+    Ue4ssModsDir,
+}
+
+/// How a shared file is merged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SharedFileFormat {
+    /// UE4SS `mods.txt`: `Name : 0|1` lines, `Keybinds` last.
+    Ue4ssModsTxt,
+}
+
+/// A file many mods may ship that modman owns and merges instead of
+/// placing (`[[shared_files]]`). Schema only; merging lives in deploy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SharedFileDef {
+    /// File name inside `relative_to` (one path component).
+    pub name: String,
+    pub relative_to: SharedFileBase,
+    pub format: SharedFileFormat,
+}
+
 fn default_subdir() -> String {
     ".".to_string()
 }
@@ -116,6 +170,11 @@ pub struct GameDefinition {
     /// Pak mods folder relative to the game root (ue profile).
     #[serde(default)]
     pub paks_dir: Option<String>,
+    /// UE4SS mod folders (ue profile only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ue4ss: Option<Ue4ssDef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shared_files: Vec<SharedFileDef>,
 }
 
 macro_rules! def {
@@ -169,9 +228,13 @@ pub fn parse_definition(text: &str, origin: &str) -> Result<GameDefinition, Game
             KNOWN_PROFILES.join(" ")
         )));
     }
+    let u = def.ue4ss.as_ref();
     for (key, value) in [
         ("subdir", Some(&def.subdir)),
         ("paks_dir", def.paks_dir.as_ref()),
+        ("ue4ss.mods_dir", u.map(|u| &u.mods_dir)),
+        ("ue4ss.legacy_mods_dir", u.map(|u| &u.legacy_mods_dir)),
+        ("ue4ss.probe", u.map(|u| &u.probe)),
     ] {
         if let Some(Err(m)) = value.map(|v| crate::deploy::check_rel_dir(v)) {
             return Err(bad(format!("{key} '{}': {m}", value.expect("checked"))));
@@ -181,6 +244,41 @@ pub fn parse_definition(text: &str, origin: &str) -> Result<GameDefinition, Game
         return Err(bad(
             "[plugins] is only valid for the bethesda profile".into()
         ));
+    }
+    if let Some(u) = u {
+        if def.profile != "ue" {
+            return Err(bad("[ue4ss] is only valid for the ue profile".into()));
+        }
+        // An empty or "." folder would make every mod root a UE4SS folder.
+        for (key, v) in [
+            ("mods_dir", &u.mods_dir),
+            ("legacy_mods_dir", &u.legacy_mods_dir),
+            ("probe", &u.probe),
+        ] {
+            if v.trim_start_matches("./").trim_matches('/').is_empty() || v == "." {
+                return Err(bad(format!("ue4ss.{key} must not be empty")));
+            }
+        }
+    }
+    for f in &def.shared_files {
+        match f.relative_to {
+            SharedFileBase::Ue4ssModsDir if def.ue4ss.is_none() => {
+                return Err(bad(format!(
+                    "shared file '{}' is relative to ue4ss_mods_dir but there is no [ue4ss]",
+                    f.name
+                )));
+            }
+            SharedFileBase::Ue4ssModsDir => {}
+        }
+        let single = !f.name.is_empty()
+            && !f.name.contains(['/', '\\', '\0'])
+            && !matches!(f.name.as_str(), "." | "..");
+        if !single {
+            return Err(bad(format!(
+                "shared file name '{}' must be one path component",
+                f.name
+            )));
+        }
     }
     Ok(def)
 }
@@ -363,6 +461,106 @@ mod tests {
             assert!(err.to_string().contains("x.toml"), "{err}");
         }
         assert!(parse_definition(&format!("{base}subdir = \"Data\"\n"), "x.toml").is_ok());
+    }
+
+    /// Catches: palworld.toml losing or misspelling the [ue4ss] block or the
+    /// mods.txt rule, and the new fields leaking into other definitions.
+    #[test]
+    fn palworld_declares_ue4ss_and_mods_txt_only_palworld_does() {
+        let defs = builtin_definitions();
+        let pal = find_definition(&defs, "palworld").unwrap();
+        assert_eq!(
+            pal.ue4ss,
+            Some(Ue4ssDef {
+                mods_dir: "Pal/Binaries/Win64/ue4ss/Mods".into(),
+                legacy_mods_dir: "Pal/Binaries/Win64/Mods".into(),
+                probe: "Pal/Binaries/Win64/ue4ss/UE4SS.dll".into(),
+            })
+        );
+        assert_eq!(
+            pal.shared_files,
+            [SharedFileDef {
+                name: "mods.txt".into(),
+                relative_to: SharedFileBase::Ue4ssModsDir,
+                format: SharedFileFormat::Ue4ssModsTxt,
+            }]
+        );
+        for d in defs.iter().filter(|d| d.domain != "palworld") {
+            assert!(
+                d.ue4ss.is_none() && d.shared_files.is_empty(),
+                "{}",
+                d.domain
+            );
+        }
+        // Other definitions serialise exactly as before (no new keys).
+        let sse = find_definition(&defs, "skyrimspecialedition").unwrap();
+        let json = serde_json::to_string(sse).unwrap();
+        assert!(
+            !json.contains("ue4ss") && !json.contains("shared_files"),
+            "{json}"
+        );
+    }
+
+    /// Catches: invalid [ue4ss]/[[shared_files]] combinations being accepted.
+    #[test]
+    fn ue4ss_and_shared_files_are_validated() {
+        let ue = "domain = \"x\"\nname = \"X\"\nprofile = \"ue\"\n";
+        let block = "[ue4ss]\nmods_dir = \"A/Mods\"\nlegacy_mods_dir = \"B/Mods\"\nprobe = \"A/UE4SS.dll\"\n";
+        let shared = |name: &str| {
+            format!("[[shared_files]]\nname = \"{name}\"\nrelative_to = \"ue4ss_mods_dir\"\nformat = \"ue4ss_mods_txt\"\n")
+        };
+        assert!(parse_definition(&format!("{ue}{block}{}", shared("mods.txt")), "x.toml").is_ok());
+        let bad = [
+            // [ue4ss] outside the ue profile.
+            format!("domain = \"x\"\nname = \"X\"\nprofile = \"generic\"\n{block}"),
+            // Escaping and empty folders.
+            format!("{ue}[ue4ss]\nmods_dir = \"../M\"\nlegacy_mods_dir = \"B\"\nprobe = \"p\"\n"),
+            format!("{ue}[ue4ss]\nmods_dir = \".\"\nlegacy_mods_dir = \"B\"\nprobe = \"p\"\n"),
+            // Unknown key, missing key.
+            format!("{ue}{block}extra = 1\n"),
+            format!("{ue}[ue4ss]\nmods_dir = \"A\"\n"),
+            // shared file without [ue4ss], with a path, unknown format.
+            format!("{ue}{}", shared("mods.txt")),
+            format!("{ue}{block}{}", shared("../mods.txt")),
+            format!("{ue}{block}{}", shared("a/mods.txt")),
+            format!("{ue}{block}[[shared_files]]\nname = \"m\"\nrelative_to = \"ue4ss_mods_dir\"\nformat = \"json\"\n"),
+        ];
+        for text in bad {
+            assert!(parse_definition(&text, "x.toml").is_err(), "{text}");
+        }
+    }
+
+    /// Catches: picking the wrong UE4SS mods folder (D01 risk 5).
+    #[test]
+    fn ue4ss_mods_dir_resolution_uses_the_injected_probe() {
+        let defs = builtin_definitions();
+        let u = find_definition(&defs, "palworld")
+            .unwrap()
+            .ue4ss
+            .clone()
+            .unwrap();
+        let has = |set: &'static [&'static str]| move |p: &str| set.contains(&p);
+        let new = "Pal/Binaries/Win64/ue4ss/Mods";
+        let legacy = "Pal/Binaries/Win64/Mods";
+        let dll = "Pal/Binaries/Win64/ue4ss/UE4SS.dll";
+        assert_eq!(
+            u.resolve_mods_dir(has(&["Pal/Binaries/Win64/ue4ss/UE4SS.dll"])),
+            new
+        );
+        assert_eq!(
+            u.resolve_mods_dir(has(&["Pal/Binaries/Win64/Mods"])),
+            legacy
+        );
+        // Both present: the current UE4SS wins.
+        assert_eq!(
+            u.resolve_mods_dir(has(&[
+                "Pal/Binaries/Win64/ue4ss/UE4SS.dll",
+                "Pal/Binaries/Win64/Mods"
+            ])),
+            new
+        );
+        assert_eq!(u.resolve_mods_dir(has(&[])), new, "unknown -> default");
+        assert_eq!(u.probe, dll);
     }
 
     #[test]

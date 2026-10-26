@@ -242,6 +242,9 @@ pub struct LayoutOptions<'a> {
     pub paks_dir: Option<&'a str>,
     /// Interactive pick when there are several variants and no preset.
     pub choose_variant: Option<VariantChooser<'a>>,
+    /// Resolved UE4SS mods folder relative to the deploy root (ue profile,
+    /// definitions with `[ue4ss]` only). `None` keeps the legacy ue layout.
+    pub ue4ss_mods_dir: Option<&'a str>,
 }
 
 impl<'a> LayoutOptions<'a> {
@@ -254,6 +257,7 @@ impl<'a> LayoutOptions<'a> {
             preset_variant: None,
             paks_dir: None,
             choose_variant: None,
+            ue4ss_mods_dir: None,
         }
     }
 }
@@ -312,6 +316,53 @@ pub fn sanitize_name(name: &str) -> String {
     } else {
         s
     }
+}
+
+/// The entry-point file a UE4SS mod folder holds in its sub-folder `sub`
+/// (any case): `Scripts/main.lua` (Lua) or `dlls/main.dll` (C++).
+pub(crate) fn ue4ss_marker(sub: &str) -> Option<&'static str> {
+    match sub.to_lowercase().as_str() {
+        "scripts" => Some("main.lua"),
+        "dlls" => Some("main.dll"),
+        _ => None,
+    }
+}
+
+/// True when `rel` (below a mod folder, `/`-separated) is a UE4SS mod
+/// entry point: `Scripts/main.lua` or `dlls/main.dll`, any case.
+pub(crate) fn is_ue4ss_marker_path(rel: &str) -> bool {
+    match rel.split_once('/') {
+        Some((sub, file)) => ue4ss_marker(sub).is_some_and(|m| file.eq_ignore_ascii_case(m)),
+        None => false,
+    }
+}
+
+/// UE4SS mod folder: holds `Scripts/main.lua` or `dlls/main.dll` (any case).
+fn is_ue4ss_mod(dir: &Path) -> Result<bool, StagingError> {
+    for e in entries(dir)? {
+        let Some(marker) = ue4ss_marker(&e.name).filter(|_| e.is_dir) else {
+            continue;
+        };
+        if has_file_ci(&dir.join(&e.name), marker)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Removes empty directories below `dir` (not `dir` itself). Returns
+/// whether `dir` is empty afterwards.
+fn prune_empty_dirs(dir: &Path) -> Result<bool, StagingError> {
+    let mut empty = true;
+    for e in entries(dir)? {
+        let p = dir.join(&e.name);
+        if e.is_dir && prune_empty_dirs(&p)? {
+            fs::remove_dir(&p).map_err(io_err(&p))?;
+        } else {
+            empty = false;
+        }
+    }
+    Ok(empty)
 }
 
 /// One entry of a directory: name and whether it is a directory.
@@ -469,6 +520,8 @@ struct Layout<'a, 'o> {
     profile: LayoutProfile,
     tops: Vec<String>,
     paks_dir: String,
+    /// Resolved UE4SS mods folder (ue profile with `[ue4ss]`).
+    ue4ss: Option<String>,
     safe: String,
     placer: Placer<'o>,
     outcome: LayoutOutcome,
@@ -514,6 +567,11 @@ impl Layout<'_, '_> {
                 return Ok(src);
             }
             let d = &dirs[0].name;
+            // Descending into a UE4SS mod folder (or its Scripts/) would lose
+            // the folder name UE4SS identifies the mod by.
+            if self.ue4ss.is_some() && (is_ue4ss_mod(&src)? || is_ue4ss_mod(&src.join(d))?) {
+                return Ok(src);
+            }
             let dl = d.to_lowercase();
             let is_data = dl == "data" || dl == "data files";
             // Bethesda: a folder holding Data/ or an .exe is a wrapper even
@@ -746,7 +804,43 @@ impl Layout<'_, '_> {
         Ok(())
     }
 
+    /// UE4SS mod folders under `dir`, not descending into deploy-root tops
+    /// (those are already game-root shaped) or into a found mod folder.
+    fn find_ue4ss_mods(&self, dir: &Path, found: &mut Vec<PathBuf>) -> Result<(), StagingError> {
+        for e in entries(dir)? {
+            if !e.is_dir || self.is_top(&e.name) {
+                continue;
+            }
+            let p = dir.join(&e.name);
+            if is_ue4ss_mod(&p)? {
+                found.push(p);
+            } else {
+                self.find_ue4ss_mods(&p, found)?;
+            }
+        }
+        Ok(())
+    }
+
     fn ue(&mut self, src: &Path) -> Result<(), StagingError> {
+        if let Some(md) = self.ue4ss.clone() {
+            if is_ue4ss_mod(src)? {
+                // The archive root is the mod: no folder name to keep.
+                let safe = self.safe.clone();
+                return self.placer.place(src, &format!("{md}/{safe}"));
+            }
+            let mut found = Vec::new();
+            self.find_ue4ss_mods(src, &mut found)?;
+            for d in &found {
+                // Keeps the archive spelling: UE4SS matches it to mods.txt.
+                let name = d.file_name().expect("subdir").to_string_lossy();
+                self.placer.place(d, &format!("{md}/{name}"))?;
+            }
+            if !found.is_empty() {
+                // Wrapper folders emptied above must not be staged.
+                prune_empty_dirs(src)?;
+            }
+        }
+        // Paks (hybrid mods) and everything else follow the legacy rules.
         if self.has_top(src)? {
             return self.placer.place_all(src, true);
         }
@@ -813,11 +907,25 @@ pub fn normalize_layout(
         return Err(unsafe_rel(out, raw_paks));
     }
     let paks_dir = raw_paks.trim_matches('/').to_string();
+    let ue4ss = match opts
+        .ue4ss_mods_dir
+        .filter(|_| opts.profile == LayoutProfile::Ue)
+    {
+        Some(md) => {
+            let t = md.trim_start_matches("./").trim_matches('/');
+            if crate::deploy::check_rel_dir(md).is_err() || t.is_empty() || t == "." {
+                return Err(unsafe_rel(out, md));
+            }
+            Some(t.to_string())
+        }
+        None => None,
+    };
     fs::create_dir_all(out).map_err(io_err(out))?;
     let mut l = Layout {
         profile: opts.profile,
         tops: opts.profile.tops(&paks_dir),
         paks_dir,
+        ue4ss,
         safe: sanitize_name(opts.mod_name),
         placer: Placer::new(out),
         outcome: LayoutOutcome::default(),
@@ -1404,6 +1512,186 @@ mod tests {
         o.paks_dir = Some("Pal/Content/Paks/~mods");
         let r = run_with(&["pal/Binaries/Win64/ue4ss/x.dll", "readme.txt"], o);
         assert_eq!(files(&r.out), ["pal/Binaries/Win64/ue4ss/x.dll"]);
+    }
+
+    // ---- ue + UE4SS (D01) ----
+
+    const PAKS: &str = "Pal/Content/Paks/~mods";
+    const U_MODS: &str = "Pal/Binaries/Win64/ue4ss/Mods";
+
+    fn ue4ss_run(name: &str, paths: &[&str]) -> Vec<String> {
+        let mut o = LayoutOptions::new(P::Ue, name);
+        o.paks_dir = Some(PAKS);
+        o.ue4ss_mods_dir = Some(U_MODS);
+        files(&run_with(paths, o).out)
+    }
+
+    /// Catches (risk 2 / root cause): wrapper stripping and the doc filter
+    /// dropping enabled.txt, config.lua and Scripts/config.txt from a UE4SS
+    /// mod folder; root readme .txt of other mods must still be dropped.
+    #[test]
+    fn ue4ss_mod_folder_keeps_enabled_and_config_files() {
+        assert_eq!(
+            ue4ss_run(
+                "FSS",
+                &[
+                    "FullSphereSummon/enabled.txt",
+                    "FullSphereSummon/config.lua",
+                    "FullSphereSummon/Scripts/config.txt",
+                    "FullSphereSummon/Scripts/main.lua",
+                    "README.md",
+                    "readme.txt",
+                ]
+            ),
+            [
+                "Pal/Binaries/Win64/ue4ss/Mods/FullSphereSummon/Scripts/config.txt",
+                "Pal/Binaries/Win64/ue4ss/Mods/FullSphereSummon/Scripts/main.lua",
+                "Pal/Binaries/Win64/ue4ss/Mods/FullSphereSummon/config.lua",
+                "Pal/Binaries/Win64/ue4ss/Mods/FullSphereSummon/enabled.txt",
+            ]
+        );
+        // Non-UE4SS mods in the same game still lose root-level docs.
+        assert_eq!(
+            ue4ss_run("p", &["Wrap/a_P.pak", "Wrap/readme.txt"]),
+            ["Pal/Content/Paks/~mods/a_P.pak"]
+        );
+        assert_eq!(
+            ue4ss_run("loose", &["tool.ini", "readme.txt"]),
+            ["tool.ini"]
+        );
+    }
+
+    /// Catches (risk 3/4 case): lower-case scripts/MAIN.LUA not detected, or
+    /// the archive spelling being "fixed" (UE4SS under Proton is
+    /// case-insensitive, renaming would desync mods.txt).
+    #[test]
+    fn ue4ss_detection_is_case_insensitive_and_keeps_spelling() {
+        assert_eq!(
+            ue4ss_run(
+                "Move Common Reward",
+                &[
+                    "ue4ss/Mods/MoveCommonRewardDown/enabled.txt",
+                    "ue4ss/Mods/MoveCommonRewardDown/scripts/MAIN.LUA",
+                ]
+            ),
+            [
+                "Pal/Binaries/Win64/ue4ss/Mods/MoveCommonRewardDown/enabled.txt",
+                "Pal/Binaries/Win64/ue4ss/Mods/MoveCommonRewardDown/scripts/MAIN.LUA",
+            ]
+        );
+    }
+
+    /// Catches: C++ UE4SS mods (dlls/main.dll) not detected.
+    #[test]
+    fn ue4ss_cpp_mod_is_detected_by_dlls_main_dll() {
+        assert_eq!(
+            ue4ss_run("cpp", &["CppMod/dlls/main.dll", "CppMod/enabled.txt"]),
+            [
+                "Pal/Binaries/Win64/ue4ss/Mods/CppMod/dlls/main.dll",
+                "Pal/Binaries/Win64/ue4ss/Mods/CppMod/enabled.txt",
+            ]
+        );
+    }
+
+    /// Catches (risk 2 precision): re-routing an archive that is already
+    /// game-root shaped (UE4SS folder under pal/ or engine/).
+    #[test]
+    fn ue4ss_dirs_under_a_top_stay_as_is() {
+        assert_eq!(
+            ue4ss_run(
+                "AntiWaste",
+                &[
+                    "pal/Binaries/Win64/ue4ss/Mods/AntiWaste/enabled.txt",
+                    "pal/Binaries/Win64/ue4ss/Mods/AntiWaste/Scripts/main.lua",
+                ]
+            ),
+            [
+                "pal/Binaries/Win64/ue4ss/Mods/AntiWaste/Scripts/main.lua",
+                "pal/Binaries/Win64/ue4ss/Mods/AntiWaste/enabled.txt",
+            ]
+        );
+        assert_eq!(
+            ue4ss_run("E", &["Engine/Lua/Scripts/main.lua"]),
+            ["Engine/Lua/Scripts/main.lua"]
+        );
+    }
+
+    /// Catches (risk 2 precision): the new routing leaking into UE games
+    /// whose definition has no [ue4ss] block (output must equal legacy).
+    #[test]
+    fn ue_without_ue4ss_is_unchanged() {
+        let mut o = LayoutOptions::new(P::Ue, "x");
+        o.paks_dir = Some(PAKS);
+        let r = run_with(
+            &[
+                "CustomBaseRadius/enabled.txt",
+                "CustomBaseRadius/Scripts/main.lua",
+            ],
+            o,
+        );
+        assert_eq!(files(&r.out), ["main.lua"]);
+    }
+
+    /// Catches: an archive whose root is the mod (Scripts/ at root) being
+    /// flattened instead of getting a folder named after the mod.
+    #[test]
+    fn ue4ss_archive_root_mod_gets_sanitized_mod_name() {
+        assert_eq!(
+            ue4ss_run("My Lua Mod 1.2", &["Scripts/main.lua", "enabled.txt"]),
+            [
+                "Pal/Binaries/Win64/ue4ss/Mods/My_Lua_Mod_1.2/Scripts/main.lua",
+                "Pal/Binaries/Win64/ue4ss/Mods/My_Lua_Mod_1.2/enabled.txt",
+            ]
+        );
+    }
+
+    /// Catches (risk 4): a pak + Lua hybrid losing its pak (or its Lua
+    /// folder): the folder goes to the UE4SS mods dir, the pak through ue().
+    #[test]
+    fn ue4ss_hybrid_routes_pak_and_folder() {
+        assert_eq!(
+            ue4ss_run(
+                "hyb",
+                &[
+                    "Hybrid/LuaPart/Scripts/main.lua",
+                    "Hybrid/LuaPart/enabled.txt",
+                    "Hybrid/Paks/Hybrid_P.pak",
+                    "Hybrid/readme.txt",
+                ]
+            ),
+            [
+                "Pal/Binaries/Win64/ue4ss/Mods/LuaPart/Scripts/main.lua",
+                "Pal/Binaries/Win64/ue4ss/Mods/LuaPart/enabled.txt",
+                "Pal/Content/Paks/~mods/Hybrid_P.pak",
+            ]
+        );
+        // Hybrid already game-root shaped for the pak, Lua folder at root.
+        assert_eq!(
+            ue4ss_run(
+                "hyb2",
+                &["Pal/Content/Paks/~mods/H_P.pak", "LuaPart/Scripts/main.lua"]
+            ),
+            [
+                "Pal/Binaries/Win64/ue4ss/Mods/LuaPart/Scripts/main.lua",
+                "Pal/Content/Paks/~mods/H_P.pak",
+            ]
+        );
+    }
+
+    /// Catches: an escaping UE4SS mods dir writing outside the staging dir.
+    #[test]
+    fn ue4ss_mods_dir_must_be_relative_and_non_empty() {
+        for bad in ["../x", "/abs", ".", ""] {
+            let t = tempfile::tempdir().unwrap();
+            let src = t.path().join("src");
+            mk(&src, &["M/Scripts/main.lua"]);
+            let mut o = LayoutOptions::new(P::Ue, "x");
+            o.ue4ss_mods_dir = Some(bad);
+            assert!(
+                normalize_layout(&src, &t.path().join("out"), &o).is_err(),
+                "{bad:?}"
+            );
+        }
     }
 
     // ---- witcher3 ----

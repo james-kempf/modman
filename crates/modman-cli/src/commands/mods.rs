@@ -788,3 +788,62 @@ mod tests {
         assert_eq!(fmt_time(1_700_000_000), "2023-11-14 22:13 UTC");
     }
 }
+
+// ── mods restage ────────────────────────────────────────────
+
+#[derive(Args, Debug)]
+pub struct ModsArgs {
+    #[command(subcommand)]
+    pub action: ModsAction,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ModsAction {
+    /// Rebuild staged files from the kept archives in the current layout
+    /// (e.g. UE4SS per-mod folders). Your edits to staged files carry over.
+    Restage(RestageArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct RestageArgs {
+    /// Mods (#position, id, name, Nexus id or unique name part). None: the
+    /// mods staged in an outdated layout.
+    #[arg(conflicts_with = "all")]
+    pub refs: Vec<String>,
+    /// Every installed mod.
+    #[arg(short = 'a', long)]
+    pub all: bool,
+    /// Restage although confirmed poisoned backups exist (see
+    /// `modman deploy clean-backups`).
+    #[arg(long)]
+    pub ignore_poisoned: bool,
+}
+
+pub fn run(ctx: &mut Ctx, args: ModsArgs) -> Result<()> {
+    match args.action {
+        ModsAction::Restage(a) => restage(ctx, a),
+    }
+}
+
+fn restage(ctx: &mut Ctx, args: RestageArgs) -> Result<()> {
+    let game = ctx.need_game()?;
+    let ids = args
+        .refs
+        .iter()
+        .map(|r| Ok(mods::resolve(ctx.store.conn(), &game.domain, r)?.id))
+        .collect::<Result<Vec<_>>>()?;
+    let req = app::restage::RestageRequest {
+        ids,
+        all: args.all,
+        ignore_poisoned: args.ignore_poisoned,
+    };
+    let ui = ctx.ui();
+    let r = app::restage::restage(&mut ctx.cx(&ui), &game, &req)?;
+    if !r.failed.is_empty() {
+        bail!(
+            "{} mod(s) could not be restaged; their staged files are unchanged.",
+            r.failed.len()
+        );
+    }
+    Ok(())
+}

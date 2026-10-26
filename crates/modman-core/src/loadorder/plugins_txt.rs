@@ -225,7 +225,7 @@ fn open_dir(root: &Path, rel: &str, full: &Path) -> Result<Opened, LoadOrderErro
 }
 
 /// Reads the file without following a symlink at its name.
-fn read_nofollow(c: &Confined, full: &Path) -> Result<Option<Vec<u8>>, LoadOrderError> {
+pub(super) fn read_nofollow(c: &Confined, full: &Path) -> Result<Option<Vec<u8>>, LoadOrderError> {
     let fd = match openat(
         CWD,
         &c.path,
@@ -256,7 +256,11 @@ fn write_atomic(c: &Confined, full: &Path, lines: &[Vec<u8>]) -> Result<(), Load
 }
 
 /// [`write_atomic`] for exact bytes (restoring the pre-deploy original).
-fn write_bytes_atomic(c: &Confined, full: &Path, body: &[u8]) -> Result<(), LoadOrderError> {
+pub(super) fn write_bytes_atomic(
+    c: &Confined,
+    full: &Path,
+    body: &[u8],
+) -> Result<(), LoadOrderError> {
     let name = c
         .path
         .file_name()
