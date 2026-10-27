@@ -4,6 +4,7 @@
 // Directions repeat while held; buttons fire once per press.
 
 import type { NavAction } from "./actions";
+import { navArbiter, type NavArbiter, type NavInput } from "./arbiter";
 import { setModality } from "./modality";
 import type { Dir } from "./spatial";
 
@@ -16,6 +17,12 @@ export interface GamepadNavOptions {
   repeatDelay?: number;
   /** ms between repeats. */
   repeatEvery?: number;
+  /** ms within which a key and a pad reporting the same input count as one press (sets the arbiter's window). */
+  dupWindow?: number;
+  /** ms an input may read as released (pads handing over) and still continue the same hold. */
+  releaseGrace?: number;
+  /** Shared with installKeyboardNav; defaults to the app-wide one. */
+  arbiter?: NavArbiter;
 }
 
 type PadLike = Pick<Gamepad, "buttons" | "axes" | "connected">;
@@ -27,13 +34,16 @@ const defaultPads: GetPads = () =>
 const pressed = (p: PadLike, i: number) => !!p.buttons[i]?.pressed;
 
 export class GamepadNav {
-  private held = new Set<string>();
+  private held = new Map<NavInput, Set<number>>();
+  private released = new Map<NavInput, { at: number; on: Set<number> }>();
   private dir: Dir | null = null;
   private dirSince = 0;
   private lastRepeat = 0;
   private readonly deadzone: number;
   private readonly repeatDelay: number;
   private readonly repeatEvery: number;
+  private readonly releaseGrace: number;
+  readonly arbiter: NavArbiter;
 
   constructor(
     private readonly getPads: GetPads = defaultPads,
@@ -42,36 +52,60 @@ export class GamepadNav {
     this.deadzone = opts.deadzone ?? 0.5;
     this.repeatDelay = opts.repeatDelay ?? 400;
     this.repeatEvery = opts.repeatEvery ?? 120;
+    this.releaseGrace = opts.releaseGrace ?? 50;
+    this.arbiter = opts.arbiter ?? navArbiter;
+    if (opts.dupWindow !== undefined) this.arbiter.dupWindow = opts.dupWindow;
   }
 
   /** Read every connected pad; returns the actions triggered since the last poll. */
   poll(now: number): NavAction[] {
-    const pads = Array.from(this.getPads()).filter((p): p is PadLike => !!p && p.connected);
-    const down = new Set<string>();
+    // Input -> indices of the pads holding it.
+    const down = new Map<NavInput, Set<number>>();
+    const hold = (k: NavInput, i: number) => down.set(k, (down.get(k) ?? new Set()).add(i));
     let dir: Dir | null = null;
-    for (const p of pads) {
-      if (pressed(p, BUTTON.A)) down.add("A");
-      if (pressed(p, BUTTON.B)) down.add("B");
-      if (pressed(p, BUTTON.LB)) down.add("LB");
-      if (pressed(p, BUTTON.RB)) down.add("RB");
-      dir ??= this.direction(p);
+    for (const [i, p] of Array.from(this.getPads()).entries()) {
+      if (!p?.connected) continue;
+      for (const b of ["A", "B", "LB", "RB"] as const) if (pressed(p, BUTTON[b])) hold(b, i);
+      if (dir) continue;
+      dir = this.direction(p);
+      if (dir) hold(dir, i);
     }
+    for (const [k, on] of this.held) if (!down.has(k)) this.released.set(k, { at: now, on });
+    // Steam's virtual pad and the physical pad can hand a press over with a
+    // frame of neither: the same input back on another pad within the grace
+    // continues the hold. Same pad = a real second press.
+    const resumed = (k: NavInput) => {
+      const r = this.released.get(k);
+      if (!r || now - r.at >= this.releaseGrace) return false;
+      return [...(down.get(k) ?? [])].some((i) => !r.on.has(i));
+    };
+    const edge = (k: NavInput) => down.has(k) && !this.held.has(k) && !resumed(k);
 
     const out: NavAction[] = [];
-    const edge = (k: string) => down.has(k) && !this.held.has(k);
-    if (edge("A")) out.push({ type: "select" });
-    if (edge("B")) out.push({ type: "back" });
-    if (edge("LB")) out.push({ type: "tab", delta: -1 });
-    if (edge("RB")) out.push({ type: "tab", delta: 1 });
+    // A new press the keyboard (Steam Input keys) already reported is dropped.
+    const emit = (k: NavInput, a: NavAction) => {
+      if (this.arbiter.padIsDuplicate(k, now)) return;
+      this.arbiter.notePad(k, now);
+      out.push(a);
+    };
+    if (edge("A")) emit("A", { type: "select" });
+    if (edge("B")) emit("B", { type: "back" });
+    if (edge("LB")) emit("LB", { type: "tab", delta: -1 });
+    if (edge("RB")) emit("RB", { type: "tab", delta: 1 });
     this.held = down;
+    this.arbiter.notePoll(new Set(down.keys()), now);
 
     if (dir !== this.dir) {
       this.dir = dir;
-      this.dirSince = now;
-      this.lastRepeat = now;
-      if (dir) out.push({ type: "move", dir });
+      if (dir && !resumed(dir)) {
+        this.dirSince = now;
+        this.lastRepeat = now;
+        emit(dir, { type: "move", dir });
+      }
     } else if (dir && now - this.dirSince >= this.repeatDelay && now - this.lastRepeat >= this.repeatEvery) {
+      // Own repeats are never dropped; they only refresh the arbiter.
       this.lastRepeat = now;
+      this.arbiter.notePad(dir, now);
       out.push({ type: "move", dir });
     }
     return out;
@@ -119,6 +153,8 @@ export function startGamepadLoop(
     if (!any && running) {
       running = false;
       win.cancelAnimationFrame(frame);
+      // No pad left: nothing may keep swallowing keys.
+      nav.arbiter.reset();
     }
   };
   win.addEventListener("gamepadconnected", start);
@@ -129,6 +165,7 @@ export function startGamepadLoop(
     win.removeEventListener("gamepaddisconnected", stopLoop);
     running = false;
     win.cancelAnimationFrame(frame);
+    nav.arbiter.reset();
   };
 }
 

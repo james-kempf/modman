@@ -2,6 +2,7 @@
 // Navigation actions shared by the keyboard and the gamepad.
 
 import { useUi, type ViewId } from "../app/store";
+import { navArbiter, type NavArbiter, type NavInput } from "./arbiter";
 import { focusables, isTextInput, moveFocus, navScope, type Dir } from "./spatial";
 
 export type NavAction =
@@ -94,7 +95,49 @@ export function keyToNav(e: KeyboardEvent): NavAction | null {
   }
 }
 
-export function installKeyboardNav(doc: Document = document): () => void {
+const KEY_INPUT: Record<string, NavInput> = {
+  ArrowUp: "up",
+  ArrowDown: "down",
+  ArrowLeft: "left",
+  ArrowRight: "right",
+  Enter: "A",
+  " ": "A",
+  Escape: "B",
+  PageUp: "LB",
+  PageDown: "RB",
+};
+
+/** The pad input a key can echo under Steam Input, if any. */
+function keyInput(e: KeyboardEvent): NavInput | null {
+  if (e.altKey || e.ctrlKey || e.metaKey) return null;
+  // Space in a text field is typing.
+  if (e.key === " " && isTextInput(e.target instanceof Element ? e.target : null)) return null;
+  return KEY_INPUT[e.key] ?? null;
+}
+
+export function installKeyboardNav(doc: Document = document, arbiter: NavArbiter = navArbiter): () => void {
+  const swallowed = new Set<string>();
+  const swallow = (e: KeyboardEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  // Capture phase: a key echoing a pad press is dropped before any handler
+  // (or native Enter/Space activation) sees it.
+  const dedup = (e: KeyboardEvent) => {
+    const input = keyInput(e);
+    if (!input) return;
+    const now = (doc.defaultView ?? window).performance.now();
+    if (arbiter.keyIsDuplicate(input, e.repeat, now)) {
+      swallowed.add(e.key);
+      swallow(e);
+      return;
+    }
+    arbiter.noteKey(input, now);
+  };
+  // Space activates a button on keyup: drop the keyup of a swallowed keydown too.
+  const dedupUp = (e: KeyboardEvent) => {
+    if (swallowed.delete(e.key)) swallow(e);
+  };
   const handler = (e: KeyboardEvent) => {
     if (e.defaultPrevented) return;
     const action = keyToNav(e);
@@ -102,6 +145,13 @@ export function installKeyboardNav(doc: Document = document): () => void {
     e.preventDefault();
     performNav(action, doc);
   };
+  doc.addEventListener("keydown", dedup, true);
+  doc.addEventListener("keyup", dedupUp, true);
   doc.addEventListener("keydown", handler);
-  return () => doc.removeEventListener("keydown", handler);
+  return () => {
+    doc.removeEventListener("keydown", dedup, true);
+    doc.removeEventListener("keyup", dedupUp, true);
+    doc.removeEventListener("keydown", handler);
+    arbiter.reset();
+  };
 }
