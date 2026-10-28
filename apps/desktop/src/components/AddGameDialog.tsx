@@ -81,7 +81,7 @@ export function AddGameDialog() {
         {detect.isError ? (
           <ErrorNote>{errMsg(detect.error)}</ErrorNote>
         ) : detect.isPending ? (
-          <p className="text-[14px] text-zinc-400">Looking for Steam games…</p>
+          <p className="text-body text-zinc-400">Looking for Steam games…</p>
         ) : !fresh.length ? (
           <Empty>No other supported games found in Steam.</Empty>
         ) : (
@@ -89,10 +89,10 @@ export function AddGameDialog() {
             {fresh.map((d) => (
               <li key={d.domain} className="flex flex-wrap items-center gap-4 py-3">
                 <span className="min-w-0 flex-1">
-                  <span className="flex flex-wrap items-center gap-2 text-[14.5px] text-zinc-100">
+                  <span className="flex flex-wrap items-center gap-2 text-body text-zinc-100">
                     {d.name} <SupportBadge support={d.support} />
                   </span>
-                  <span className="block font-mono text-[11.5px] break-all text-dim">{d.install_dir}</span>
+                  <span className="block font-mono text-caption break-all text-dim">{d.install_dir}</span>
                 </span>
                 <Button
                   size="sm"

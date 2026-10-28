@@ -12,6 +12,7 @@ import type {
   AfterChange,
   Answer,
   AppInfo,
+  ShortcutStatus,
   ArtKind,
   AutoupdateStatus,
   CollectionInfo,
@@ -65,6 +66,9 @@ const call = <T>(cmd: string, args?: Record<string, unknown>): Promise<T> =>
 /** Every command name, as registered in the backend. */
 export const COMMANDS = [
   "app_info",
+  "quit_app",
+  "steam_shortcut_status",
+  "steam_shortcut_set",
   "app_ready",
   "startup_check",
   "prompt_answer",
@@ -133,7 +137,10 @@ export type CommandName = (typeof COMMANDS)[number];
 
 // ── app ─────────────────────────────────────────────────────
 
+export const quitApp = () => call<void>("quit_app");
 export const appInfo = () => call<AppInfo>("app_info");
+export const steamShortcutStatus = () => call<ShortcutStatus>("steam_shortcut_status");
+export const steamShortcutSet = (enabled: boolean) => call<ShortcutStatus>("steam_shortcut_set", { enabled });
 /** Call once listeners are registered: start-up check + queued nxm links start processing. */
 export const appReady = () => call<ReadyInfo>("app_ready");
 /** The one auto-update check of this app start (cached). */

@@ -9,7 +9,10 @@ Nexus Mods manager for Linux (Rust rewrite). Work in progress.
 ```sh
 cargo build      # core + CLI
 cargo run -p modman-cli -- --help
-cd apps/desktop && npm install && npm run tauri dev   # needs webkit2gtk-4.1 dev packages
+./dev.sh         # desktop app in Tauri dev mode (installs npm deps on first run)
 ```
+
+`dev.sh` needs the webkit2gtk-4.1 dev packages and Node/npm on your `PATH`.
+It is equivalent to `cd apps/desktop && npm install && npm run tauri dev`.
 
 Licence: GPL-3.0-or-later.

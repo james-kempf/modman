@@ -9,8 +9,91 @@
 @import "tailwindcss";
 
 @theme {
+  /*
+   * Design tokens: the one source for sizes, radii, colours and motion.
+   * Tailwind generates the utilities from these names (text-body,
+   * rounded-card, border-hairline, min-h-control, duration-base, ...).
+   * Tailwind's numeric spacing scale (--spacing, 0.25rem steps) stays the
+   * scale for gaps, margins and paddings; the named sizes below cover the
+   * repeated component dimensions.
+   *
+   * Font size (no paired line-height: text inherits it, or sets leading-*)
+   *   --text-micro    11px  chips, mono initials, eyebrows
+   *   --text-caption  12px  mono paths, small meta
+   *   --text-label    13px  field labels, helper/intro text, small buttons
+   *   --text-body     14px  body copy, rows, menus
+   *   --text-lead     15px  inputs, large buttons, intros
+   *   --text-title    16px  card titles, prompt questions
+   *   --text-display  40px  view titles (md and up)
+   *   (Tailwind text-lg/xl/2xl/3xl remain the heading steps.)
+   * Tracking: --tracking-eyebrow 0.14em (plus tracking-tight/tighter)
+   * Radius
+   *   --radius-control-sm  0.5rem  options inside a control, badges, checks
+   *   --radius-control     0.75rem buttons, inputs, thumbs, menus
+   *   --radius-card        1rem    cards, tiles, dialogs, notes
+   *   --radius-pill        9999px  dots, switches, progress
+   * Spacing / sizing
+   *   --spacing-section     1rem    padding of every card section
+   *   --spacing-control-sm  2.75rem small control height (44px target)
+   *   --spacing-control     3rem    control height and icon-button size
+   *   --spacing-control-lg  3.5rem  large control height
+   *   --spacing-thumb       2.75rem mod thumbnail / monogram
+   *   --spacing-tile        4rem    empty-state icon tile
+   *   --spacing-badge       1.5rem  badge height
+   *   --spacing-icon        1.25rem switch knob, radio/check mark
+   *   --spacing-dot         0.625rem status dot
+   *   --spacing-rail        3px     thin activity bars and their gaps
+   *   --spacing-sidebar     268px   navigation sidebar width
+   *   --container-content   1400px  page content max width
+   *   --container-prose     65ch    long text measure
+   *   --container-prose-sm  52ch    short text measure (empty states)
+   * Colour on white (overlays on the ink surfaces)
+   *   --color-hairline     5%   card borders and dividers
+   *   --color-line         8%   input, well and dashed borders
+   *   --color-line-strong  10%  overlay (glass) border
+   *   --color-line-focus   25%  focused input border
+   *   --color-fill-1       3%   resting option fill, row hover
+   *   --color-fill-2       6%   default button, track, hover
+   *   --color-fill-3       8%   selected option
+   *   --color-fill-hover   10%  hover on a filled control, switch off
+   *   --color-surface-overlay  zinc-900 at 95%  glass overlays
+   *   --color-scrim            ink at 70%       dialog backdrop
+   * Shadow: --shadow-overlay (dialogs, menus, notices via .glass)
+   * Duration: --transition-duration-fast 150ms, -base 200ms, -slow 300ms
+   * Opacity: --opacity-disabled 0.45, --opacity-grain 0.035
+   */
   --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, "SFMono-Regular", monospace;
+
+  --text-micro: 0.6875rem;
+  --text-caption: 0.75rem;
+  --text-label: 0.8125rem;
+  --text-body: 0.875rem;
+  --text-lead: 0.9375rem;
+  --text-title: 1rem;
+  --text-display: 2.5rem;
+
+  --tracking-eyebrow: 0.14em;
+
+  --radius-control-sm: 0.5rem;
+  --radius-control: 0.75rem;
+  --radius-card: 1rem;
+  --radius-pill: 9999px;
+
+  --spacing-section: 1rem;
+  --spacing-control-sm: 2.75rem;
+  --spacing-control: 3rem;
+  --spacing-control-lg: 3.5rem;
+  --spacing-thumb: 2.75rem;
+  --spacing-tile: 4rem;
+  --spacing-badge: 1.5rem;
+  --spacing-icon: 1.25rem;
+  --spacing-dot: 0.625rem;
+  --spacing-rail: 3px;
+  --spacing-sidebar: 268px;
+  --container-content: 1400px;
+  --container-prose: 65ch;
+  --container-prose-sm: 52ch;
 
   /* One accent: a desaturated emerald. Neutrals are zinc throughout. */
   --color-accent-50: oklch(0.97 0.03 165);
@@ -26,6 +109,43 @@
   --color-ink-3: oklch(0.225 0.006 286);
   /* Legacy used zinc-500 for secondary text; this keeps that look at >= 4.5:1 on ink-3. */
   --color-dim: oklch(0.66 0.012 286);
+
+  --color-hairline: rgb(255 255 255 / 0.05);
+  --color-line: rgb(255 255 255 / 0.08);
+  --color-line-strong: rgb(255 255 255 / 0.1);
+  --color-line-focus: rgb(255 255 255 / 0.25);
+  --color-fill-1: rgb(255 255 255 / 0.03);
+  --color-fill-2: rgb(255 255 255 / 0.06);
+  --color-fill-3: rgb(255 255 255 / 0.08);
+  --color-fill-hover: rgb(255 255 255 / 0.1);
+  --color-surface-overlay: color-mix(in oklab, var(--color-zinc-900) 95%, transparent);
+  --color-scrim: color-mix(in oklab, var(--color-ink) 70%, transparent);
+  --color-selection: color-mix(in oklch, var(--color-accent-400) 35%, transparent);
+  --color-scrollbar: oklch(0.32 0.006 286);
+  --color-focus: var(--color-zinc-100);
+
+  /* Monogram fills: --color-mono-* (see @theme). */
+  --color-mono-0: oklch(0.34 0.05 20);
+  --color-mono-1: oklch(0.34 0.05 65);
+  --color-mono-2: oklch(0.34 0.05 110);
+  --color-mono-3: oklch(0.34 0.05 155);
+  --color-mono-4: oklch(0.34 0.05 200);
+  --color-mono-5: oklch(0.34 0.05 245);
+  --color-mono-6: oklch(0.34 0.05 290);
+  --color-mono-7: oklch(0.34 0.05 335);
+
+  --shadow-overlay: 0 20px 50px -20px rgb(0 0 0 / 0.7);
+
+  --transition-duration-fast: 150ms;
+  --transition-duration-base: 200ms;
+  --transition-duration-slow: 300ms;
+  /* Staggered list entrance step (legacy: 15 ms per item, capped at 7 steps). */
+  --stagger-step: 15ms;
+
+  --opacity-disabled: 0.45;
+  --opacity-grain: 0.035;
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
 
   --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
 
@@ -80,12 +200,12 @@
     inset: 0;
     pointer-events: none;
     z-index: 60;
-    opacity: 0.035;
+    opacity: var(--opacity-grain);
     mix-blend-mode: overlay;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   }
   ::selection {
-    background: color-mix(in oklch, var(--color-accent-400) 35%, transparent);
+    background: var(--color-selection);
   }
   /*
    * Focus ring only for keyboard/gamepad use (html[data-input], set by
@@ -98,12 +218,12 @@
     outline: none;
   }
   html[data-input="nav"] :focus {
-    outline: 2px solid var(--color-zinc-100);
-    outline-offset: 2px;
+    outline: var(--focus-ring-width) solid var(--color-focus);
+    outline-offset: var(--focus-ring-offset);
   }
   * {
     scrollbar-width: thin;
-    scrollbar-color: oklch(0.32 0.006 286) transparent;
+    scrollbar-color: var(--color-scrollbar) transparent;
   }
   button {
     cursor: pointer;
@@ -111,75 +231,68 @@
   button:disabled,
   button[aria-disabled="true"] {
     cursor: not-allowed;
-    opacity: 0.45;
+    opacity: var(--opacity-disabled);
   }
   /* The search fields' native clear button would be the browser's blue: hidden (Escape/select-all clears). */
   input[type="search"]::-webkit-search-cancel-button {
     appearance: none;
   }
   progress {
-    @apply h-1.5 w-full overflow-hidden rounded-full;
+    @apply h-1.5 w-full overflow-hidden rounded-pill;
     appearance: none;
-    background: rgb(255 255 255 / 0.06);
+    background: var(--color-fill-2);
   }
   progress::-webkit-progress-bar {
-    background: rgb(255 255 255 / 0.06);
+    background: var(--color-fill-2);
   }
   progress::-webkit-progress-value {
     background: var(--color-accent-400);
-    border-radius: 9999px;
-    transition: width 0.3s var(--ease-spring);
+    border-radius: var(--radius-pill);
+    transition: width var(--transition-duration-slow) var(--ease-spring);
   }
   progress::-moz-progress-bar {
     background: var(--color-accent-400);
-    border-radius: 9999px;
+    border-radius: var(--radius-pill);
   }
 }
 
 @layer components {
-  .surface {
-    @apply rounded-3xl border border-white/[0.06] bg-ink-2;
-  }
-  /* The large legacy panels (hero, install, collections). */
-  .panel {
-    @apply rounded-[2rem] border border-white/[0.06] bg-ink-2;
-  }
   /* Overlays (dialogs, notices, island): a plain drop shadow lifts them off the page. */
   .glass {
-    @apply border border-white/10 bg-zinc-900/95 backdrop-blur-xl;
-    box-shadow: 0 20px 50px -20px rgb(0 0 0 / 0.7);
+    @apply border border-line-strong bg-surface-overlay backdrop-blur-xl;
+    box-shadow: var(--shadow-overlay);
   }
   .eyebrow {
-    @apply font-mono text-[11px] tracking-[0.14em] text-dim uppercase;
+    @apply font-mono text-micro tracking-eyebrow text-dim uppercase;
   }
   .input {
-    @apply min-h-12 w-full rounded-xl border border-white/[0.08] bg-ink px-3.5 text-[15px] text-zinc-100 transition-colors duration-200 placeholder:text-zinc-500 focus:border-white/25 focus:bg-ink-3;
+    @apply min-h-control w-full rounded-control border border-line bg-ink px-3.5 text-lead text-zinc-100 transition-colors duration-base placeholder:text-zinc-500 focus:border-line-focus focus:bg-ink-3;
   }
-  /* Row list inside a surface (Settings, lists). */
+  /* Divided row list (inside a Card section, lists). */
   .rows > * + * {
-    @apply border-t border-white/[0.05];
+    @apply border-t border-hairline;
   }
-  /* Staggered list entrance (legacy: 15 ms per item, capped). */
+  /* Staggered list entrance (--stagger-step per item, capped). */
   .stagger > * {
     animation: var(--animate-rise);
   }
-  .stagger > :nth-child(2) { animation-delay: 15ms; }
-  .stagger > :nth-child(3) { animation-delay: 30ms; }
-  .stagger > :nth-child(4) { animation-delay: 45ms; }
-  .stagger > :nth-child(5) { animation-delay: 60ms; }
-  .stagger > :nth-child(6) { animation-delay: 75ms; }
-  .stagger > :nth-child(7) { animation-delay: 90ms; }
-  .stagger > :nth-child(n + 8) { animation-delay: 105ms; }
+  .stagger > :nth-child(2) { animation-delay: calc(var(--stagger-step) * 1); }
+  .stagger > :nth-child(3) { animation-delay: calc(var(--stagger-step) * 2); }
+  .stagger > :nth-child(4) { animation-delay: calc(var(--stagger-step) * 3); }
+  .stagger > :nth-child(5) { animation-delay: calc(var(--stagger-step) * 4); }
+  .stagger > :nth-child(6) { animation-delay: calc(var(--stagger-step) * 5); }
+  .stagger > :nth-child(7) { animation-delay: calc(var(--stagger-step) * 6); }
+  .stagger > :nth-child(n + 8) { animation-delay: calc(var(--stagger-step) * 7); }
 
-  /* Deterministic monogram fills, one flat colour per hue (legacy computed a hue inline; the CSP forbids that). */
-  .mono-0 { background: oklch(0.34 0.05 20); }
-  .mono-1 { background: oklch(0.34 0.05 65); }
-  .mono-2 { background: oklch(0.34 0.05 110); }
-  .mono-3 { background: oklch(0.34 0.05 155); }
-  .mono-4 { background: oklch(0.34 0.05 200); }
-  .mono-5 { background: oklch(0.34 0.05 245); }
-  .mono-6 { background: oklch(0.34 0.05 290); }
-  .mono-7 { background: oklch(0.34 0.05 335); }
+  /* Monogram fills (monogram() in ui.tsx picks one; colours are --color-mono-* tokens). */
+  .mono-0 { background: var(--color-mono-0); }
+  .mono-1 { background: var(--color-mono-1); }
+  .mono-2 { background: var(--color-mono-2); }
+  .mono-3 { background: var(--color-mono-3); }
+  .mono-4 { background: var(--color-mono-4); }
+  .mono-5 { background: var(--color-mono-5); }
+  .mono-6 { background: var(--color-mono-6); }
+  .mono-7 { background: var(--color-mono-7); }
 }
 
 @media (prefers-reduced-motion: reduce) {

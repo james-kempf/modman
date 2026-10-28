@@ -30,10 +30,20 @@ describe("keyboard mapping", () => {
     expect(keyToNav(key("PageDown", input))).toBeNull();
   });
 
-  it("left/right inside a text field move the caret, not focus", () => {
+  it("left/right inside a text field move the caret until it reaches that edge", () => {
     const input = document.createElement("input");
+    input.value = "abc";
+    input.setSelectionRange(1, 1);
     expect(keyToNav(key("ArrowLeft", input))).toBeNull();
+    expect(keyToNav(key("ArrowRight", input))).toBeNull();
     expect(keyToNav(key("ArrowDown", input))).toEqual({ type: "move", dir: "down" });
+    input.setSelectionRange(3, 3);
+    expect(keyToNav(key("ArrowRight", input))).toEqual({ type: "move", dir: "right" });
+    expect(keyToNav(key("ArrowLeft", input))).toBeNull();
+    input.setSelectionRange(0, 0);
+    expect(keyToNav(key("ArrowLeft", input))).toEqual({ type: "move", dir: "left" });
+    input.setSelectionRange(0, 3);
+    expect(keyToNav(key("ArrowRight", input))).toBeNull();
   });
 
   it("leaves modified keys alone", () => {

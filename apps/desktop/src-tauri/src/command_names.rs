@@ -6,6 +6,9 @@
 /// Every app command the webview may invoke.
 pub const COMMANDS: &[&str] = &[
     "app_info",
+    "quit_app",
+    "steam_shortcut_status",
+    "steam_shortcut_set",
     "app_ready",
     "startup_check",
     "prompt_answer",

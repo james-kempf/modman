@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Settings card for the active game: poisoned held backups (backups that
 // hold mod files instead of game originals) and their quarantine, restoring
-// a quarantine, and restaging mods into the current layout. Cleanup and
+// a quarantine, and restaging mods into the current layout. The backup and
+// quarantine lists start collapsed behind a count. Cleanup and
 // restore change files, so each asks in a dialog first and only then calls
 // the backend with confirmed=true. Restage refuses while confirmed poisoned
 // backups exist; its message is shown here.
@@ -14,7 +15,7 @@ import { useActiveGame } from "../app/queries";
 import { useBusy, useRun } from "../app/run";
 import { useUi } from "../app/store";
 import { Dialog } from "../components/Dialog";
-import { Badge, Button, Empty, ErrorNote, Row, Section, Toggle, when } from "../components/ui";
+import { Badge, Button, Card, CardSection, ErrorNote, ListToggle, Row, Toggle, when } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import type { PoisonedBackup, QuarantineManifest } from "../ipc/types";
 
@@ -40,6 +41,9 @@ function GameRepair({ domain, name }: { domain: string; name: string }) {
   const [includeAmbiguous, setIncludeAmbiguous] = useState(false);
   const [asking, setAsking] = useState<{ kind: "clean" } | { kind: "restore"; q: QuarantineManifest } | null>(null);
   const [blocked, setBlocked] = useState<string | null>(null);
+  // Long lists start collapsed behind a count.
+  const [showPoisoned, setShowPoisoned] = useState(false);
+  const [showQuarantines, setShowQuarantines] = useState(false);
 
   const list = poisoned.data ?? [];
   const confirmed = list.filter((e) => e.class === "confirmed");
@@ -89,102 +93,136 @@ function GameRepair({ domain, name }: { domain: string; name: string }) {
   const history = [...(quarantines.data ?? [])].reverse();
 
   return (
-    <Section
+    <Card
       title={`Backups and staging: ${name}`}
-      intro="modman keeps the game's original files as backups when a mod replaces them. A backup that holds a mod's file instead would put that mod file back on purge. Quarantine moves such backups aside; nothing is deleted and a quarantine can be restored."
+      intro="Backups keep the game's originals. A poisoned one holds a mod file and would put it back on purge; quarantine moves it aside (nothing is deleted, it can be restored)."
     >
-      <Row
-        title="Poisoned backups"
-        desc={
-          poisoned.isPending
-            ? "Checking held backups…"
-            : list.length
-              ? `${confirmed.length} confirmed, ${ambiguous.length} ambiguous. Confirmed ones were placed by modman; ambiguous ones have no earlier deploy record.`
-              : "None: every held backup differs from the mod files at its path."
-        }
-      >
-        <Toggle
-          label="Include ambiguous"
-          checked={includeAmbiguous}
-          disabled={!ambiguous.length}
-          onChange={setIncludeAmbiguous}
-        />
-        <Button
-          tone="danger"
-          icon={<ShieldWarningIcon aria-hidden size={16} />}
-          busy={cleaning}
-          inactive={!selected.length}
-          onClick={() => selected.length && setAsking({ kind: "clean" })}
+      <div className="rows">
+        <Row
+          title="Poisoned backups"
+          desc={
+            poisoned.isPending
+              ? "Checking held backups…"
+              : list.length
+                ? `${confirmed.length} confirmed (placed by modman), ${ambiguous.length} ambiguous (no earlier deploy record).`
+                : "None: every held backup differs from the mod files at its path."
+          }
         >
-          Quarantine…
-        </Button>
-      </Row>
-      {poisoned.isError && (
-        <div className="px-6 py-5">
-          <ErrorNote>Could not check the backups: {errMsg(poisoned.error)}</ErrorNote>
-        </div>
-      )}
-      {list.length > 0 && (
-        <div className="grid gap-5 px-6 py-5">
-          <EntryGroup label="Confirmed" entries={confirmed} />
-          <EntryGroup label="Ambiguous" entries={ambiguous} note={includeAmbiguous ? null : "Left alone unless you include them."} />
-        </div>
-      )}
-
-      <div className="px-6 py-5">
-        <h3 className="eyebrow mb-3">Quarantines</h3>
-        {quarantines.isError ? (
-          <ErrorNote>Could not read the quarantines: {errMsg(quarantines.error)}</ErrorNote>
-        ) : history.length ? (
-          <ul aria-label="Quarantines" className="grid gap-2">
-            {history.map((q) => (
-              <li
-                key={q.id}
-                className="flex flex-wrap items-center gap-3 rounded-2xl border border-white/[0.05] bg-ink px-4 py-3 text-[13px]"
-              >
-                <span className="min-w-0 flex-1">
-                  <span className="block font-mono text-[12px] break-all text-zinc-200">{q.id}</span>
-                  <span className="block text-dim">
-                    {when(q.created_at)} · {q.items.length} item(s)
-                  </span>
-                </span>
-                {q.restored_at !== null ? (
-                  <Badge>restored {when(q.restored_at)}</Badge>
-                ) : (
-                  <Button
-                    size="sm"
-                    aria-label={`Restore quarantine ${q.id}`}
-                    icon={<ArrowCounterClockwiseIcon aria-hidden size={15} />}
-                    onClick={() => setAsking({ kind: "restore", q })}
-                  >
-                    Restore…
-                  </Button>
-                )}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <Empty>No quarantines for {name}.</Empty>
+          {list.length > 0 && (
+            <ListToggle
+              name="Poisoned backups"
+              count={list.length}
+              open={showPoisoned}
+              onToggle={() => setShowPoisoned((o) => !o)}
+              controls={`poisoned-${domain}`}
+            />
+          )}
+          <Toggle
+            label="Include ambiguous"
+            checked={includeAmbiguous}
+            disabled={!ambiguous.length}
+            onChange={setIncludeAmbiguous}
+          />
+          <Button
+            size="sm"
+            tone="danger"
+            icon={<ShieldWarningIcon aria-hidden size={15} />}
+            busy={cleaning}
+            inactive={!selected.length}
+            onClick={() => selected.length && setAsking({ kind: "clean" })}
+          >
+            Quarantine…
+          </Button>
+        </Row>
+        {poisoned.isError && (
+          <CardSection>
+            <ErrorNote>Could not check the backups: {errMsg(poisoned.error)}</ErrorNote>
+          </CardSection>
+        )}
+        {showPoisoned && list.length > 0 && (
+          <CardSection id={`poisoned-${domain}`} className="grid gap-3">
+            <EntryGroup label="Confirmed" entries={confirmed} />
+            <EntryGroup label="Ambiguous" entries={ambiguous} note={includeAmbiguous ? null : "Left alone unless you include them."} />
+          </CardSection>
         )}
       </div>
 
-      <Row
-        title="Restage mods"
-        desc={
-          confirmed.length
-            ? `Blocked while ${confirmed.length} confirmed poisoned backup(s) exist: quarantine them first.`
-            : "Rebuild the staged copies of mods staged in an outdated layout from their archives. Your edits to staged files are kept. Deploy afterwards."
-        }
-      >
-        <Button icon={<ArrowsClockwiseIcon aria-hidden size={16} />} busy={restaging} onClick={() => void restage()}>
-          Restage
-        </Button>
-      </Row>
-      {blocked && (
-        <div className="px-6 py-5">
-          <ErrorNote>{blocked}</ErrorNote>
-        </div>
-      )}
+      <div className="rows">
+        <Row
+          title="Quarantines"
+          desc={
+            quarantines.isError
+              ? undefined
+              : history.length
+                ? `${history.length} quarantine(s), ${history.filter((q) => q.restored_at === null).length} not restored.`
+                : `No quarantines for ${name}.`
+          }
+        >
+          {history.length > 0 && (
+            <ListToggle
+              name="Quarantines"
+              count={history.length}
+              open={showQuarantines}
+              onToggle={() => setShowQuarantines((o) => !o)}
+              controls={`quarantines-${domain}`}
+            />
+          )}
+        </Row>
+        {quarantines.isError && (
+          <CardSection>
+            <ErrorNote>Could not read the quarantines: {errMsg(quarantines.error)}</ErrorNote>
+          </CardSection>
+        )}
+        {showQuarantines && history.length > 0 && (
+          <CardSection id={`quarantines-${domain}`}>
+            <ul aria-label="Quarantines" className="grid gap-1.5">
+              {history.map((q) => (
+                <li
+                  key={q.id}
+                  className="flex flex-wrap items-center gap-3 rounded-xl border border-white/[0.05] bg-ink px-3 py-1.5 text-[12.5px]"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-mono text-[12px] break-all text-zinc-200">{q.id}</span>
+                    <span className="block text-dim">
+                      {when(q.created_at)} · {q.items.length} item(s)
+                    </span>
+                  </span>
+                  {q.restored_at !== null ? (
+                    <Badge>restored {when(q.restored_at)}</Badge>
+                  ) : (
+                    <Button
+                      size="sm"
+                      aria-label={`Restore quarantine ${q.id}`}
+                      icon={<ArrowCounterClockwiseIcon aria-hidden size={15} />}
+                      onClick={() => setAsking({ kind: "restore", q })}
+                    >
+                      Restore…
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </CardSection>
+        )}
+
+        <Row
+          title="Restage mods"
+          desc={
+            confirmed.length
+              ? `Blocked while ${confirmed.length} confirmed poisoned backup(s) exist: quarantine them first.`
+              : "Rebuild mods staged in an outdated layout from their archives (your edits are kept), then deploy."
+          }
+        >
+          <Button size="sm" icon={<ArrowsClockwiseIcon aria-hidden size={15} />} busy={restaging} onClick={() => void restage()}>
+            Restage
+          </Button>
+        </Row>
+        {blocked && (
+          <CardSection>
+            <ErrorNote>{blocked}</ErrorNote>
+          </CardSection>
+        )}
+      </div>
 
       {asking?.kind === "clean" && (
         <ConfirmDialog
@@ -208,21 +246,21 @@ function GameRepair({ domain, name }: { domain: string; name: string }) {
           Put the {asking.q.items.length} item(s) of quarantine {asking.q.id} back as held backups of {name}.
         </ConfirmDialog>
       )}
-    </Section>
+    </Card>
   );
 }
 
 function EntryGroup({ label, entries, note }: { label: string; entries: PoisonedBackup[]; note?: string | null }) {
   if (!entries.length) return null;
   return (
-    <div className="grid gap-2">
+    <div className="grid gap-1.5">
       <h3 className="eyebrow">
         {label} ({entries.length}){note && <span className="ml-2 normal-case text-dim">{note}</span>}
       </h3>
-      <ul aria-label={`${label} poisoned backups`} className="grid gap-2">
+      <ul aria-label={`${label} poisoned backups`} className="grid gap-1.5">
         {entries.map((e) => (
           // Focusable so the list can be read with the keyboard or gamepad.
-          <li key={e.backup_id} tabIndex={0} className="grid gap-1 rounded-2xl border border-white/[0.05] bg-ink px-4 py-3 text-[13px]">
+          <li key={e.backup_id} tabIndex={0} className="grid gap-0.5 rounded-xl border border-white/[0.05] bg-ink px-3 py-2 text-[12.5px]">
             <span className="font-mono text-[12px] break-all text-zinc-200">{e.path}</span>
             <span className="text-dim">
               {e.reason}

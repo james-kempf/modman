@@ -17,7 +17,7 @@ import {
   TrashIcon,
   WarningIcon,
 } from "@phosphor-icons/react";
-import { Badge, Button, Card, Empty, ErrorNote, Segmented, TextField, Toggle, ViewHeader, bytes, cx, monogram, when } from "../components/ui";
+import { Badge, Button, Card, CardSection, Empty, ErrorNote, Segmented, TextField, Toggle, SECTION_PAD, ViewHeader, bytes, cx, monogram, when } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import type { CollectionInfo, CollectionRemoved, CollectionResult } from "../ipc/types";
 import { NoGame } from "../components/NoGame";
@@ -91,25 +91,26 @@ function Installed({ game }: { game: string }) {
     });
   };
   return (
-    <section aria-labelledby="installed-collections" className="grid gap-5">
-      <h2 id="installed-collections" className="eyebrow px-1">
-        Installed collections
-      </h2>
+    <Card title="Installed collections">
       {q.isError ? (
-        <ErrorNote>Could not load installed collections: {errMsg(q.error)}</ErrorNote>
+        <CardSection>
+          <ErrorNote>Could not load installed collections: {errMsg(q.error)}</ErrorNote>
+        </CardSection>
       ) : !list.length ? (
-        <Empty icon={<BooksIcon size={28} weight="duotone" />} title="No collections installed">
-          Paste a collection link above. modman downloads every file, replays the curator&apos;s FOMOD choices and applies the
-          load-order rules.
-        </Empty>
+        <CardSection>
+          <Empty icon={<BooksIcon size={28} weight="duotone" />} title="No collections installed">
+            Paste a collection link above. modman downloads every file, replays the curator&apos;s FOMOD choices and applies the
+            load-order rules.
+          </Empty>
+        </CardSection>
       ) : (
-        <ul className="stagger grid gap-5">
+        <ul className="rows" aria-label="Installed collections">
           {list.map(({ record: c, enabled }) => (
-            <li key={c.id} className="panel grid gap-6 p-6 md:grid-cols-[auto_1fr_auto] md:items-center md:p-8">
+            <li key={c.id} className={cx("grid gap-4 md:grid-cols-[auto_1fr_auto] md:items-center", SECTION_PAD)}>
               <CollectionArt game={c.game} slug={c.slug} name={c.name ?? c.slug} />
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="truncate text-xl font-medium tracking-tight text-zinc-50">{c.name ?? c.slug}</h3>
+                  <h3 className="truncate text-[15px] font-medium tracking-tight text-zinc-50">{c.name ?? c.slug}</h3>
                   <Badge>rev {c.revision}</Badge>
                 </div>
                 <p className="mt-1 text-[13.5px] text-zinc-400">
@@ -154,7 +155,7 @@ function Installed({ game }: { game: string }) {
           ))}
         </ul>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -184,27 +185,30 @@ function Lookup() {
   };
   return (
     <Card title="Add a collection">
-      <form
-        className="flex flex-wrap items-end gap-3"
-        onSubmit={async (e) => {
-          e.preventDefault();
-          if (ref.trim()) setInfo((await run("Look up", () => ipc.collectionInfo(ref.trim()))) ?? null);
-        }}
-      >
-        <TextField
-          label="Collection URL, nxm link or slug"
-          name={LOOKUP_NAME}
-          value={ref}
-          onChange={(e) => setRef(e.target.value)}
-          className="min-w-0 flex-[1_1_18rem]"
-          placeholder="https://next.nexusmods.com/skyrimspecialedition/collections/…"
-        />
-        <Button type="submit" busy={looking} disabled={!ref.trim()} icon={<MagnifyingGlassIcon aria-hidden size={16} />}>
-          Look up
-        </Button>
-      </form>
+      <CardSection>
+        <form
+          className="flex flex-wrap items-end gap-3"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (ref.trim()) setInfo((await run("Look up", () => ipc.collectionInfo(ref.trim()))) ?? null);
+          }}
+        >
+          <TextField
+            label="Collection URL, nxm link or slug"
+            name={LOOKUP_NAME}
+            value={ref}
+            onChange={(e) => setRef(e.target.value)}
+            className="min-w-0 flex-[1_1_18rem]"
+            placeholder="https://next.nexusmods.com/skyrimspecialedition/collections/…"
+          />
+          <Button type="submit" busy={looking} disabled={!ref.trim()} icon={<MagnifyingGlassIcon aria-hidden size={16} />}>
+            Look up
+          </Button>
+        </form>
+      </CardSection>
+      {/* The looked-up collection: its own section of this card, not a nested box. */}
       {info && (
-        <div className="mt-6 grid animate-rise gap-5 rounded-3xl border border-white/[0.06] bg-ink p-6">
+        <CardSection className="grid animate-rise gap-5">
           <div className="flex flex-wrap items-start gap-5">
             <CollectionArt game={info.game} slug={info.slug} name={info.revision.name} />
             <div className="min-w-0 flex-1">
@@ -237,7 +241,7 @@ function Lookup() {
               {info.installed ? "Install this revision" : "Install collection"}
             </Button>
           </div>
-        </div>
+        </CardSection>
       )}
     </Card>
   );

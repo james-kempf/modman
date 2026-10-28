@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Settings: Nexus account (API key entry with paste + on-screen keyboard),
-// auto-update toggle with status and last-run log, the active game's
-// backup cleanup and restage, config keys, app paths.
+// Settings: Nexus account (API key entry with paste + on-screen keyboard)
+// then the app paths, auto-update (status, collapsible last-run log) then
+// the Steam shortcut, the active game's backup cleanup and restage, config
+// keys. Compact rows in a single column.
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState, type ReactNode } from "react";
 import { errMsg } from "../app/bridge";
 import { useAccount } from "../app/queries";
@@ -14,15 +15,18 @@ import { ClipboardTextIcon, FloppyDiskIcon, KeyIcon, KeyboardIcon, SignOutIcon }
 import {
   Badge,
   Button,
+  Card,
+  CardSection,
   Empty,
   ErrorNote,
-  Fact,
+  ListToggle,
   Row,
-  Section,
+  SECTION_PAD,
   Select,
   StatusDot,
   Toggle,
   ViewHeader,
+  cx,
   when,
 } from "../components/ui";
 import * as ipc from "../ipc/commands";
@@ -31,17 +35,20 @@ import { GameRepairCard } from "./GameRepair";
 
 export function Settings() {
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-14">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
       <ViewHeader title="Settings" description="Changes are saved by modman as soon as you make them." />
       <AccountCard />
-      <AutoUpdateCard />
+      <AutomationCard />
       <GameRepairCard />
       <ConfigCard />
-      <AppInfoCard />
+      <Card title="About">
+        <AppInfo />
+      </Card>
     </div>
   );
 }
 
+/** Nexus account (first section: harnesses read `main section` for the sign-in state) followed by the app paths. */
 function AccountCard() {
   const q = useAccount();
   const run = useRun();
@@ -50,14 +57,11 @@ function AccountCard() {
   const a = q.data;
   const signedIn = !!a?.key_source;
   return (
-    <Section
-      title="Nexus Mods account"
-      intro="modman signs in with your personal API key. It is kept in the system keyring, or the modman config file when there is none."
-    >
+    <Card title="Nexus Mods account" intro="Your personal API key, kept in the system keyring (else the modman config file).">
       {q.isError ? (
-        <div className="px-6 py-5">
+        <CardSection>
           <ErrorNote>Could not read the account: {errMsg(q.error)}</ErrorNote>
-        </div>
+        </CardSection>
       ) : signedIn ? (
         <Row
           title={
@@ -88,14 +92,14 @@ function AccountCard() {
           </Button>
         </Row>
       ) : (
-        <Row title="Not signed in" desc="Get a personal API key at nexusmods.com → Site preferences → API keys." />
+        <Row title="Not signed in" desc="Get a key at nexusmods.com → Site preferences → API keys." />
       )}
       {(!signedIn || changing) && (
-        <div className="px-6 py-5">
+        <CardSection>
           <ApiKeyEntry onDone={() => setChanging(false)} />
-        </div>
+        </CardSection>
       )}
-    </Section>
+    </Card>
   );
 }
 
@@ -125,13 +129,13 @@ export function ApiKeyEntry({ onDone }: { onDone?: () => void }) {
 
   return (
     <form
-      className="grid gap-3"
+      className="grid gap-2"
       onSubmit={(e) => {
         e.preventDefault();
         void submit();
       }}
     >
-      <label htmlFor="nexus-api-key" className="text-[13px] font-medium text-zinc-300">
+      <label htmlFor="nexus-api-key" className="text-[12.5px] font-medium text-zinc-300">
         Nexus API key
       </label>
       <input
@@ -146,8 +150,9 @@ export function ApiKeyEntry({ onDone }: { onDone?: () => void }) {
         className="input font-mono"
         placeholder="Paste or type your personal API key"
       />
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-wrap gap-2">
         <Button
+          size="sm"
           icon={<ClipboardTextIcon aria-hidden size={16} />}
           onClick={async () => {
             const t = await readClipboard();
@@ -160,6 +165,7 @@ export function ApiKeyEntry({ onDone }: { onDone?: () => void }) {
           Paste
         </Button>
         <Button
+          size="sm"
           icon={<KeyboardIcon aria-hidden size={16} />}
           onClick={() => input.current && openOsk({ input: input.current, label: "Nexus API key" })}
         >
@@ -167,6 +173,7 @@ export function ApiKeyEntry({ onDone }: { onDone?: () => void }) {
         </Button>
         <Button
           type="submit"
+          size="sm"
           tone="primary"
           busy={busy}
           disabled={!key.trim()}
@@ -180,23 +187,90 @@ export function ApiKeyEntry({ onDone }: { onDone?: () => void }) {
   );
 }
 
-function AutoUpdateCard() {
+/** Auto-update and the Steam shortcut: both about running modman unattended / from Game Mode. */
+function AutomationCard() {
+  return (
+    <Card title="Auto-update and Steam" intro="Background updates, and starting modman from Steam's Game Mode.">
+      <AutoUpdate />
+      <SteamShortcut />
+    </Card>
+  );
+}
+
+/** Compact key/value facts: one muted line per fact, wrapping into columns. */
+function Facts({ items }: { items: readonly (readonly [string, ReactNode])[] }) {
+  return (
+    <dl className={cx("grid grid-cols-[repeat(auto-fill,minmax(12rem,1fr))] gap-x-4 gap-y-1 text-[12.5px]", SECTION_PAD)}>
+      {items.map(([k, v]) => (
+        <div key={k} className="flex min-w-0 gap-2">
+          <dt className="shrink-0 text-dim">{k}</dt>
+          <dd className="min-w-0 font-mono text-[12px] break-words text-zinc-300">{v}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function SteamShortcut() {
+  const q = useQuery({ queryKey: ["steam-shortcut"], queryFn: ipc.steamShortcutStatus });
+  const qc = useQueryClient();
+  const run = useRun();
+  const notify = useUi((s) => s.notify);
+  const busy = useBusy("Steam shortcut");
+  const s = q.data;
+  const on = !!s && s.accounts > 0 && s.added === s.accounts;
+  return (
+    <div className="rows">
+      <Row
+        title="Show modman in Steam"
+        desc={
+          s?.steam_running
+            ? "A non-Steam game entry. Steam is running: restart Steam for the change to show up."
+            : s && !s.accounts
+              ? "No Steam account was found. Start Steam and sign in once first."
+              : "A non-Steam game entry; takes effect the next time Steam starts."
+        }
+      >
+        <Toggle
+          label={on ? "Steam shortcut on" : "Steam shortcut off"}
+          checked={on}
+          disabled={!s || !s.accounts}
+          busy={busy}
+          onChange={async (v) => {
+            const r = await run("Steam shortcut", () => ipc.steamShortcutSet(v), { key: "Steam shortcut" });
+            if (r) {
+              qc.setQueryData(["steam-shortcut"], r);
+              notify("success", `${v ? "Added modman to Steam" : "Removed modman from Steam"}. Restart Steam to apply it.`);
+            }
+          }}
+        />
+      </Row>
+      {q.isError && (
+        <CardSection>
+          <ErrorNote>Could not read the Steam shortcuts: {errMsg(q.error)}</ErrorNote>
+        </CardSection>
+      )}
+    </div>
+  );
+}
+
+function AutoUpdate() {
   const q = useQuery({ queryKey: ["autoupdate"], queryFn: () => ipc.autoupdateStatus(20) });
   const run = useRun();
   const busy = useBusy("Auto-update");
+  const [showRuns, setShowRuns] = useState(false);
   const s = q.data;
   const on = !!s?.timer.installed;
+  const runs = s?.runs ?? [];
+  const last = runs[0];
   return (
-    <Section
-      title="Auto-update"
-      intro="After an OS update or a Steam update of a game, modman installs mod updates and redeploys every game that has mods deployed. It waits while a game is running."
-    >
+    <div className="rows">
       <Row
         title="Automatic updates"
         desc={
           <>
-            A systemd user timer runs modman every {s?.interval_hours || 1} h: after a system or game update it updates mods
-            {s?.collections ? " and collections" : ""} and redeploys, skipping games that are running or updating.
+            Every {s?.interval_hours || 1} h after a system or game update: updates mods{s?.collections ? " and collections" : ""}{" "}
+            and redeploys, skipping running games.
           </>
         }
       >
@@ -211,30 +285,49 @@ function AutoUpdateCard() {
         />
       </Row>
       {q.isError && (
-        <div className="px-6 py-5">
+        <CardSection>
           <ErrorNote>Could not read the auto-update status: {errMsg(q.error)}</ErrorNote>
-        </div>
+        </CardSection>
       )}
       {s && (
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-4 px-6 py-5 md:grid-cols-4">
-          <Fact k="Timer" v={s.timer.installed ? (s.timer.active ?? "installed") : "not installed"} />
-          <Fact k="Next run" v={s.timer.next_elapse ?? "–"} />
-          <Fact k="Last system change" v={when(s.last_system_change)} />
-          <Fact
-            k="Games"
-            v={s.games.map((g) => (
-              <span key={g.domain} className="block">
-                {g.name}: {g.last_failed ? "last run failed" : `ok ${when(g.last_ok)}`}
-              </span>
-            ))}
-          />
-        </dl>
+        <Facts
+          items={[
+            ["Timer", s.timer.installed ? (s.timer.active ?? "installed") : "not installed"],
+            ["Next run", s.timer.next_elapse ?? "–"],
+            ["Last system change", when(s.last_system_change)],
+            [
+              "Games",
+              s.games.length
+                ? s.games.map((g) => (
+                    <span key={g.domain} className="block">
+                      {g.name}: {g.last_failed ? "last run failed" : `ok ${when(g.last_ok)}`}
+                    </span>
+                  ))
+                : "–",
+            ],
+          ]}
+        />
       )}
-      <div className="px-6 py-5">
-        <h3 className="eyebrow mb-3">Last runs</h3>
-        <RunLog runs={s?.runs ?? []} />
-      </div>
-    </Section>
+      <Row
+        title="Last runs"
+        desc={last ? `Latest ${when(last.started_at)}: ${last.outcome}` : "No auto-update runs recorded yet."}
+      >
+        {runs.length > 0 && (
+          <ListToggle
+            name="Auto-update runs"
+            count={runs.length}
+            open={showRuns}
+            onToggle={() => setShowRuns((o) => !o)}
+            controls="autoupdate-runs"
+          />
+        )}
+      </Row>
+      {showRuns && runs.length > 0 && (
+        <CardSection id="autoupdate-runs">
+          <RunLog runs={runs} />
+        </CardSection>
+      )}
+    </div>
   );
 }
 
@@ -243,9 +336,9 @@ const OUTCOME = { nothing: "zinc", acted: "accent", failed: "rose", skipped: "am
 export function RunLog({ runs }: { runs: RunLogEntry[] }) {
   if (!runs.length) return <Empty>No auto-update runs recorded yet.</Empty>;
   return (
-    <ul aria-label="Auto-update runs" className="grid gap-2">
+    <ul aria-label="Auto-update runs" className="grid gap-1.5">
       {runs.map((r) => (
-        <li key={r.id} tabIndex={0} className="grid gap-1 rounded-2xl border border-white/[0.05] bg-ink px-4 py-3 text-[13px]">
+        <li key={r.id} tabIndex={0} className="grid gap-0.5 rounded-xl border border-white/[0.05] bg-ink px-3 py-2 text-[12.5px]">
           <span className="flex flex-wrap items-center gap-2">
             <StatusDot tone={OUTCOME[r.outcome]} />
             <span className="text-zinc-200">{when(r.started_at)}</span>
@@ -266,13 +359,14 @@ export function RunLog({ runs }: { runs: RunLogEntry[] }) {
 function ConfigCard() {
   const q = useQuery({ queryKey: ["config"], queryFn: ipc.configList });
   return (
-    <Section title="Configuration" intro="modman's config keys, as on the command line (modman config).">
+    <Card title="Configuration" intro="modman's config keys, as on the command line (modman config).">
       {q.isError ? (
-        <div className="px-6 py-5">
+        <CardSection>
           <ErrorNote>Could not read the configuration: {errMsg(q.error)}</ErrorNote>
-        </div>
+        </CardSection>
       ) : (
-        <ul className="rows">
+        // Rows divide with a top border; the first row has none.
+        <ul className="grid [&>li]:border-t [&>li]:border-white/[0.05] [&>li:first-child]:border-t-0">
           {q.data?.map((e) => (
             // Text fields key on the value too: a saved (or refetched) value resets the field. Switches and
             // dropdowns show the value as given and must stay mounted, so focus stays on them after a change.
@@ -280,7 +374,7 @@ function ConfigCard() {
           ))}
         </ul>
       )}
-    </Section>
+    </Card>
   );
 }
 
@@ -291,6 +385,8 @@ export function configError(entry: ConfigEntry, value: string): string | null {
   if (entry.kind === "path") return /^(\/|~(\/|$))/.test(v) ? null : "Enter an absolute path (starting with / or ~).";
   return null;
 }
+
+const ROW = cx("flex flex-wrap items-center justify-between gap-x-3 gap-y-1", SECTION_PAD);
 
 /** One setting: a dropdown (enum), a switch (bool), else a validated text field with Save. */
 function ConfigRow({ entry }: { entry: ConfigEntry }) {
@@ -307,13 +403,15 @@ function ConfigRow({ entry }: { entry: ConfigEntry }) {
   };
   const title = (
     <>
-      <span className="font-mono text-zinc-100">{entry.key}</span> <span className="text-dim">{entry.description}</span>
+      <span className="block font-mono text-[13px] text-zinc-100">{entry.key}</span>{" "}
+      <span className="block text-[12px] leading-snug text-dim">{entry.description}</span>
     </>
   );
+  const label = "min-w-0 flex-[1_1_9rem] wrap-anywhere";
   if (entry.kind === "bool")
     return (
-      <li className="flex flex-wrap items-center justify-between gap-3 px-6 py-4">
-        <span className="min-w-0 flex-[1_1_18rem] text-[13px] wrap-anywhere text-zinc-300">{title}</span>
+      <li className={ROW}>
+        <span className={label}>{title}</span>
         <Toggle
           label={entry.key}
           showLabel={false}
@@ -325,28 +423,35 @@ function ConfigRow({ entry }: { entry: ConfigEntry }) {
     );
   if (entry.kind === "enum")
     return (
-      <li className="px-6 py-5">
+      <li className={ROW}>
+        {/* Visible copy of the dropdown's label, which stays the (screen-reader-only) accessible name. */}
+        <span aria-hidden className={label}>
+          {title}
+        </span>
         <Select
           label={title}
+          hideLabel
           value={entry.value}
           options={entry.options.map((o) => ({ value: o, label: o }))}
           busy={busy}
           onChange={(v) => void save(v)}
-          className="max-w-md font-mono"
+          className="w-44 font-mono"
         />
       </li>
     );
-  return <ConfigTextRow entry={entry} title={title} save={save} busy={busy} />;
+  return <ConfigTextRow entry={entry} title={title} labelClass={label} save={save} busy={busy} />;
 }
 
 function ConfigTextRow({
   entry,
   title,
+  labelClass,
   save,
   busy,
 }: {
   entry: ConfigEntry;
   title: ReactNode;
+  labelClass: string;
   save: (v: string) => Promise<void>;
   busy: boolean;
 }) {
@@ -354,21 +459,21 @@ function ConfigTextRow({
   const error = value === entry.value ? null : configError(entry, value);
   const id = `config-${entry.key}`;
   return (
-    <li className="px-6 py-5">
+    <li>
       <form
-        className="grid gap-2"
+        className={ROW}
         onSubmit={(e) => {
           e.preventDefault();
           if (!error && value !== entry.value) void save(value.trim());
         }}
       >
-        <label htmlFor={id} className="text-[13px] wrap-anywhere text-zinc-300">
+        <label htmlFor={id} className={labelClass}>
           {title}
         </label>
-        <div className="flex flex-wrap items-center gap-3">
+        <span className="flex min-w-0 flex-[1_1_14rem] items-center gap-2">
           <input
             id={id}
-            className="input min-w-0 flex-[1_1_18rem] font-mono"
+            className="input min-w-0 flex-1 font-mono"
             value={value}
             onChange={(e) => setValue(e.target.value)}
             inputMode={entry.kind === "number" ? "numeric" : undefined}
@@ -377,15 +482,16 @@ function ConfigTextRow({
           />
           <Button
             type="submit"
+            size="sm"
             busy={busy}
             disabled={value === entry.value || !!error}
             icon={<FloppyDiskIcon aria-hidden size={15} />}
           >
             Save
           </Button>
-        </div>
+        </span>
         {error && (
-          <p id={`${id}-err`} className="text-[13px] text-rose-300">
+          <p id={`${id}-err`} className="basis-full text-[12.5px] text-rose-300">
             {error}
           </p>
         )}
@@ -394,21 +500,20 @@ function ConfigTextRow({
   );
 }
 
-function AppInfoCard() {
+/** App version and paths, below the account. */
+function AppInfo() {
   const q = useQuery({ queryKey: ["appinfo"], queryFn: ipc.appInfo });
   const i = q.data;
   if (q.isError)
     return (
-      <Section title="About">
-        <div className="px-6 py-5">
-          <ErrorNote>Could not read the app info: {errMsg(q.error)}</ErrorNote>
-        </div>
-      </Section>
+      <CardSection>
+        <ErrorNote>Could not read the app info: {errMsg(q.error)}</ErrorNote>
+      </CardSection>
     );
   if (!i) return null;
   return (
-    <Section title="About">
-      <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 px-6 py-5 font-mono text-[12px] leading-relaxed text-zinc-400">
+    <CardSection>
+      <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-0.5 font-mono text-[12px] leading-relaxed text-zinc-400">
         {(
           [
             ["modman", i.version],
@@ -424,6 +529,6 @@ function AppInfoCard() {
           </div>
         ))}
       </dl>
-    </Section>
+    </CardSection>
   );
 }

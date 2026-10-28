@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Overview of the active game: play and its folders, deployment
 // (deploy/purge/verify and how many enabled mods are deployed), mods,
-// collections, requirements, recently installed mods, plugins (Bethesda
-// games) and the start-up auto-update check, over the game's Steam hero art.
+// collections, requirements, plugins (Bethesda games) and the start-up
+// auto-update check, over the game's Steam hero art.
 // Games are picked and added in the Games view.
 
 import {
@@ -25,11 +25,10 @@ import {
   Badge,
   Button,
   Card,
-  Empty,
+  CardSection,
   ErrorNote,
   StatusDot,
   SupportBadge,
-  Thumb,
   ago,
   cx,
   when,
@@ -46,9 +45,6 @@ import type {
   VerifyReport,
 } from "../ipc/types";
 import { NoGame } from "../components/NoGame";
-
-/** How many mods "Recently installed" lists. */
-const RECENT = 5;
 
 export function Overview() {
   const { game, data: games, error } = useActiveGame();
@@ -105,7 +101,6 @@ function GameCards({ game }: { game: GameView }) {
         <RequirementsCard game={game.domain} />
         {bethesda && <PluginsCard game={game.domain} />}
       </div>
-      <RecentCard game={game.domain} mods={mods.data?.mods} />
     </>
   );
 }
@@ -130,59 +125,61 @@ function PlayCard({ game, outOfSync }: { game: GameView; outOfSync: boolean }) {
     ui.notify("success", `Starting ${game.name} through Steam.`);
   };
   return (
-    <div className="panel flex min-w-0 flex-col justify-between gap-8 p-7 md:p-9">
-      <div>
-        <div
-          data-testid="game-tags"
-          className="flex flex-wrap items-center gap-2.5"
-        >
-          {game.appid !== null && <Badge>App {game.appid}</Badge>}
-          <Badge>{game.profile}</Badge>
-          {game.folder && <Badge>{game.prefix ? "Proton" : "Native"}</Badge>}
-          <SupportBadge support={game.support} />
-          <span className="flex items-center gap-2.5">
-            <StatusDot tone={status.tone} live={d.active} />
-            <span className="text-[13.5px] text-zinc-300">{status.text}</span>
-          </span>
-        </div>
-        <h2 className="mt-6 text-4xl leading-none font-medium tracking-tighter wrap-anywhere text-zinc-50 md:text-5xl">
-          {game.name}
-        </h2>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {game.folder ? (
-            <FolderButton game={game} which="game" label="Game folder" />
-          ) : (
-            <p className="font-mono text-[12.5px] text-dim">no folder set</p>
-          )}
-          {game.prefix && (
-            <FolderButton game={game} which="prefix" label="Proton folder" />
-          )}
-          <FolderButton game={game} which="mods" label="Mods folder" />
-        </div>
-      </div>
-      <div className="grid gap-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <Button
-            tone="primary"
-            size="lg"
-            busy={launching}
-            disabled={game.appid === null}
-            icon={<PlayIcon aria-hidden size={19} weight="fill" />}
-            onClick={play}
+    <Card>
+      <CardSection className="flex flex-1 flex-col justify-between gap-8">
+        <div>
+          <div
+            data-testid="game-tags"
+            className="flex flex-wrap items-center gap-2.5"
           >
-            Play
-          </Button>
-          <RemoveGame game={game} />
+            {game.appid !== null && <Badge>App {game.appid}</Badge>}
+            <Badge>{game.profile}</Badge>
+            {game.folder && <Badge>{game.prefix ? "Proton" : "Native"}</Badge>}
+            <SupportBadge support={game.support} />
+            <span className="flex items-center gap-2.5">
+              <StatusDot tone={status.tone} live={d.active} />
+              <span className="text-[13.5px] text-zinc-300">{status.text}</span>
+            </span>
+          </div>
+          <h2 className="mt-6 text-4xl leading-none font-medium tracking-tighter wrap-anywhere text-zinc-50 md:text-5xl">
+            {game.name}
+          </h2>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {game.folder ? (
+              <FolderButton game={game} which="game" label="Game folder" />
+            ) : (
+              <p className="font-mono text-[12.5px] text-dim">no folder set</p>
+            )}
+            {game.prefix && (
+              <FolderButton game={game} which="prefix" label="Proton folder" />
+            )}
+            <FolderButton game={game} which="mods" label="Mods folder" />
+          </div>
         </div>
-        {(game.appid === null || outOfSync) && (
-          <p className="text-[13px] leading-relaxed text-dim">
-            {game.appid === null
-              ? "No Steam app id is set for this game, so it cannot be started from here (modman game set appid <id>)."
-              : "Your mod changes are not deployed yet: Play asks to deploy them first."}
-          </p>
-        )}
-      </div>
-    </div>
+        <div className="grid gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              tone="primary"
+              size="lg"
+              busy={launching}
+              disabled={game.appid === null}
+              icon={<PlayIcon aria-hidden size={19} weight="fill" />}
+              onClick={play}
+            >
+              Play
+            </Button>
+            <RemoveGame game={game} />
+          </div>
+          {(game.appid === null || outOfSync) && (
+            <p className="text-[13px] leading-relaxed text-dim">
+              {game.appid === null
+                ? "No Steam app id is set for this game, so it cannot be started from here (modman game set appid <id>)."
+                : "Your mod changes are not deployed yet: Play asks to deploy them first."}
+            </p>
+          )}
+        </div>
+      </CardSection>
+    </Card>
   );
 }
 
@@ -255,73 +252,78 @@ function DeploymentCard({
   const [verified, setVerified] = useState<VerifyReport | null>(null);
   const d = game.deploy;
   return (
-    <div className="panel flex min-w-0 flex-col justify-between gap-7 p-7 md:p-9">
-      <div>
-        <h2 className="eyebrow">Deployment</h2>
-        {(outOfSync || !d.active) && (
-          <p className="mt-3 max-w-[44ch] text-[15px] leading-relaxed text-zinc-400">
-            {outOfSync
-              ? "You changed mods since the last deploy. Deploy to apply them to the game folder."
-              : "Link every enabled mod into the game folder. Original files are backed up first."}
-          </p>
-        )}
-        <dl className="mt-6 grid grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] gap-4">
-          <Stat label="Files" value={d.files.toLocaleString()} />
-          <Stat label="Method" value={game.method ?? "auto"} />
-          <Stat
-            label="Last deploy"
-            value={ago(d.last_deployed_at)}
-            title={when(d.last_deployed_at)}
-          />
-        </dl>
-      </div>
-      <div className="grid gap-3">
-        <Button
-          tone="primary"
-          size="lg"
-          className="w-full"
-          busy={deploying}
-          icon={<RocketLaunchIcon aria-hidden size={19} weight="duotone" />}
-          onClick={() => void deploy()}
-        >
-          Deploy
-        </Button>
-        <div className="grid grid-cols-2 gap-2">
-          <Button
-            busy={verifying}
-            icon={<ShieldCheckIcon aria-hidden size={16} />}
-            onClick={async () =>
-              setVerified(
-                (await run("Verify", () => ipc.verify(), { key: "Verify" })) ??
-                  null,
-              )
-            }
-          >
-            Verify
-          </Button>
-          {/* The backend asks for confirmation through a prompt. */}
-          <Button
-            tone="danger"
-            busy={purging}
-            icon={<BroomIcon aria-hidden size={16} />}
-            onClick={async () => {
-              const r = await run("Purge", () => ipc.purge(), { key: "Purge" });
-              // null: declined at the confirmation.
-              if (r)
-                useUi
-                  .getState()
-                  .notify(
-                    r.nothing_deployed ? "info" : "success",
-                    purgedText(r),
-                  );
-            }}
-          >
-            Purge
-          </Button>
+    // inset: the title sits inside the box, so its top lines up with the untitled Play card beside it.
+    <Card title="Deployment" inset>
+      <CardSection className="flex flex-1 flex-col justify-between gap-7">
+        <div>
+          {(outOfSync || !d.active) && (
+            <p className="max-w-[44ch] text-[15px] leading-relaxed text-zinc-400">
+              {outOfSync
+                ? "You changed mods since the last deploy. Deploy to apply them to the game folder."
+                : "Link every enabled mod into the game folder. Original files are backed up first."}
+            </p>
+          )}
+          <dl className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] gap-4">
+            <Stat label="Files" value={d.files.toLocaleString()} />
+            <Stat label="Method" value={game.method ?? "auto"} />
+            <Stat
+              label="Last deploy"
+              value={ago(d.last_deployed_at)}
+              title={when(d.last_deployed_at)}
+            />
+          </dl>
         </div>
-        {verified && <VerifyResult r={verified} />}
-      </div>
-    </div>
+        <div className="grid gap-3">
+          <Button
+            tone="primary"
+            size="lg"
+            className="w-full"
+            busy={deploying}
+            icon={<RocketLaunchIcon aria-hidden size={19} weight="duotone" />}
+            onClick={() => void deploy()}
+          >
+            Deploy
+          </Button>
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              busy={verifying}
+              icon={<ShieldCheckIcon aria-hidden size={16} />}
+              onClick={async () =>
+                setVerified(
+                  (await run("Verify", () => ipc.verify(), {
+                    key: "Verify",
+                  })) ?? null,
+                )
+              }
+            >
+              Verify
+            </Button>
+            {/* The backend asks for confirmation through a prompt. */}
+            <Button
+              tone="danger"
+              busy={purging}
+              icon={<BroomIcon aria-hidden size={16} />}
+              onClick={async () => {
+                const r = await run("Purge", () => ipc.purge(), {
+                  key: "Purge",
+                });
+                // null: declined at the confirmation.
+                if (r)
+                  useUi
+                    .getState()
+                    .notify(
+                      r.nothing_deployed ? "info" : "success",
+                      purgedText(r),
+                    );
+              }}
+            >
+              Purge
+            </Button>
+          </div>
+          {verified && <VerifyResult r={verified} />}
+        </div>
+      </CardSection>
+    </Card>
   );
 }
 
@@ -445,22 +447,21 @@ function SummaryCard({
 }) {
   const setView = useUi((s) => s.setView);
   return (
-    <section
-      aria-label={title}
-      className="surface flex min-w-0 flex-col gap-5 p-6"
-    >
-      <h2 className="eyebrow">{title}</h2>
-      <div className="flex-1">{children}</div>
-      <Button
-        size="sm"
-        tone="ghost"
-        className="justify-self-start self-start"
-        icon={<ArrowRightIcon aria-hidden size={15} />}
-        onClick={() => setView(view)}
-      >
-        {linkLabel}
-      </Button>
-    </section>
+    <Card aria-label={title} title={title} inset>
+      {/* flex-1 pushes the link to the bottom when tiles in a row share one height. */}
+      <CardSection className="flex flex-1 flex-col gap-5">
+        <div className="flex-1">{children}</div>
+        <Button
+          size="sm"
+          tone="ghost"
+          className="self-start"
+          icon={<ArrowRightIcon aria-hidden size={15} />}
+          onClick={() => setView(view)}
+        >
+          {linkLabel}
+        </Button>
+      </CardSection>
+    </Card>
   );
 }
 
@@ -643,55 +644,6 @@ function PluginsCard({ game }: { game: string }) {
   );
 }
 
-function RecentCard({
-  game,
-  mods,
-}: {
-  game: string;
-  mods: ModView[] | undefined;
-}) {
-  const setView = useUi((s) => s.setView);
-  const recent = [...(mods ?? [])]
-    .sort((a, b) => b.installed_at - a.installed_at)
-    .slice(0, RECENT);
-  return (
-    <Card
-      title="Recently installed"
-      actions={
-        <Button
-          size="sm"
-          tone="ghost"
-          icon={<ArrowRightIcon aria-hidden size={15} />}
-          onClick={() => setView("install")}
-        >
-          Install mods
-        </Button>
-      }
-    >
-      {!recent.length ? (
-        <Empty>No mods installed yet.</Empty>
-      ) : (
-        <ul className="rows" aria-label="Recently installed mods">
-          {recent.map((m) => (
-            <li key={m.id} className="flex items-center gap-4 py-3">
-              <Thumb game={game} modId={m.nexus_mod_id} name={m.name} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[14.5px] text-zinc-100">
-                  {m.name}
-                </span>
-                <span className="block truncate font-mono text-[11.5px] text-dim">
-                  {m.version ?? "no version"} · installed {ago(m.installed_at)}
-                </span>
-              </span>
-              {!m.enabled && <Badge>disabled</Badge>}
-            </li>
-          ))}
-        </ul>
-      )}
-    </Card>
-  );
-}
-
 /**
  * The active game's Steam hero art, faint and flat behind the Overview
  * (none without an app id or art). Decorative: hidden from assistive tech.
@@ -747,26 +699,29 @@ function StartupCheckCard() {
           <ArrowsClockwiseIcon aria-hidden size={14} /> Auto-update check
         </span>
       }
+      inset
     >
-      {check.system_busy && (
-        <p className="mb-3 flex items-center gap-2 text-[14px] text-amber-300">
-          <StatusDot tone="amber" live />
-          {check.system_busy.kind === "already_running"
-            ? "An auto-update run is in progress."
-            : `The system is updating${check.system_busy.by ? ` (${check.system_busy.by})` : ""}.`}
-        </p>
-      )}
-      <ul className="rows">
-        {check.pending.map((p) => (
-          <li key={p.domain} className="py-3 text-[14px] text-zinc-400">
-            <span className="text-zinc-100">{p.name}</span>:{" "}
-            {p.reasons.join(", ")}
-            {p.blocked
-              ? ` (waiting: ${skipText(p.blocked)})`
-              : " (the next run will update and redeploy)"}
-          </li>
-        ))}
-      </ul>
+      <CardSection>
+        {check.system_busy && (
+          <p className="mb-3 flex items-center gap-2 text-[14px] text-amber-300">
+            <StatusDot tone="amber" live />
+            {check.system_busy.kind === "already_running"
+              ? "An auto-update run is in progress."
+              : `The system is updating${check.system_busy.by ? ` (${check.system_busy.by})` : ""}.`}
+          </p>
+        )}
+        <ul className="rows">
+          {check.pending.map((p) => (
+            <li key={p.domain} className="py-3 text-[14px] text-zinc-400">
+              <span className="text-zinc-100">{p.name}</span>:{" "}
+              {p.reasons.join(", ")}
+              {p.blocked
+                ? ` (waiting: ${skipText(p.blocked)})`
+                : " (the next run will update and redeploy)"}
+            </li>
+          ))}
+        </ul>
+      </CardSection>
     </Card>
   );
 }

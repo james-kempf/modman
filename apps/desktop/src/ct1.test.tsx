@@ -39,7 +39,7 @@ describe("CT1 D01 Overview long names", () => {
     await open("overview", {
       mods_list: () => ({ mods: [mod({ name: "x".repeat(140) })], changed_since_deploy: false }),
     });
-    await within(main()).findByText("x".repeat(140));
+    await within(main()).findByRole("region", { name: "Mods" });
     const root = main().querySelector<HTMLElement>(":scope > div > div")!;
     // The page grid, the hero row and the summary-card row.
     const grids = [root, ...root.querySelectorAll<HTMLElement>(":scope > .stagger")];

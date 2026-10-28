@@ -29,8 +29,17 @@ async function mount() {
       <GameRepairCard />
     </QueryClientProvider>,
   );
+  const user = userEvent.setup();
+  // The entries start collapsed behind a count.
+  await user.click(await screen.findByRole("button", { name: "Poisoned backups list (3)" }));
   await screen.findByRole("list", { name: "Confirmed poisoned backups" });
-  return { t, user: userEvent.setup() };
+  return { t, user };
+}
+
+/** Expands the (collapsed) quarantine list. */
+async function showQuarantines(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole("button", { name: /^Quarantines list \(\d+\)$/ }));
+  return screen.findByRole("list", { name: "Quarantines" });
 }
 
 const rows = (name: string) => within(screen.getByRole("list", { name })).getAllByRole("listitem");
@@ -58,7 +67,7 @@ describe("GameRepair (demo backend)", () => {
     await waitFor(() => expect(t.callsOf("backups_clean")).toEqual([{ game: GAME, include_ambiguous: false, confirmed: true }]));
     await waitFor(() => expect(screen.queryByRole("list", { name: "Confirmed poisoned backups" })).toBeNull());
     expect(rows("Ambiguous poisoned backups")).toHaveLength(1);
-    const qs = await screen.findByRole("list", { name: "Quarantines" });
+    const qs = await showQuarantines(user);
     expect(within(qs).getAllByRole("listitem")).toHaveLength(1);
     expect(within(qs).getByText("2 item(s)", { exact: false })).toBeInTheDocument();
   });
@@ -78,6 +87,7 @@ describe("GameRepair (demo backend)", () => {
     const { t, user } = await mount();
     await user.click(screen.getByRole("button", { name: "Quarantine…" }));
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Quarantine" }));
+    await showQuarantines(user);
     const restoreBtn = await screen.findByRole("button", { name: /^Restore quarantine / });
     await user.click(restoreBtn);
     const dlg = await screen.findByRole("dialog", { name: "Restore this quarantine?" });
@@ -104,6 +114,26 @@ describe("GameRepair (demo backend)", () => {
   });
 });
 
+describe("GameRepair collapsed lists", () => {
+  // Fails when the lists render expanded by default (the condensed page grows again) or the disclosure state is not exposed.
+  it("poisoned backups and quarantines start collapsed behind a count and expand on demand", async () => {
+    const { user } = await mount();
+    const toggle = screen.getByRole("button", { name: "Poisoned backups list (3)" });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(document.getElementById(toggle.getAttribute("aria-controls")!)).toContainElement(rows("Confirmed poisoned backups")[0]);
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("list", { name: "Confirmed poisoned backups" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Quarantine…" }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Quarantine" }));
+    const qt = await screen.findByRole("button", { name: "Quarantines list (1)" });
+    expect(qt).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("list", { name: "Quarantines" })).toBeNull();
+    await showQuarantines(user);
+    expect(qt).toHaveAttribute("aria-expanded", "true");
+  });
+});
+
 describe("GameRepair navigation", () => {
   // Fails when a control or entry is not reachable by keyboard/gamepad spatial navigation or lacks an accessible name.
   it("every control and entry is a spatial-nav focusable with a name", async () => {
@@ -113,6 +143,7 @@ describe("GameRepair navigation", () => {
       screen.getByRole("switch", { name: "Include ambiguous" }),
       screen.getByRole("button", { name: "Quarantine…" }),
       screen.getByRole("button", { name: "Restage" }),
+      screen.getByRole("button", { name: "Poisoned backups list (3)" }),
       ...rows("Confirmed poisoned backups"),
       ...rows("Ambiguous poisoned backups"),
     ])

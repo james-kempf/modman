@@ -83,17 +83,6 @@ describe("Overview", () => {
     expect(useUi.getState().view).toBe("requirements");
   });
 
-  // Fails when recent mods are not ordered by install time or the list is unbounded.
-  it("lists the latest five installed mods, newest first", async () => {
-    const mods = [1, 7, 3, 9, 5, 2].map((d) => mod({ name: `Mod day ${d}`, installed_at: 1_760_000_000 + d * 86_400 }));
-    await open("overview", { mods_list: () => ({ mods, changed_since_deploy: false }) });
-    const list = await screen.findByRole("list", { name: "Recently installed mods" });
-    const names = within(list)
-      .getAllByRole("listitem")
-      .map((li) => /Mod day \d/.exec(li.textContent ?? "")?.[0]);
-    expect(names).toEqual(["Mod day 9", "Mod day 7", "Mod day 5", "Mod day 3", "Mod day 2"]);
-  });
-
   // Fails when the plugins card queries plugins_list for a game without plugins.txt (it rejects).
   it("hides the plugins card for non-Bethesda games", async () => {
     const { t } = await open("overview", {}, [experimentalGame()]);

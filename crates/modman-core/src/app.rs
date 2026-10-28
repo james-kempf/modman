@@ -21,6 +21,7 @@ pub mod nexus;
 pub mod nxm;
 pub mod plugins;
 pub mod restage;
+pub mod shortcut;
 pub mod thumbs;
 pub mod updates;
 pub mod views;

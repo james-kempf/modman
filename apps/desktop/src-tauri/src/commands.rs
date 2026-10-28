@@ -24,6 +24,7 @@ use modman_core::app::mods::{
     self as appmods, ModDetail, ModsView, MoveResult, ProfileLoaded, UninstallResult,
 };
 use modman_core::app::nexus::{self as appnx, AccountInfo, LoginResult};
+use modman_core::app::shortcut::{self, ShortcutStatus};
 use modman_core::app::updates::{self as appup, UpdateReport};
 use modman_core::app::views::{self, ConfigChange, ConfigEntry, FilesView, SearchView};
 use modman_core::app::{actions, art, games_hint, plugins as appplug, thumbs, Cx, R};
@@ -93,6 +94,12 @@ pub struct AppInfo {
     pub legacy_state_dir: Option<PathBuf>,
 }
 
+/// Closes the app (the window's own close button is out of reach in Game Mode).
+#[tauri::command(rename_all = "snake_case")]
+pub fn quit_app(app: AppHandle) {
+    app.exit(0);
+}
+
 #[tauri::command(rename_all = "snake_case")]
 pub fn app_info(state: St<'_>) -> AppInfo {
     let p = &state.0.paths;
@@ -104,6 +111,24 @@ pub fn app_info(state: St<'_>) -> AppInfo {
         db_path: p.db_path(),
         legacy_state_dir: p.legacy_state_dir(),
     }
+}
+
+fn exe() -> CmdResult<std::path::PathBuf> {
+    std::env::current_exe().map_err(|e| CmdError::new(format!("cannot find this program: {e}")))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn steam_shortcut_status(state: St<'_>) -> CmdResult<ShortcutStatus> {
+    let home = state.0.paths.home.clone();
+    blocking(move || Ok(shortcut::status(&home, &exe()?)?)).await
+}
+
+/// Adds modman to (or removes it from) Steam as a non-Steam game; refused
+/// while Steam runs.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn steam_shortcut_set(state: St<'_>, enabled: bool) -> CmdResult<ShortcutStatus> {
+    let home = state.0.paths.home.clone();
+    blocking(move || Ok(shortcut::set(&home, &exe()?, enabled)?)).await
 }
 
 #[derive(Debug, Clone, Serialize)]

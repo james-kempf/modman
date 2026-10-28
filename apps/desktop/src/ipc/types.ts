@@ -500,6 +500,14 @@ export interface ConfigChange extends ConfigEntry {
   old_data_left: string | null;
 }
 
+/** The modman shortcut in Steam (as a non-Steam game). */
+export interface ShortcutStatus {
+  accounts: number;
+  added: number;
+  steam_running: boolean;
+  exe: string;
+}
+
 export interface AppInfo {
   version: string;
   config_dir: string;

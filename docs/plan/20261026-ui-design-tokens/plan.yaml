@@ -1,0 +1,137 @@
+plan_id: 20261026-ui-design-tokens
+status: pending
+tldr: |
+  Define one design-token layer in apps/desktop/src/index.css (Tailwind v4.3.3 `@theme`) plus
+  composed class constants in components/ui.tsx, then migrate every tsx source to it in two
+  file-disjoint parallel tasks, then add a guard test and the final arbitrary-value/snapping report.
+created_at: "2026-10-26"
+created_by: gem-planner
+revision: 1
+replan_count: 0
+planner_revision_used: false
+
+decisions:
+  - "Token source = Tailwind v4 `@theme` in index.css (platform rung: Tailwind generates utilities like text-body, rounded-card, border-hairline from --text-*/--radius-*/--color-* vars); ui.tsx holds only composed class-string constants (SECTION_PAD etc.), no raw values."
+  - "Wave 1 owns index.css + ui.tsx + all components/*.tsx (hotspots and shared dialog shells) so token names are frozen before views migrate."
+  - "Wave 2 split by file sets (A: App/Overview/Activity/Games/GameRepair ~86 arbitrary values; B: Mods/Install/Settings/Collections/Requirements ~75) to balance load; no shared source file."
+  - "Guard test + cross-cutting test-file fixes + final report in wave 3: guard can only pass once all sources are migrated; class-asserting test files (ct1, ct2, u02, views.test, App.test, ui.test) are shared between W2 sets."
+  - "No separate researcher task: survey done at plan time (shared_context.tokens) and wave-1 implementer owns token naming; a reviewer/tester pair not added since tsc+vitest+guard are the acceptance gate."
+
+assumptions:
+  - "Snapping near-duplicates (e.g. text-[12.5px]->12px or 13px, border-white/[0.05] vs [0.06], rounded-3xl->rounded-2xl) is acceptable; every snap is listed."
+  - "Layout-structural arbitrary values (grid-cols-[...] templates, max-h-[calc/min(...)], max-w-[NNch], aspect-[2/3], flex-[1_1_18rem], transition-[prop,list], scroll-pb-[30rem]) are allowed exceptions if not repeated; they are listed with justification rather than tokenized. Repeated ones (grid-cols-[minmax(0,1fr)] x13, sidebar 268px x2) get a token/constant."
+  - "Tailwind v4 default scales (spacing 0.25rem step, rounded-*, text-xs..2xl) remain available; project tokens are added under semantic names and the guard restricts usage to the chosen scale."
+
+shared_context:
+  tokens:
+    - "Tailwind 4.3.3 via @tailwindcss/vite; existing @theme in src/index.css:11 has fonts, --color-accent-*, --color-ink/ink-2/ink-3, --color-dim, --ease-spring, --animate-*; .glass (shadow 0 20px 50px -20px rgb(0 0 0/.7), border-white/10 bg-zinc-900/95), .eyebrow at index.css:145; progress bg rgb(255 255 255/.06)."
+    - "ui.tsx: SECTION_PAD='p-4' (l.363), INSET_HEADER_PAD='px-4 pt-4' (l.365); Card title non-inset uses text-[16px] font-medium tracking-tight."
+    - "Arbitrary font sizes in tsx: 14px x28, 12px x19, 13px x18, 12.5 x15, 11.5 x13, 15 x12, 13.5 x12, 14.5 x11, 11 x8, 16 x3, 15.5 x3, 10.5 x3, 40 x1 -> target ~7-step scale (e.g. 10.5/11.5->micro? decide: 11,12,13,14,15,16,40 display)."
+    - "Radius: rounded-xl x19, 2xl x16, full x12, lg x8, 3xl x4, md x1 -> semantic: control(lg/xl), card(2xl), pill(full); 3xl snaps to card."
+    - "White overlays: border-white/[0.05]x9,[0.06]x10,[0.08]x2,/10,/15; bg-white/[0.02][0.03][0.04][0.05][0.06][0.08][0.1]; divide-white/[0.05] -> tokens like --color-hairline, --color-line, --color-fill-1..3, --color-fill-hover."
+    - "Durations: duration-150 x5, 200 x9, 300 x2; one transition-[transform,background-color], one transition-[background-color,color,transform,opacity]."
+    - "Sizing repeats: h-12/w-12, h-14, h-11, size-9, size-11, size-5, size-2.5, h-3.5, w-[3px]x3, gap-[3px], w-[268px]/left-[268px], max-w-[1400px]."
+    - "Arbitrary-value counts per file: App.tsx 30, Overview 29, ui.tsx 28, Mods 25, Install 16, Settings 14, Activity 13, Collections 11, PromptDialog 10, Requirements 9, Games 9, GameRepair 5, Dialog 3, AddGameDialog 3, ErrorBoundary 2."
+    - "Tests asserting className/toHaveClass: ct1.test.tsx(17), ct2(7), u02(6), ui.test(6), views.test(4), App.test(1); style.test.ts is the guard file (uses import.meta.glob ?raw of non-test tsx + index.css?raw)."
+    - "Verify commands (cwd apps/desktop): npx tsc --noEmit ; npx vitest run."
+
+tasks:
+  - id: T1
+    title: Define token layer; migrate index.css, ui.tsx, components/*
+    description: |
+      Rung: platform (Tailwind v4 @theme). Add token scales to @theme in index.css: --text-* (with
+      paired --text-*--line-height / tracking where needed), --tracking-* (eyebrow 0.14em, tight),
+      --radius-* (control, card, pill), --color-* surface/border/fill opacities on white, --shadow-overlay,
+      durations/transition tokens, component sizing (--spacing-* or --size-* for icon, button/input/tile
+      heights, rail 3px, sidebar 268px, content max 1400px). Rewrite .glass/.eyebrow/progress/scrollbar
+      to use the vars. Migrate components/ui.tsx (export composed constants: SECTION_PAD, INSET_HEADER_PAD,
+      CARD_SHELL, DIVIDE, plus any reused tile/pill/row class constants) and components/Dialog.tsx,
+      PromptDialog.tsx, Osk.tsx, AddGameDialog.tsx, ErrorBoundary.tsx. Write the token reference as a
+      comment block at top of @theme (name -> value -> intended use).
+    wave: 1
+    depends_on: []
+    agent: gem-implementer
+    status: pending
+    retries_used: 0
+    context_cluster: tokens
+    acceptance_criteria:
+      - "index.css @theme defines token scales for: font size, tracking, radius, spacing/padding, component sizing, surface/border/fill colours+opacities, shadows, durations/easing."
+      - "index.css contains no raw rgb()/px/opacity literals outside @theme except the grain SVG data URI and keyframes; .glass shadow uses --shadow-overlay."
+      - "components/*.tsx (non-test) contain no arbitrary `-[...]` values for text size, tracking, radius, colour/opacity, shadow, duration, h/w/size except entries recorded in the exceptions list."
+      - "ui.tsx exports the composed class constants views will reuse (at minimum SECTION_PAD, INSET_HEADER_PAD, card shell, divider) built only from tokens."
+      - "Returned output includes: token table (name/value/use), snapping list (old -> new, file:line), exceptions list with justification for touched files."
+      - "DOM structure, element order, tabIndex/data-nav attributes unchanged in touched files."
+      - "npx tsc --noEmit clean; npx vitest run passes (update class assertions in components/ui.test.tsx, components/*.test.tsx only)."
+    handoff:
+      constraints:
+        - "Edit only apps/desktop/src/index.css, src/components/*.tsx (incl. their own tests). No Rust, no commits, never discard uncommitted changes."
+        - "Keep token names stable once returned; wave 2 depends on them."
+        - "No prettier/eslint: preserve existing indentation by hand."
+        - "Keep style.test.ts existing guards passing (no gradients, no shadow-sm..2xl / shadow-[ classes, no .panel); overlay shadow must be a named token used from CSS (.glass), not a new shadow-* class in tsx unless the guard is adjusted in T4."
+
+  - id: T2
+    title: Migrate App.tsx, Overview, Activity, Games, GameRepair to tokens
+    description: "Rung: reuse (T1 tokens and ui.tsx constants). Replace arbitrary and off-scale classes with tokens; snap near-duplicates."
+    wave: 2
+    depends_on: [T1]
+    agent: gem-implementer
+    status: pending
+    retries_used: 0
+    context_cluster: tokens
+    acceptance_criteria:
+      - "src/app/App.tsx, views/Overview.tsx, views/Activity.tsx, views/Games.tsx, views/GameRepair.tsx contain no arbitrary values for text size, tracking, radius, colour/opacity, shadow, duration, h/w/size/gap, and no rounded-3xl/md or off-scale white opacities; remaining arbitrary values listed with justification."
+      - "Repeated containers (Activity job li px-3 py-2.5, RunLog/GameRepair pills px-3 py-1.5) use ui.tsx constants or tokens shared with T3 equivalents."
+      - "Snapping list returned (old -> new, file:line)."
+      - "DOM order, focus order, data-nav/gamepad attributes unchanged (diff shows only className/style string changes)."
+      - "npx tsc --noEmit clean; npx vitest run passes, or failing assertions in shared test files (ct1, ct2, u02, views.test) reported verbatim for T4."
+    handoff:
+      constraints:
+        - "Edit only the five listed source files plus app/App.test.tsx, views/GameRepair.test.tsx, views/Games.test.tsx. Do not edit index.css, ui.tsx, or shared test files (ct1, ct2, u02, views.test, style.test). Need a new token -> report it, use nearest existing token."
+        - "No commits; never discard uncommitted changes; indentation by hand."
+
+  - id: T3
+    title: Migrate Mods, Install, Settings, Collections, Requirements to tokens
+    description: "Rung: reuse (T1 tokens and ui.tsx constants). Replace arbitrary and off-scale classes with tokens; snap near-duplicates (Install tiles rounded-3xl -> card radius)."
+    wave: 2
+    depends_on: [T1]
+    agent: gem-implementer
+    status: pending
+    retries_used: 0
+    context_cluster: tokens
+    acceptance_criteria:
+      - "views/Mods.tsx, Install.tsx, Settings.tsx, Collections.tsx, Requirements.tsx contain no arbitrary values for text size, tracking, radius, colour/opacity, shadow, duration, h/w/size/gap, and no rounded-3xl/md or off-scale white opacities; remaining arbitrary values listed with justification."
+      - "Install search-result tiles and Mods load-order li (min-h-16, py-2 pr-3 pl-2) use tokens/constants; Install tile radius matches Card radius."
+      - "Snapping list returned (old -> new, file:line)."
+      - "DOM order, focus order, data-nav/gamepad attributes unchanged (diff shows only className/style string changes)."
+      - "npx tsc --noEmit clean; npx vitest run passes, or failing assertions in shared test files (ct1, ct2, u02, views.test) reported verbatim for T4."
+    handoff:
+      constraints:
+        - "Edit only the five listed source files plus views/Settings.test.tsx. Do not edit index.css, ui.tsx, App.tsx, or shared test files (ct1, ct2, u02, views.test, style.test). Need a new token -> report it, use nearest existing token."
+        - "No commits; never discard uncommitted changes; indentation by hand."
+
+  - id: T4
+    title: Guard test, shared test fixes, final exceptions and snapping report
+    description: |
+      Rung: reuse (extend style.test.ts). Add guard: for every non-test tsx source, fail on arbitrary
+      `-[...]` values for tokenized properties (text-[, tracking-[, rounded-[, leading-[, opacity-[,
+      (bg|border|divide|ring|text)-white/[, shadow-[, duration-[, h-/w-/size-/gap-[ px values) and on
+      off-scale classes (rounded-3xl, rounded-md, text-white/NN outside allowlist, duration-* not on scale),
+      with an explicit allowlist array of justified exceptions (file + class + reason). Also assert index.css
+      @theme declares each token family. Apply token additions reported by T2/T3 to index.css if any, and
+      fix class assertions in ct1, ct2, u02, views.test.
+    wave: 3
+    depends_on: [T2, T3]
+    agent: gem-implementer
+    status: pending
+    retries_used: 0
+    context_cluster: tokens
+    acceptance_criteria:
+      - "style.test.ts has a token guard test that fails when a new text-[13px], rounded-3xl, border-white/[0.07], tracking-[0.2em], h-[37px] or duration-[250ms] is added to any non-test tsx (verified by temporarily inserting one and seeing the test fail, then reverting)."
+      - "Guard allowlist entries each carry a one-line justification; allowlist matches the merged exceptions list from T1-T3."
+      - "grep -rE '(text|tracking|rounded|leading|opacity|shadow|duration)-\\[' apps/desktop/src --include=*.tsx (excluding tests) returns only allowlisted entries."
+      - "Consolidated report returned: token table, full snapping list (old -> new, file:line), remaining arbitrary values with justification."
+      - "npx tsc --noEmit clean; npx vitest run passes in apps/desktop (all suites, including existing flat-look guards)."
+    handoff:
+      constraints:
+        - "Edit only style.test.ts, shared test files (ct1, ct2, u02, views.test), and index.css @theme additions requested by T2/T3. Do not reshape views."
+        - "No commits; never discard uncommitted changes."

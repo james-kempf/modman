@@ -75,7 +75,7 @@ function Actions({ children }: { children: ReactNode }) {
 function Confirm({ p, answer, cancel, sending }: Props<"confirm">) {
   return (
     <Dialog title="Confirm" onBack={cancel}>
-      <p className="text-[16px] leading-relaxed text-zinc-200">{p.question}</p>
+      <p className="text-title leading-relaxed text-zinc-200">{p.question}</p>
       <Actions>
         <Button
           data-autofocus={!p.default_yes || undefined}
@@ -149,21 +149,21 @@ function Choice({
       onClick={onClick}
       onFocus={onFocus}
       className={cx(
-        "flex min-h-14 w-full items-start gap-3 rounded-2xl border px-4 py-3 text-left transition-colors duration-200",
+        "flex min-h-control-lg w-full items-start gap-3 rounded-card border px-4 py-3 text-left transition-colors duration-base",
         selected
-          ? "border-accent-400/40 bg-accent-400/[0.08]"
-          : "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]",
+          ? "border-accent-400/40 bg-accent-400/10"
+          : "border-hairline bg-fill-1 hover:bg-fill-2",
       )}
     >
       <span
         aria-hidden
         className={cx(
-          "mt-0.5 grid size-5 shrink-0 place-items-center border-2 transition-colors duration-200",
-          multi ? "rounded-md" : "rounded-full",
+          "mt-0.5 grid size-icon shrink-0 place-items-center border-2 transition-colors duration-base",
+          multi ? "rounded-control-sm" : "rounded-pill",
           selected ? "border-accent-400 bg-accent-400 text-accent-950" : "border-zinc-500",
         )}
       >
-        {selected && (multi ? <CheckIcon size={12} weight="bold" /> : <span className="size-2 rounded-full bg-accent-950" />)}
+        {selected && (multi ? <CheckIcon size={12} weight="bold" /> : <span className="size-2 rounded-pill bg-accent-950" />)}
       </span>
       <span className="min-w-0 flex-1">{children}</span>
     </button>
@@ -180,7 +180,7 @@ function ChooseFile({ p, answer, cancel, sending }: Props<"choose_file">) {
             <span className="block text-zinc-100">
               {f.name} {f.version && <span className="text-zinc-400">v{f.version}</span>}
             </span>
-            <span className="block font-mono text-[11.5px] text-dim">
+            <span className="block font-mono text-caption text-dim">
               {[f.category_name, f.file_name, f.size_in_bytes !== null && bytes(f.size_in_bytes)]
                 .filter(Boolean)
                 .join(" · ")}
@@ -210,7 +210,7 @@ function ChooseOptional({ p, answer, cancel, sending }: Props<"choose_optional">
         {p.mods.map((m, i) => (
           <Choice key={i} multi selected={sel.includes(i)} onClick={() => toggle(i)} autoFocus={i === 0}>
             <span className="text-zinc-100">{m.name}</span>{" "}
-            <span className="font-mono text-[11.5px] text-dim">
+            <span className="font-mono text-caption text-dim">
               {m.version && `v${m.version} · `}
               {bytes(m.size)}
             </span>
@@ -234,9 +234,9 @@ function ManualDownload({ p, answer, cancel, sending }: Props<"manual_download">
   const [path, setPath] = useState("");
   return (
     <Dialog title={`Manual download: ${p.name}`} subtitle="This file cannot be downloaded automatically." onBack={cancel}>
-      {p.instructions && <p className="text-[14.5px] leading-relaxed whitespace-pre-wrap text-zinc-300">{p.instructions}</p>}
+      {p.instructions && <p className="text-body leading-relaxed whitespace-pre-wrap text-zinc-300">{p.instructions}</p>}
       {p.url && (
-        <p className="mt-3 text-[14px] text-zinc-400">
+        <p className="mt-3 text-body text-zinc-400">
           Download it from <span className="font-mono break-all text-zinc-200 select-all">{p.url}</span>
         </p>
       )}
@@ -345,7 +345,7 @@ function FomodGroup({ p, answer, cancel, sending }: Props<"fomod_group">) {
       {p.error && (
         <p
           role="alert"
-          className="mb-5 flex items-start gap-2 rounded-2xl border border-rose-400/15 bg-rose-500/[0.06] px-4 py-3 text-[14px] text-rose-200"
+          className="mb-5 flex items-start gap-2 rounded-card border border-rose-400/15 bg-rose-500/5 px-4 py-3 text-body text-rose-200"
         >
           <WarningIcon aria-hidden size={16} weight="bold" className="mt-0.5 shrink-0" />
           {p.error}
@@ -370,13 +370,13 @@ function FomodGroup({ p, answer, cancel, sending }: Props<"fomod_group">) {
             </Choice>
           ))}
         </div>
-        <div className="rounded-2xl border border-white/[0.06] bg-ink p-5 text-zinc-300" aria-live="polite">
+        <div className={cx(TILE, "p-5 text-zinc-300")} aria-live="polite">
           <div className="eyebrow mb-3">Description</div>
-          <h3 className="mb-2 text-[15.5px] font-medium text-zinc-100">{shown?.name}</h3>
-          <p className="text-[14px] leading-relaxed whitespace-pre-wrap text-zinc-400">{shown?.description || "No description."}</p>
+          <h3 className="mb-2 text-lead font-medium text-zinc-100">{shown?.name}</h3>
+          <p className="text-body leading-relaxed whitespace-pre-wrap text-zinc-400">{shown?.description || "No description."}</p>
         </div>
       </div>
-      {problem && <p className="mt-4 text-[14px] text-amber-300">{problem}</p>}
+      {problem && <p className="mt-4 text-body text-amber-300">{problem}</p>}
       <Actions>
         <Button tone="ghost" onClick={cancel} disabled={sending}>
           Cancel install

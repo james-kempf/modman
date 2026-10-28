@@ -51,6 +51,7 @@ export function createDemoBackend(): FakeTransport {
   const waiting = new Map<number, (a: Answer) => void>();
   let loggedIn = false;
   let timer = false;
+  let shortcut = false;
   const bools = ["true", "false"];
   // The core's 9 keys with their kinds and options (config.rs).
   const config: ConfigEntry[] = [
@@ -166,6 +167,12 @@ export function createDemoBackend(): FakeTransport {
       db_path: "~/.local/share/modman/modman.db",
       legacy_state_dir: null,
     }),
+    steam_shortcut_status: () => ({ accounts: 1, added: shortcut ? 1 : 0, steam_running: false, exe: "/home/deck/Applications/modman.AppImage" }),
+    steam_shortcut_set: (a: Args) => {
+      shortcut = !!a!.enabled;
+      return { accounts: 1, added: shortcut ? 1 : 0, steam_running: false, exe: "/home/deck/Applications/modman.AppImage" };
+    },
+    quit_app: () => undefined,
     app_ready: () => ({ startup_check: { system_busy: null, pending: [] }, queued: 0 }),
     startup_check: () => null,
     prompt_answer: (a: Args) => {

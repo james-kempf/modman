@@ -57,7 +57,7 @@ class Boundary extends Component<Props, { error: unknown; failed: boolean; autoT
 
   render() {
     if (!this.state.failed) return this.props.children;
-    if (this.props.recover && !this.state.autoTried) return <p className="py-6 text-[14px] text-zinc-400">Loading…</p>;
+    if (this.props.recover && !this.state.autoTried) return <p className="py-6 text-body text-zinc-400">Loading…</p>;
     return this.props.fallback(this.state.error, this.retry);
   }
 }
@@ -124,7 +124,7 @@ export function RootBoundary({ children }: { children: ReactNode }) {
           <div className="grid max-w-xl gap-4">
             <WarningIcon aria-hidden size={32} weight="duotone" className="text-rose-300" />
             <h1 className="text-2xl font-medium tracking-tight text-zinc-50">modman hit an error</h1>
-            <p className="text-[14px] leading-relaxed wrap-anywhere text-zinc-400">{errMsg(error)}</p>
+            <p className="text-body leading-relaxed wrap-anywhere text-zinc-400">{errMsg(error)}</p>
             <div className="flex flex-wrap gap-3">
               <Button tone="primary" onClick={reload}>
                 Reload

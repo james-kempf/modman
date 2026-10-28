@@ -12,6 +12,7 @@ import {
   GameControllerIcon,
   GearSixIcon,
   InfoIcon,
+  PowerIcon,
   PuzzlePieceIcon,
   SquaresFourIcon,
   StackIcon,
@@ -70,10 +71,10 @@ const ICON: Record<ViewId, ReactNode> = {
 /**
  * Bottom padding of the view: with nothing in the bottom stack it equals
  * the side padding (px-10); with notices or the island it also leaves room
- * (+ scroll-padding) for the fixed stack (~82px per notice or island + 24px
+ * (+ scroll-padding, also kept at the top) for the fixed stack (~82px per notice or island + 24px
  * offset), so a control scrolled into view is not under it.
  */
-const STACK_ROOM = ["pb-10", "pb-28 scroll-pb-28", "pb-48 scroll-pb-48", "pb-72 scroll-pb-72", "pb-96 scroll-pb-96"];
+const STACK_ROOM = ["pb-10 scroll-pb-32", "pb-28 scroll-pb-60", "pb-48 scroll-pb-80", "pb-72 scroll-pb-96", "pb-96 scroll-pb-[30rem]"];
 
 /** How long a finished job stays in the island (legacy: 5 s). */
 const ISLAND_LINGER = 5000;
@@ -108,7 +109,7 @@ export function App() {
         {/* The Overview's hero art sits behind the scrolling view, not in it: it stays put while the view scrolls. */}
         <div className="relative isolate min-h-0 min-w-0 flex-1">
           {view === "overview" && <HeroBackdrop />}
-          <main className={cx("relative h-full overflow-y-auto", STACK_ROOM[stack] ?? STACK_ROOM[4])}>
+          <main className={cx("relative h-full scroll-pt-32 overflow-y-auto", STACK_ROOM[stack] ?? STACK_ROOM[4])}>
             {/* key: each view enters with the short legacy fade/rise. */}
             <div key={view} className="mx-auto w-full max-w-[1400px] animate-rise px-10 pt-10">
               <ViewBoundary name={VIEWS.find((v) => v.id === view)?.label ?? view}>
@@ -158,6 +159,16 @@ function Sidebar() {
     >
       <GameHeader />
       <TabRail />
+      <div data-nav-rail className="mt-auto px-4 pb-4">
+        <button
+          type="button"
+          onClick={() => void ipc.quitApp()}
+          className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-[14.5px] text-zinc-400 transition-colors duration-150 hover:bg-white/[0.03] hover:text-zinc-200"
+        >
+          <PowerIcon aria-hidden size={20} />
+          <span className="flex-1">Quit</span>
+        </button>
+      </div>
       <AccountFooter />
     </aside>
   );
@@ -246,7 +257,7 @@ function AccountFooter() {
   const a = q.data;
   const signedIn = !!a?.key_source;
   return (
-    <div className="mt-auto grid gap-4 border-t border-white/[0.05] px-6 py-5">
+    <div className="grid gap-4 border-t border-white/[0.05] px-6 py-5">
       {q.isError ? (
         <p className="text-[13px] text-rose-300">Could not read the Nexus account. See Settings.</p>
       ) : signedIn ? (

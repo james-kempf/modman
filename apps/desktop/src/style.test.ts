@@ -25,9 +25,13 @@ describe("flat look", () => {
       expect(src, file).not.toMatch(/\bshadow-\[|\bshadow-(sm|md|lg|xl|2xl)\b|className="glow"/);
     }
     expect(css).not.toMatch(/\.glow\b/);
-    for (const cls of ["surface", "panel"]) {
-      const rule = new RegExp(`\\.${cls}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? "";
-      expect(rule, cls).not.toMatch(/box-shadow/);
+  });
+
+  // Fails when a page brings back its own card shell (the legacy .panel) instead of Card.
+  it("has no .panel card shell; cards use Card from ui.tsx", () => {
+    expect(css).not.toMatch(/\.panel\b/);
+    for (const [file, src] of Object.entries(sources)) {
+      expect(src, file).not.toMatch(/className=(\{cx\()?"(panel|[^"]* panel)\b/);
     }
   });
 });

@@ -278,7 +278,7 @@ describe("bottom padding", () => {
     expect(m.className).toMatch(/\bpb-10\b/);
     act(() => useUi.getState().notify("info", "hello"));
     await waitFor(() => expect(m.className).toMatch(/\bpb-28\b/));
-    expect(m.className).toMatch(/\bscroll-pb-28\b/);
+    expect(m.className).toMatch(/\bscroll-pb-60\b/);
   });
 });
 

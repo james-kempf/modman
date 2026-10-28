@@ -68,6 +68,14 @@ export function performNav(action: NavAction, doc: Document = document): void {
   }
 }
 
+/** True when the caret is collapsed at the start/end of the field, so the arrow has nowhere to go in the text. */
+function caretAtEdge(el: HTMLInputElement | HTMLTextAreaElement, edge: "start" | "end"): boolean {
+  // Types without selection support (number, email) report null: keep the caret behaviour.
+  const { selectionStart: a, selectionEnd: b } = el;
+  if (a === null || b === null || a !== b) return false;
+  return edge === "start" ? a === 0 : a === el.value.length;
+}
+
 /** Keyboard mapping (also the Steam Input keyboard-layout fallback). */
 export function keyToNav(e: KeyboardEvent): NavAction | null {
   if (e.altKey || e.ctrlKey || e.metaKey) return null;
@@ -80,8 +88,8 @@ export function keyToNav(e: KeyboardEvent): NavAction | null {
       return { type: "move", dir: e.key === "ArrowUp" ? "up" : "down" };
     case "ArrowLeft":
     case "ArrowRight":
-      // Inside a text field the caret moves.
-      if (inText) return null;
+      // Inside a text field the caret moves, until it sits at the edge the key points to.
+      if (inText && !caretAtEdge(target, e.key === "ArrowLeft" ? "start" : "end")) return null;
       return { type: "move", dir: e.key === "ArrowLeft" ? "left" : "right" };
     case "Escape":
       return { type: "back" };

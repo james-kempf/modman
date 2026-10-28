@@ -13,6 +13,7 @@ import {
   useState,
   type ButtonHTMLAttributes,
   type FocusEvent,
+  type HTMLAttributes,
   type InputHTMLAttributes,
   type KeyboardEvent,
   type ReactNode,
@@ -26,15 +27,15 @@ export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Bool
 type Tone = "primary" | "default" | "danger" | "ghost";
 const TONES: Record<Tone, string> = {
   primary: "bg-accent-400 text-accent-950 font-semibold hover:bg-accent-300",
-  default: "bg-white/[0.06] text-zinc-100 border border-white/[0.06] hover:bg-white/[0.1]",
+  default: "bg-fill-2 text-zinc-100 border border-hairline hover:bg-fill-hover",
   danger: "bg-rose-500/10 text-rose-200 border border-rose-400/20 hover:bg-rose-500/20",
-  ghost: "text-zinc-300 hover:text-zinc-100 hover:bg-white/[0.05]",
+  ghost: "text-zinc-300 hover:text-zinc-100 hover:bg-fill-2",
 };
 type Size = "sm" | "md" | "lg";
 const SIZES: Record<Size, string> = {
-  sm: "min-h-11 px-3.5 text-[13.5px] gap-1.5 rounded-xl",
-  md: "min-h-12 px-4 text-sm gap-2 rounded-xl",
-  lg: "min-h-14 px-7 text-[15px] gap-2.5 rounded-2xl",
+  sm: "min-h-control-sm px-3.5 text-label gap-1.5 rounded-control",
+  md: "min-h-control px-4 text-body gap-2 rounded-control",
+  lg: "min-h-control-lg px-7 text-lead gap-2.5 rounded-card",
 };
 
 export function Button({
@@ -68,7 +69,7 @@ export function Button({
       aria-busy={busy || undefined}
       onClick={off ? (e) => e.preventDefault() : rest.onClick}
       className={cx(
-        "inline-flex min-w-12 shrink-0 items-center justify-center font-medium whitespace-nowrap transition-[background-color,color,transform,opacity] duration-200 active:translate-y-px active:scale-[0.98]",
+        "inline-flex min-w-control shrink-0 items-center justify-center font-medium whitespace-nowrap transition-[background-color,color,transform,opacity] duration-base active:translate-y-px active:scale-98",
         TONES[tone],
         SIZES[size],
         className,
@@ -97,7 +98,7 @@ export function IconButton({
       aria-busy={busy || undefined}
       onClick={busy ? (e) => e.preventDefault() : rest.onClick}
       className={cx(
-        "grid size-12 shrink-0 place-items-center rounded-xl text-zinc-300 transition-colors duration-200 hover:bg-white/[0.06] hover:text-zinc-100 active:scale-95",
+        "grid size-control shrink-0 place-items-center rounded-control text-zinc-300 transition-colors duration-base hover:bg-fill-2 hover:text-zinc-100 active:scale-95",
         className,
       )}
     >
@@ -134,20 +135,20 @@ export function Toggle({
       aria-busy={busy || undefined}
       onClick={() => !busy && onChange(!checked)}
       className={cx(
-        "inline-flex min-h-12 min-w-12 shrink-0 items-center gap-3 rounded-xl text-sm text-zinc-200",
+        "inline-flex min-h-control min-w-control shrink-0 items-center gap-3 rounded-control text-body text-zinc-200",
         showLabel ? "px-2" : "justify-center",
       )}
     >
       <span
         aria-hidden
         className={cx(
-          "inline-flex h-7 w-12 shrink-0 items-center rounded-full p-1 transition-colors duration-300",
-          checked ? "bg-accent-500/90" : "bg-white/[0.1]",
+          "inline-flex h-7 w-12 shrink-0 items-center rounded-pill p-1 transition-colors duration-slow",
+          checked ? "bg-accent-500/90" : "bg-fill-hover",
         )}
       >
         <span
           className={cx(
-            "size-5 rounded-full transition-[transform,background-color] duration-300 ease-spring",
+            "size-icon rounded-pill transition-[transform,background-color] duration-slow ease-spring",
             checked ? "translate-x-5 bg-white" : "bg-zinc-400",
           )}
         />
@@ -172,7 +173,7 @@ export function Segmented<T extends string>({
   return (
     <div role="group" aria-label={label} className="flex flex-wrap items-center gap-3">
       <span className="eyebrow">{label}</span>
-      <span className="flex max-w-full flex-wrap rounded-xl border border-white/[0.06] bg-ink p-1">
+      <span className="flex max-w-full flex-wrap rounded-control border border-hairline bg-ink p-1">
         {options.map((o) => (
           <button
             key={o.value}
@@ -180,8 +181,8 @@ export function Segmented<T extends string>({
             aria-pressed={o.value === value}
             onClick={() => onChange(o.value)}
             className={cx(
-              "min-h-11 rounded-lg px-4 text-[13.5px] transition-colors duration-200",
-              o.value === value ? "bg-white/[0.08] text-zinc-50" : "text-zinc-400 hover:text-zinc-200",
+              "min-h-control-sm rounded-control-sm px-4 text-label transition-colors duration-base",
+              o.value === value ? "bg-fill-3 text-zinc-50" : "text-zinc-400 hover:text-zinc-200",
             )}
           >
             {o.label}
@@ -258,7 +259,7 @@ export function Select<T extends string>({
   };
   return (
     <div className={cx("relative grid min-w-0 gap-2", className)} onBlur={open ? onBlur : undefined}>
-      <span id={`${id}-label`} className={cx("text-[13px] font-medium wrap-anywhere text-zinc-300", hideLabel && "sr-only")}>
+      <span id={`${id}-label`} className={cx("text-label font-medium wrap-anywhere text-zinc-300", hideLabel && "sr-only")}>
         {label}
       </span>
       <button
@@ -287,7 +288,7 @@ export function Select<T extends string>({
           aria-labelledby={`${id}-label`}
           data-nav-scope
           onKeyDown={onKeyDown}
-          className="glass absolute top-full right-0 left-0 z-30 mt-1.5 grid max-h-72 gap-0.5 overflow-y-auto rounded-xl p-1"
+          className="glass absolute top-full right-0 left-0 z-30 mt-1.5 grid max-h-72 gap-0.5 overflow-y-auto rounded-control p-1"
         >
           {options.map((o) => (
             <button
@@ -297,8 +298,8 @@ export function Select<T extends string>({
               aria-selected={o.value === value}
               onClick={() => pick(o.value)}
               className={cx(
-                "flex min-h-11 items-center justify-between gap-3 rounded-lg px-3 text-left text-[14px] transition-colors duration-150",
-                o.value === value ? "bg-white/[0.08] text-zinc-50" : "text-zinc-300 hover:bg-white/[0.05] hover:text-zinc-100",
+                "flex min-h-control-sm items-center justify-between gap-3 rounded-control-sm px-3 text-left text-body transition-colors duration-fast",
+                o.value === value ? "bg-fill-3 text-zinc-50" : "text-zinc-300 hover:bg-fill-2 hover:text-zinc-100",
               )}
             >
               <span className="min-w-0 truncate">{o.label}</span>
@@ -331,7 +332,7 @@ export function TextField({
   const described = [error && errId, helper && helpId].filter(Boolean).join(" ") || undefined;
   return (
     <div className={cx("grid gap-2", className)}>
-      <label htmlFor={id} className={cx("text-[13px] font-medium text-zinc-300", hideLabel && "sr-only")}>
+      <label htmlFor={id} className={cx("text-label font-medium text-zinc-300", hideLabel && "sr-only")}>
         {label}
       </label>
       <input
@@ -345,12 +346,12 @@ export function TextField({
         className="input"
       />
       {error && (
-        <p id={errId} className="text-[13px] leading-relaxed text-rose-300">
+        <p id={errId} className="text-label leading-relaxed text-rose-300">
           {error}
         </p>
       )}
       {helper && (
-        <p id={helpId} className="text-[12.5px] leading-relaxed text-dim">
+        <p id={helpId} className="text-label leading-relaxed text-dim">
           {helper}
         </p>
       )}
@@ -358,67 +359,132 @@ export function TextField({
   );
 }
 
-/** A legacy panel: eyebrow title, optional actions, generous padding. */
-export function Card({
-  title,
-  actions,
-  children,
-  className,
-}: {
-  title?: ReactNode;
-  actions?: ReactNode;
-  children: ReactNode;
-  className?: string;
-}) {
-  return (
-    <section className={cx("panel p-6 md:p-8", className)}>
-      {(title || actions) && (
-        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-          {title && <h2 className="eyebrow">{title}</h2>}
-          {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
-        </div>
-      )}
-      {children}
-    </section>
-  );
-}
+/** Padding of every Card section (CardSection, Row, card-level list rows): equal on both axes. */
+export const SECTION_PAD = "p-section";
+/** The inset header: the section padding minus the bottom (the first section's top padding is the gap). */
+export const INSET_HEADER_PAD = "px-section pt-section";
+/** The card surface: radius, hairline border, raised fill. */
+export const CARD_SHELL = "rounded-card border border-hairline bg-ink-2";
+/** Hairline dividers between stacked children (card sections, lists). */
+export const DIVIDE = "divide-y divide-hairline";
+/** A sunken well inside a card or dialog (tiles, typed-text output, side panels); add padding per use. */
+export const TILE = "rounded-card border border-hairline bg-ink";
+/** A compact status pill / chip row (mono log lines, repair steps). */
+export const PILL = "rounded-control border border-hairline bg-ink px-3 py-1.5 text-label";
+/** A free-standing list row (jobs, entries) that highlights on hover. */
+export const LIST_ROW = "rounded-control px-3 py-2.5 transition-colors duration-base hover:bg-fill-1";
+/** Card title (non-inset header). */
+export const CARD_TITLE = "text-title font-medium tracking-tight text-zinc-50";
+/** Muted secondary line under a title (card intros, row help). */
+export const MUTED_NOTE = "text-label leading-snug text-dim";
 
-/** Settings-style section: title above, rows in a divided surface. */
-export function Section({
+/**
+ * The one card: an optional header (title, intro, actions) above a surface
+ * whose children are stacked sections split by dividers. Children are
+ * `CardSection`s (padded free content), `Row`s, or lists with their own padding.
+ * `inset` puts the header inside the surface as its first section (for cards
+ * side by side with an untitled one, so their tops line up).
+ */
+export function Card({
   title,
   intro,
   actions,
+  inset = false,
   children,
-}: {
-  title: ReactNode;
+  className,
+  ...rest
+}: Omit<HTMLAttributes<HTMLElement>, "title"> & {
+  title?: ReactNode;
   intro?: ReactNode;
   actions?: ReactNode;
+  inset?: boolean;
   children: ReactNode;
 }) {
-  return (
-    <section>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="text-[19px] font-medium tracking-tight text-zinc-50">{title}</h2>
-          {intro && <div className="mt-1.5 max-w-[65ch] text-[14px] leading-relaxed text-dim">{intro}</div>}
-        </div>
-        {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+  const header = title || intro || actions ? (
+    // inset: no bottom padding, the first section's top padding is the gap (no divider line).
+    <div className={cx("flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1", inset && INSET_HEADER_PAD)}>
+      <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
+        {/* inset titles keep the pre-migration mono eyebrow look. */}
+        {title && <h2 className={inset ? "eyebrow" : CARD_TITLE}>{title}</h2>}
+        {intro && <div className={MUTED_NOTE}>{intro}</div>}
       </div>
-      <div className="rows mt-5 rounded-3xl border border-white/[0.05] bg-ink-2">{children}</div>
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+    </div>
+  ) : null;
+  return (
+    <section {...rest} className={cx("flex min-w-0 flex-col", className)}>
+      {!inset && header}
+      {/* flex-1: cards side by side in a grid row share one height. */}
+      {inset ? (
+        // The header sits outside the divided part, so no line between it and the first section.
+        <div className={cx("flex flex-1 flex-col", CARD_SHELL)}>
+          {header}
+          <div className={cx("flex flex-1 flex-col", DIVIDE)}>{children}</div>
+        </div>
+      ) : (
+        <div
+          className={cx(
+            "flex flex-1 flex-col",
+            DIVIDE,
+            CARD_SHELL,
+            header && "mt-2.5",
+          )}
+        >
+          {children}
+        </div>
+      )}
     </section>
   );
 }
 
-/** One row of a Section: title + description left, controls right. */
+/** One padded part of a Card (free content: forms, lists, notes). */
+export function CardSection({ children, className, ...rest }: HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div {...rest} className={cx(SECTION_PAD, className)}>
+      {children}
+    </div>
+  );
+}
+
+/** One compact row of a Card: title + one muted help line left, controls right (wrapping below when narrow). */
 export function Row({ title, desc, children }: { title: ReactNode; desc?: ReactNode; children?: ReactNode }) {
   return (
-    <div className="grid gap-4 px-6 py-5 md:grid-cols-[1fr_auto] md:items-center">
-      <div className="min-w-0">
-        <div className="text-[14.5px] text-zinc-100">{title}</div>
-        {desc && <div className="mt-1 text-[13px] leading-relaxed text-dim">{desc}</div>}
+    <div className={cx("flex flex-wrap items-center justify-between gap-x-4 gap-y-2", SECTION_PAD)}>
+      <div className="min-w-0 flex-[1_1_12rem]">
+        <div className="text-body text-zinc-100">{title}</div>
+        {desc && <div className={MUTED_NOTE}>{desc}</div>}
       </div>
-      {children && <div className="flex min-w-0 flex-wrap items-center gap-2 md:justify-end">{children}</div>}
+      {children && <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">{children}</div>}
     </div>
+  );
+}
+
+/** Disclosure button for a list that is collapsed by default; `name` reads e.g. "Quarantines list (2)". */
+export function ListToggle({
+  name,
+  count,
+  open,
+  onToggle,
+  controls,
+}: {
+  name: string;
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+  controls: string;
+}) {
+  return (
+    <Button
+      size="sm"
+      aria-expanded={open}
+      // Only while open: the collapsed list is not rendered, so the id would dangle.
+      aria-controls={open ? controls : undefined}
+      aria-label={`${name} list (${count})`}
+      icon={<CaretDownIcon aria-hidden size={14} className={cx("transition-transform duration-base", open && "rotate-180")} />}
+      onClick={onToggle}
+    >
+      List ({count})
+    </Button>
   );
 }
 
@@ -439,8 +505,8 @@ export function ViewHeader({
     <header className="flex flex-wrap items-end justify-between gap-x-8 gap-y-5 pb-2">
       <div className="min-w-0 flex-[1_1_24rem]">
         {eyebrow && <div className="eyebrow mb-3">{eyebrow}</div>}
-        <h1 className="text-3xl font-medium tracking-tighter text-zinc-50 md:text-[40px] md:leading-none">{title}</h1>
-        {description && <div className="mt-3 max-w-[65ch] text-[15px] leading-relaxed text-zinc-400">{description}</div>}
+        <h1 className="text-3xl font-medium tracking-tighter text-zinc-50 md:text-display md:leading-none">{title}</h1>
+        {description && <div className="mt-3 max-w-prose text-lead leading-relaxed text-zinc-400">{description}</div>}
       </div>
       {children && <div className="flex max-w-full min-w-0 flex-wrap items-center gap-2">{children}</div>}
     </header>
@@ -449,7 +515,7 @@ export function ViewHeader({
 
 type BadgeTone = "zinc" | "accent" | "amber" | "rose";
 const BADGE: Record<BadgeTone, string> = {
-  zinc: "bg-white/[0.05] text-zinc-300 border-white/[0.06]",
+  zinc: "bg-fill-2 text-zinc-300 border-hairline",
   accent: "bg-accent-400/10 text-accent-300 border-accent-400/15",
   amber: "bg-amber-400/10 text-amber-300 border-amber-400/15",
   rose: "bg-rose-400/10 text-rose-300 border-rose-400/15",
@@ -459,7 +525,7 @@ export function Badge({ tone = "zinc", children }: { tone?: BadgeTone; children:
   return (
     <span
       className={cx(
-        "inline-flex h-6 items-center gap-1 rounded-lg border px-2 font-mono text-[11px] whitespace-nowrap",
+        "inline-flex h-badge items-center gap-1 rounded-control-sm border px-2 font-mono text-micro whitespace-nowrap",
         BADGE[tone],
       )}
     >
@@ -491,9 +557,9 @@ const DOT: Record<DotTone, string> = {
 /** A status dot that breathes while something is live. */
 export const StatusDot = memo(function StatusDot({ tone = "accent", live = false }: { tone?: DotTone; live?: boolean }) {
   return (
-    <span aria-hidden className="relative inline-flex size-2.5 shrink-0">
-      {live && <span className={cx("absolute inset-0 animate-breathe rounded-full", DOT[tone])} />}
-      <span className={cx("relative inline-flex size-2.5 rounded-full", DOT[tone])} />
+    <span aria-hidden className="relative inline-flex size-dot shrink-0">
+      {live && <span className={cx("absolute inset-0 animate-breathe rounded-pill", DOT[tone])} />}
+      <span className={cx("relative inline-flex size-dot rounded-pill", DOT[tone])} />
     </span>
   );
 });
@@ -514,15 +580,15 @@ export function Empty({
   action?: ReactNode;
 }) {
   if (!title)
-    return <p className="rounded-2xl border border-dashed border-white/[0.08] px-5 py-6 text-[14px] text-zinc-400">{children}</p>;
+    return <p className="rounded-card border border-dashed border-line px-5 py-6 text-body text-zinc-400">{children}</p>;
   return (
     <div className="grid gap-5 py-10 md:grid-cols-[auto_1fr] md:items-start md:gap-8">
-      <div aria-hidden className="grid size-16 place-items-center rounded-2xl border border-white/[0.06] bg-ink-2 text-dim">
+      <div aria-hidden className="grid size-tile place-items-center rounded-card border border-hairline bg-ink-2 text-dim">
         {icon}
       </div>
-      <div className="max-w-[52ch]">
+      <div className="max-w-prose-sm">
         <h2 className="text-xl font-medium tracking-tight text-zinc-100">{title}</h2>
-        {children && <div className="mt-2 text-[15px] leading-relaxed text-zinc-400">{children}</div>}
+        {children && <div className="mt-2 text-lead leading-relaxed text-zinc-400">{children}</div>}
         {action && <div className="mt-6 flex flex-wrap gap-3">{action}</div>}
       </div>
     </div>
@@ -534,7 +600,7 @@ export function ErrorNote({ children, actions }: { children: ReactNode; actions?
   return (
     <div
       role="status"
-      className="flex flex-wrap items-center gap-3 rounded-2xl border border-rose-400/15 bg-rose-500/[0.06] px-4 py-3 text-[14px] text-rose-200"
+      className="flex flex-wrap items-center gap-3 rounded-card border border-rose-400/15 bg-rose-500/5 px-4 py-3 text-body text-rose-200"
     >
       <div className="min-w-0 flex-1 wrap-anywhere">{children}</div>
       {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
@@ -547,7 +613,7 @@ export function Fact({ k, v }: { k: string; v: ReactNode }) {
   return (
     <div className="min-w-0">
       <dt className="eyebrow">{k}</dt>
-      <dd className="mt-1 font-mono text-[12.5px] break-words text-zinc-300">{v}</dd>
+      <dd className="mt-1 font-mono text-label break-words text-zinc-300">{v}</dd>
     </div>
   );
 }
@@ -629,13 +695,13 @@ export function Thumb({
     staleTime: Infinity,
   });
   const src = q.data && q.data.startsWith("data:") ? q.data : null;
-  if (src) return <img src={src} alt="" className={cx("size-11 shrink-0 rounded-xl object-cover", className)} />;
+  if (src) return <img src={src} alt="" className={cx("size-thumb shrink-0 rounded-control object-cover", className)} />;
   const m = monogram(name ?? "");
   return (
     <span
       aria-hidden
       className={cx(
-        "grid size-11 shrink-0 place-items-center rounded-xl font-mono text-[11px] font-semibold text-white/75",
+        "grid size-thumb shrink-0 place-items-center rounded-control font-mono text-micro font-semibold text-white/75",
         m.cls,
         className,
       )}

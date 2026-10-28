@@ -211,6 +211,11 @@ describe("auto-update", () => {
     });
     renderApp();
     act(() => useUi.getState().setView("settings"));
+    // Collapsed behind a count; the latest outcome shows without expanding.
+    const more = await screen.findByRole("button", { name: "Auto-update runs list (1)" });
+    expect(screen.queryByRole("list", { name: "Auto-update runs" })).toBeNull();
+    expect(screen.getByText(/^Latest .*: acted$/)).toBeInTheDocument();
+    await userEvent.setup().click(more);
     const runs = await screen.findByRole("list", { name: "Auto-update runs" });
     expect(runs).toHaveTextContent("acted");
     expect(runs).toHaveTextContent("steam build changed");
@@ -218,5 +223,37 @@ describe("auto-update", () => {
     expect(toggle).toHaveAttribute("aria-checked", "false");
     await userEvent.setup().click(toggle);
     await waitFor(() => expect(t.callsOf("autoupdate_enable")).toHaveLength(1));
+  });
+});
+
+describe("Steam shortcut", () => {
+  const status = (o = {}) => ({ accounts: 1, added: 0, steam_running: false, exe: "/x/modman.AppImage", ...o });
+
+  // Fails when the toggle does not add the shortcut, or works while Steam runs.
+  it("adds the shortcut from the toggle", async () => {
+    let added = 0;
+    const { renderApp, t } = await setup({
+      steam_shortcut_status: () => status({ added }),
+      steam_shortcut_set: () => status({ added: (added = 1) }),
+    });
+    renderApp();
+    act(() => useUi.getState().setView("settings"));
+    const toggle = screen.getByRole("switch", { name: "Steam shortcut off" });
+    await waitFor(() => expect(toggle).toBeEnabled());
+    // The per-account count and executable path are no longer shown under the toggle.
+    expect(screen.queryByText(/have it$/)).toBeNull();
+    expect(screen.queryByText("/x/modman.AppImage")).toBeNull();
+    await userEvent.setup().click(toggle);
+    await waitFor(() => expect(t.callsOf("steam_shortcut_set")).toHaveLength(1));
+    await screen.findByRole("switch", { name: "Steam shortcut on" });
+  });
+
+  // Fails when a running Steam blocks the toggle or the restart note is missing.
+  it("stays usable while Steam is running and says to restart it", async () => {
+    const { renderApp } = await setup({ steam_shortcut_status: () => status({ steam_running: true }) });
+    renderApp();
+    act(() => useUi.getState().setView("settings"));
+    expect(await screen.findByText(/restart Steam/)).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Steam shortcut off" })).toBeEnabled();
   });
 });

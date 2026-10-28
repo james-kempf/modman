@@ -80,6 +80,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::app_info,
+            commands::quit_app,
+            commands::steam_shortcut_status,
+            commands::steam_shortcut_set,
             commands::app_ready,
             commands::startup_check,
             commands::prompt_answer,

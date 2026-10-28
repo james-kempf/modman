@@ -130,7 +130,7 @@ export function Dialog({
     // Fixed to the viewport; the dialog scrolls inside and always fits (also at 800x480).
     <div
       ref={backdrop}
-      className="fixed inset-0 z-50 grid animate-fade place-items-center overflow-y-auto overscroll-contain bg-ink/70 p-4 backdrop-blur-sm sm:p-6"
+      className="fixed inset-0 z-50 grid animate-fade place-items-center overflow-y-auto overscroll-contain bg-scrim p-4 backdrop-blur-sm sm:p-6"
     >
       <div
         ref={ref}
@@ -140,14 +140,14 @@ export function Dialog({
         data-nav-scope
         onKeyDown={onKeyDown}
         className={cx(
-          "glass max-h-[calc(100vh-2rem)] w-full animate-pop overflow-y-auto overscroll-contain rounded-3xl p-5 sm:max-h-[calc(100vh-3rem)] sm:p-7",
+          "glass max-h-[calc(100vh-2rem)] w-full animate-pop overflow-y-auto overscroll-contain rounded-card p-5 sm:max-h-[calc(100vh-3rem)] sm:p-7",
           wide ? "max-w-5xl" : "max-w-2xl",
         )}
       >
         <h2 id={titleId} className="text-xl font-medium tracking-tight wrap-anywhere text-zinc-50">
           {title}
         </h2>
-        {subtitle && <p className="mt-1.5 text-[14.5px] leading-relaxed wrap-anywhere text-zinc-400">{subtitle}</p>}
+        {subtitle && <p className="mt-1.5 text-body leading-relaxed wrap-anywhere text-zinc-400">{subtitle}</p>}
         <div className="mt-6">{children}</div>
       </div>
     </div>,
