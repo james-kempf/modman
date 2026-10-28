@@ -12,7 +12,7 @@ import { errMsg } from "../app/bridge";
 import { useGames } from "../app/queries";
 import { useDeployDue, useRun } from "../app/run";
 import { useUi } from "../app/store";
-import { Badge, ErrorNote, ViewHeader, cx, monogram } from "../components/ui";
+import { Badge, ErrorNote, ViewFrame, ViewHeader, cx, monogram } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import type { GameView } from "../ipc/types";
 import { openView } from "../nav/actions";
@@ -30,7 +30,7 @@ export function Games() {
   const q = query.trim().toLowerCase();
   const list = q ? all.filter((g) => g.name.toLowerCase().includes(q) || g.domain.toLowerCase().includes(q)) : all;
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-8">
+    <ViewFrame>
       <ViewHeader title="Games">
         {all.length > 0 && (
           <div role="search" aria-label="Filter games" className="relative">
@@ -71,7 +71,7 @@ export function Games() {
           </ul>
         </>
       )}
-    </div>
+    </ViewFrame>
   );
 }
 

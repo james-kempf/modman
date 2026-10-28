@@ -26,6 +26,7 @@ import {
   Select,
   StatusDot,
   Toggle,
+  ViewFrame,
   ViewHeader,
   cx,
   when,
@@ -36,7 +37,7 @@ import { GameRepairCard } from "./GameRepair";
 
 export function Settings() {
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
+    <ViewFrame>
       <ViewHeader title="Settings" />
       <AccountCard />
       <AutomationCard />
@@ -45,7 +46,7 @@ export function Settings() {
       <Card navSections title="About">
         <AppInfo />
       </Card>
-    </div>
+    </ViewFrame>
   );
 }
 

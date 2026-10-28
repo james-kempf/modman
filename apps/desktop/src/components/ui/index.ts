@@ -22,6 +22,7 @@ export { SupportBadge } from "./display/SupportBadge";
 export { TextField } from "./controls/TextField";
 export { Thumb } from "./display/Thumb";
 export { Toggle } from "./controls/Toggle";
+export { ViewFrame } from "./layout/ViewFrame";
 export { ViewHeader } from "./layout/ViewHeader";
 export { ago, bytes, monogram, when } from "./format";
 export {
@@ -35,5 +36,6 @@ export {
   SECTION_PAD,
   SETTING_CONTROL,
   TILE,
+  VIEW_FRAME,
   cx,
 } from "./styles";

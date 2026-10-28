@@ -4,7 +4,7 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import { useUi, type ViewId } from "../app/store";
+import { VIEWS, useUi, type ViewId } from "../app/store";
 import { game, experimentalGame, mod } from "../mock/fixtures";
 import type { Handler } from "../mock/fake";
 import { setup } from "../test/harness";
@@ -254,5 +254,14 @@ describe("Activity", () => {
     expect(await screen.findByRole("list", { name: "Jobs" })).toHaveTextContent("Install");
     expect(screen.getByRole("list", { name: "Messages" })).toHaveTextContent("Extracting");
     expect(await screen.findByText("line one")).toBeInTheDocument();
+  });
+});
+
+describe("view frame", () => {
+  // Fails when a view goes back to its own hand-written outer wrapper instead of ViewFrame.
+  it.each(VIEWS.map((v) => v.id))("%s renders inside ViewFrame", async (view) => {
+    await open(view);
+    const content = screen.getByRole("main").firstElementChild!;
+    expect(content.firstElementChild).toHaveAttribute("data-view-frame");
   });
 });

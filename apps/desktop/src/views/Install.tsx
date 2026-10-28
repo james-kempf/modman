@@ -18,7 +18,7 @@ import {
   MagnifyingGlassIcon,
   ThumbsUpIcon,
 } from "@phosphor-icons/react";
-import { Badge, Button, Card, CardSection, Empty, ErrorNote, Segmented, StatusDot, TextField, Thumb, Toggle, ViewHeader, bytes, cx } from "../components/ui";
+import { Badge, Button, Card, CardSection, Empty, ErrorNote, Segmented, StatusDot, TextField, Thumb, Toggle, ViewFrame, ViewHeader, bytes, cx } from "../components/ui";
 
 /** 12345 -> "12.3K" (legacy `compact`). */
 function compact(n: number | null): string {
@@ -65,7 +65,7 @@ function insertAtSelection(input: HTMLInputElement, text: string): string {
 export function Install() {
   const { game, isLoading } = useActiveGame();
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
+    <ViewFrame>
       <ViewHeader
         title="Install"
         eyebrow={game?.name}
@@ -85,7 +85,7 @@ export function Install() {
           <DownloadsCard />
         </>
       )}
-    </div>
+    </ViewFrame>
   );
 }
 

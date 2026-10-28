@@ -17,7 +17,7 @@ import {
   TrashIcon,
   WarningIcon,
 } from "@phosphor-icons/react";
-import { Badge, Button, Card, CardSection, Empty, ErrorNote, Segmented, TextField, Toggle, SECTION_PAD, ViewHeader, bytes, cx, monogram, when } from "../components/ui";
+import { Badge, Button, Card, CardSection, Empty, ErrorNote, Segmented, TextField, Toggle, SECTION_PAD, ViewFrame, ViewHeader, bytes, cx, monogram, when } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import type { CollectionInfo, CollectionRemoved, CollectionResult } from "../ipc/types";
 import { NoGame } from "../components/shell/NoGame";
@@ -53,7 +53,7 @@ const LOOKUP_NAME = "collection-ref";
 export function Collections() {
   const { game } = useActiveGame();
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
+    <ViewFrame>
       <ViewHeader
         title="Collections"
         eyebrow={game?.name}
@@ -68,7 +68,7 @@ export function Collections() {
           <Installed game={game.domain} />
         </>
       )}
-    </div>
+    </ViewFrame>
   );
 }
 

@@ -32,6 +32,7 @@ import {
   ago,
   cx,
   when,
+  ViewFrame,
 } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import type {
@@ -50,7 +51,7 @@ export function Overview() {
   const { game, data: games, error } = useActiveGame();
   return (
     // minmax(0, 1fr): long unbroken names truncate inside the cards instead of widening the page.
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
+    <ViewFrame>
       {/* The legacy Overview has no big page title: the game name leads the hero. */}
       <h1 className="eyebrow">Overview</h1>
       <StartupCheckCard />
@@ -66,7 +67,7 @@ export function Overview() {
             : "Add a game in Games to get started. modman keeps every mod in its own folder and links them into the game only when you deploy."}
         </NoGame>
       )}
-    </div>
+    </ViewFrame>
   );
 }
 

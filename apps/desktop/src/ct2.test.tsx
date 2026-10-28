@@ -257,9 +257,13 @@ describe("CT2 D06/D08 layout guards", () => {
     await open("mods");
     const h1 = await within(main()).findByRole("heading", { level: 1, name: "Mods" });
     const header = h1.closest("header")!;
-    expect(header.className).toMatch(/\bflex-wrap\b/);
     expect(header.className).not.toMatch(/md:flex-row/);
-    expect(h1.parentElement!.className).toMatch(/flex-\[1_1_24rem\]/);
+    // Mods has a description: the actions share its wrapping row, top-aligned with its first line.
+    const row = header.lastElementChild!;
+    expect(row.className).toMatch(/\bflex-wrap\b/);
+    expect(row.className).toMatch(/\bitems-start\b/);
+    expect(row.firstElementChild!.className).toMatch(/flex-\[1_1_24rem\]/);
+    expect(row.contains(h1)).toBe(false);
   });
 
   // D08: fails when every job row is a tab stop and the list grows the page.

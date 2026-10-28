@@ -11,12 +11,12 @@ import { errMsg } from "../app/bridge";
 import { jobLabel, jobOutcome } from "../app/jobs";
 import { useUi } from "../app/store";
 import { ArrowClockwiseIcon } from "@phosphor-icons/react";
-import { Button, Card, CardSection, Empty, ErrorNote, MsgLine, StatusDot, ViewHeader } from "../components/ui";
+import { Button, Card, CardSection, Empty, ErrorNote, MsgLine, StatusDot, ViewFrame, ViewHeader } from "../components/ui";
 import * as ipc from "../ipc/commands";
 
 export function Activity() {
   return (
-    <div className="grid grid-cols-1 gap-6">
+    <ViewFrame>
       <ViewHeader
         title="Activity"
         description="Everything the app ran in this session, with its output. The log file also covers the command line and the auto-update timer."
@@ -26,7 +26,7 @@ export function Activity() {
         <Messages />
       </div>
       <LogTail />
-    </div>
+    </ViewFrame>
   );
 }
 

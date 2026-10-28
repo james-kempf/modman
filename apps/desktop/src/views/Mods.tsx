@@ -37,6 +37,7 @@ import {
   TextField,
   Thumb,
   Toggle,
+  ViewFrame,
   ViewHeader,
   bytes,
   cx,
@@ -64,13 +65,12 @@ export function Mods() {
   const { game } = useActiveGame();
   const [tab, setTab] = useState<Tab>("list");
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
+    <ViewFrame>
       <ViewHeader
         title="Mods"
         eyebrow={game?.name}
         description="Priority runs top to bottom: when two mods ship the same file, the one lower in the list wins."
       >
-        {game && <SupportBadge support={game.support} />}
         <Segmented label="Show" value={tab} options={TABS} onChange={setTab} />
       </ViewHeader>
       {!game ? (
@@ -85,7 +85,7 @@ export function Mods() {
       ) : (
         <Profiles game={game.domain} />
       )}
-    </div>
+    </ViewFrame>
   );
 }
 

@@ -22,6 +22,7 @@ import {
   Empty,
   ErrorNote,
   SECTION_PAD,
+  ViewFrame,
   ViewHeader,
   cx,
 } from "../components/ui";
@@ -70,7 +71,7 @@ export function Requirements() {
   });
   const rows = q.data ?? [];
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
+    <ViewFrame>
       <ViewHeader
         title="Requirements"
         eyebrow={game?.name}
@@ -138,7 +139,7 @@ export function Requirements() {
           })}
         </div>
       )}
-    </div>
+    </ViewFrame>
   );
 }
 
