@@ -92,11 +92,44 @@ const RAIL_CROSS = 4e6;
 const region = (el: Element) => el.closest("nav,header,main,aside,[role=dialog]");
 const inRail = (el: Element) => !!el.closest("[data-nav-rail]");
 
+/**
+ * Card sections, opt-in: inside a `data-nav-sections` container (a Card's
+ * divided surface), each direct child and each `data-nav-section` element is
+ * a section; the innermost one counts.
+ */
+const SECTION = "[data-nav-sections] > *, [data-nav-sections] [data-nav-section]";
+function sectionOf(el: Element, scope: HTMLElement): Element | null {
+  const s = el.closest(SECTION);
+  // A section around the scope (e.g. an open listbox inside it) does not apply.
+  return s && scope.contains(s) && s !== scope ? s : null;
+}
+
 /** The element focus would move to from `from` in `dir`, or null. */
 export function findNext(from: HTMLElement | null, dir: Dir, scope = navScope()): HTMLElement | null {
   const all = focusables(scope);
   if (!all.length) return null;
   if (!from || !scope.contains(from)) return all[0];
+  const section = dir === "up" || dir === "down" ? sectionOf(from, scope) : null;
+  if (!section) return nearest(from, dir, all);
+  // Up/Down inside a section first (stacked controls), then the first control
+  // of the previous/next section that has one (no wrap).
+  const inside = nearest(from, dir, all.filter((el) => sectionOf(el, scope) === section));
+  if (inside) return inside;
+  const firsts = new Map<Element, HTMLElement>();
+  for (const el of all) {
+    const s = sectionOf(el, scope);
+    if (s && !firsts.has(s)) firsts.set(s, el);
+  }
+  const order = [...firsts.keys()];
+  const i = order.indexOf(section);
+  // `from` itself is not focusable (e.g. just disabled) and alone in its section: plain geometry.
+  if (i < 0) return nearest(from, dir, all);
+  const next = order[i + (dir === "down" ? 1 : -1)];
+  return next ? firsts.get(next)! : null;
+}
+
+/** Geometric pick among `all` (which contains `from`). */
+function nearest(from: HTMLElement, dir: Dir, all: HTMLElement[]): HTMLElement | null {
   const a = box(from);
   const boxes = all.map(box);
   // No layout (jsdom, or a hidden window): fall back to document order.

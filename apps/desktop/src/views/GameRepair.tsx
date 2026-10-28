@@ -94,6 +94,7 @@ function GameRepair({ domain, name }: { domain: string; name: string }) {
 
   return (
     <Card
+      navSections
       title={`Backups and staging: ${name}`}
       intro="Backups keep the game's originals. A poisoned one holds a mod file and would put it back on purge; quarantine moves it aside (nothing is deleted, it can be restored)."
     >

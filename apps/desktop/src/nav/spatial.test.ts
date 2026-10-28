@@ -146,3 +146,91 @@ describe("focus recovery (T16 F1)", () => {
     }
   });
 });
+
+describe("card sections (opt-in via data-nav-sections)", () => {
+  const el = (parent: HTMLElement, attrs: Record<string, string> = {}, tag = "div") => {
+    const e = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    parent.appendChild(e);
+    return e;
+  };
+  /**
+   * Settings-like single column, controls right-aligned (x up to 1000):
+   *   card 1: S1 [t1 toggle]  S2 [i2 input][s2 Save]  S3 (text only)
+   *   card 2: S4 [b4a far left] [b4b in s2's beam]  S5 [t5]
+   */
+  function page(opt = true) {
+    const cards = [0, 1].map(() => el(el(document.body, {}, "section"), opt ? { "data-nav-sections": "" } : {}));
+    const sec = (card: HTMLElement) => el(card, { "data-nav-section": "" });
+    const [s1, s2, s3] = [sec(cards[0]), sec(cards[0]), sec(cards[0])];
+    s3.textContent = "no controls here";
+    const [s4, s5] = [sec(cards[1]), sec(cards[1])];
+    return {
+      t1: btn("t1", 900, 0, 60, 40, s1),
+      i2: btn("i2", 400, 100, 440, 40, s2, "input"),
+      s2: btn("s2", 850, 100, 100, 40, s2),
+      b4a: btn("b4a", 0, 300, 100, 40, s4),
+      b4b: btn("b4b", 850, 300, 100, 40, s4),
+      t5: btn("t5", 900, 400, 60, 40, s5),
+      s4,
+    };
+  }
+
+  // Fails when down follows the beam to the in-line Save button instead of the next section's first control.
+  it("down moves to the first control of the next section", () => {
+    const p = page();
+    expect(findNext(p.t1, "down")).toBe(p.i2);
+  });
+
+  // Fails when crossing cards picks the aligned control, or stops at a section with no controls.
+  it("down crosses into the next card, skipping sections without controls", () => {
+    const p = page();
+    expect(findNext(p.s2, "down")).toBe(p.b4a);
+    expect(findNext(p.i2, "down")).toBe(p.b4a);
+  });
+
+  // Fails when up lands on the aligned control instead of the previous section's first one.
+  it("up moves to the first control of the previous section or card", () => {
+    const p = page();
+    expect(findNext(p.b4b, "up")).toBe(p.i2);
+    expect(findNext(p.t5, "up")).toBe(p.b4a);
+  });
+
+  // Fails when section navigation wraps around at either end.
+  it("does not wrap at the first or last section", () => {
+    const p = page();
+    expect(findNext(p.t1, "up")).toBeNull();
+    expect(findNext(p.t5, "down")).toBeNull();
+  });
+
+  // Fails when stacked controls inside one section become unreachable with up/down.
+  it("moves between stacked controls inside a section first", () => {
+    const p = page();
+    const below = btn("below", 0, 350, 100, 40, p.s4);
+    expect(findNext(p.b4a, "down")).toBe(below);
+    expect(findNext(below, "up")).toBe(p.b4a);
+  });
+
+  // Fails when the section rule leaks to cards that did not opt in (other pages).
+  it("keeps plain geometric navigation without the opt-in", () => {
+    const p = page(false);
+    expect(findNext(p.t1, "down")).toBe(p.s2);
+  });
+
+  // Fails when left/right start following sections.
+  it("leaves left/right geometric", () => {
+    const p = page();
+    expect(findNext(p.i2, "right")).toBe(p.s2);
+    expect(findNext(p.b4b, "left")).toBe(p.b4a);
+  });
+
+  // Fails when an open overlay inside a section (a Select listbox scope) jumps out by section.
+  it("ignores sections outside the current nav scope", () => {
+    const p = page();
+    const list = el(p.s4, { "data-nav-scope": "" });
+    const o1 = btn("o1", 850, 340, 100, 30, list);
+    const o2 = btn("o2", 850, 370, 100, 30, list);
+    expect(findNext(o1, "down")).toBe(o2);
+    expect(findNext(o2, "down")).toBeNull();
+  });
+});

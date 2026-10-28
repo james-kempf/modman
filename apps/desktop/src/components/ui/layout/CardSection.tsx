@@ -5,7 +5,7 @@ import { SECTION_PAD, cx } from "../styles";
 /** One padded part of a Card (free content: forms, lists, notes). */
 export function CardSection({ children, className, ...rest }: HTMLAttributes<HTMLDivElement>) {
   return (
-    <div {...rest} className={cx(SECTION_PAD, className)}>
+    <div data-nav-section {...rest} className={cx(SECTION_PAD, className)}>
       {children}
     </div>
   );

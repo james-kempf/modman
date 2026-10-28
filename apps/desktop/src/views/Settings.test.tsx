@@ -3,6 +3,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useUi } from "../app/store";
+import { SETTING_CONTROL } from "../components/ui";
 import { autoupdateStatus } from "../mock/fixtures";
 import { performNav } from "../nav/actions";
 import { BUTTON, GamepadNav } from "../nav/gamepad";
@@ -255,5 +256,43 @@ describe("Steam shortcut", () => {
     act(() => useUi.getState().setView("settings"));
     expect(await screen.findByText(/restart Steam/)).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Steam shortcut off" })).toBeEnabled();
+  });
+});
+
+describe("config rows", () => {
+  // Fails when a dropdown and the input + Save group stop sharing one width rule (dropdowns end up narrower).
+  it("sizes dropdowns like the input + Save group", async () => {
+    const config_list = () => [
+      { key: "jobs", value: "4", description: "parallel jobs", kind: "number", options: [] },
+      { key: "deploy-method", value: "auto", description: "how", kind: "enum", options: ["auto", "copy"] },
+    ];
+    const { renderApp } = await setup({ config_list });
+    renderApp();
+    act(() => useUi.getState().setView("settings"));
+    const input = await screen.findByLabelText(/^jobs\b/);
+    const dropdown = screen.getByRole("button", { name: /^deploy-method\b/ });
+    const width = SETTING_CONTROL.split(" ");
+    expect([...input.parentElement!.classList]).toEqual(expect.arrayContaining(width));
+    expect([...dropdown.parentElement!.classList]).toEqual(expect.arrayContaining(width));
+  });
+
+  // Fails when Settings stops opting in to section-by-section Up/Down (nav/spatial.ts), so D-pad/arrows follow the beam again.
+  it("opts every card and config row in to section navigation", async () => {
+    const config_list = () => [
+      { key: "jobs", value: "4", description: "parallel jobs", kind: "number", options: [] },
+      { key: "deploy-method", value: "auto", description: "how", kind: "enum", options: ["auto", "copy"] },
+    ];
+    const { renderApp } = await setup({ config_list });
+    renderApp();
+    act(() => useUi.getState().setView("settings"));
+    const input = await screen.findByLabelText(/^jobs\b/);
+    const dropdown = screen.getByRole("button", { name: /^deploy-method\b/ });
+    for (const el of [input, dropdown]) {
+      expect(el.closest("[data-nav-section]")?.tagName).toBe("LI");
+      expect(el.closest("[data-nav-sections]")).not.toBeNull();
+    }
+    const cards = document.querySelectorAll("main section");
+    expect(cards.length).toBeGreaterThan(0);
+    for (const c of cards) expect(c.querySelector("[data-nav-sections]"), c.textContent ?? "").not.toBeNull();
   });
 });

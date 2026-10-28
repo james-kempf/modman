@@ -17,6 +17,8 @@ export const TILE = "rounded-card border border-hairline bg-ink";
 export const PILL = "rounded-control border border-hairline bg-ink px-3 py-1.5 text-label";
 /** A free-standing list row (jobs, entries) that highlights on hover. */
 export const LIST_ROW = "rounded-control px-3 py-2.5 transition-colors duration-base hover:bg-fill-1";
+/** Width of a settings row's control (input + Save group, dropdown): grows to fill the row, wraps below 14rem. */
+export const SETTING_CONTROL = "min-w-0 flex-[1_1_14rem]";
 /** Card title (non-inset header). */
 export const CARD_TITLE = "text-title font-medium tracking-tight text-zinc-50";
 /** Muted secondary line under a title (card intros, row help). */

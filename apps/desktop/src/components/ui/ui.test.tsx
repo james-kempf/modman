@@ -27,7 +27,7 @@ describe("Card", () => {
     const s = screen.getByRole("heading", { name: "Inside" }).closest("section")!;
     expect(s.children).toHaveLength(1);
     const box = s.firstElementChild!;
-    expect(box.className).toMatch(/rounded-2xl/);
+    expect(box.className).toMatch(/\brounded-card\b/);
     expect(box.firstElementChild!.contains(screen.getByRole("heading", { name: "Inside" }))).toBe(true);
     expect(box.lastElementChild!.textContent).toBe("body");
   });
@@ -62,12 +62,12 @@ describe("Card", () => {
     expect(boxed.className).toMatch(/\beyebrow\b/);
     const open = screen.getByRole("heading", { level: 2, name: "Open" });
     expect(open.className).not.toMatch(/\beyebrow\b|font-mono/);
-    expect(open.className).toMatch(/text-\[16px\]/);
+    expect(open.className).toMatch(/\btext-title\b/);
   });
 
   // Fails when a section drifts back to uneven padding (e.g. px-4 py-3) or Row/sections/inset header disagree.
   it("pads every section evenly from one shared value", () => {
-    expect(SECTION_PAD).toBe("p-4");
+    expect(SECTION_PAD).toBe("p-section");
     render(
       <Card title="Even" inset>
         <CardSection>sec</CardSection>
@@ -75,9 +75,9 @@ describe("Card", () => {
       </Card>,
     );
     const pad = (el: Element) => el.className.split(/\s+/).filter((c) => /^!?[p][xytblr]?-/.test(c));
-    expect(pad(screen.getByText("sec"))).toEqual(["p-4"]);
-    expect(pad(screen.getByText("row").closest(".divide-y > *")!)).toEqual(["p-4"]);
+    expect(pad(screen.getByText("sec"))).toEqual(["p-section"]);
+    expect(pad(screen.getByText("row").closest(".divide-y > *")!)).toEqual(["p-section"]);
     // Inset header: same top/side padding, no bottom (the first section's top padding is the gap).
-    expect(pad(screen.getByRole("heading", { name: "Even" }).parentElement!.parentElement!).sort()).toEqual(["pt-4", "px-4"]);
+    expect(pad(screen.getByRole("heading", { name: "Even" }).parentElement!.parentElement!).sort()).toEqual(["pt-section", "px-section"]);
   });
 });

@@ -8,12 +8,14 @@ import { CARD_SHELL, CARD_TITLE, DIVIDE, INSET_HEADER_PAD, MUTED_NOTE, cx } from
  * `CardSection`s (padded free content), `Row`s, or lists with their own padding.
  * `inset` puts the header inside the surface as its first section (for cards
  * side by side with an untitled one, so their tops line up).
+ * `navSections`: Up/Down move section by section (nav/spatial.ts).
  */
 export function Card({
   title,
   intro,
   actions,
   inset = false,
+  navSections = false,
   children,
   className,
   ...rest
@@ -22,6 +24,7 @@ export function Card({
   intro?: ReactNode;
   actions?: ReactNode;
   inset?: boolean;
+  navSections?: boolean;
   children: ReactNode;
 }) {
   const header = title || intro || actions ? (
@@ -43,10 +46,13 @@ export function Card({
         // The header sits outside the divided part, so no line between it and the first section.
         <div className={cx("flex flex-1 flex-col", CARD_SHELL)}>
           {header}
-          <div className={cx("flex flex-1 flex-col", DIVIDE)}>{children}</div>
+          <div data-nav-sections={navSections || undefined} className={cx("flex flex-1 flex-col", DIVIDE)}>
+            {children}
+          </div>
         </div>
       ) : (
         <div
+          data-nav-sections={navSections || undefined}
           className={cx(
             "flex flex-1 flex-col",
             DIVIDE,

@@ -22,6 +22,7 @@ import {
   ListToggle,
   Row,
   SECTION_PAD,
+  SETTING_CONTROL,
   Select,
   StatusDot,
   Toggle,
@@ -36,12 +37,12 @@ import { GameRepairCard } from "./GameRepair";
 export function Settings() {
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
-      <ViewHeader title="Settings" description="Changes are saved by modman as soon as you make them." />
+      <ViewHeader title="Settings" />
       <AccountCard />
       <AutomationCard />
       <GameRepairCard />
       <ConfigCard />
-      <Card title="About">
+      <Card navSections title="About">
         <AppInfo />
       </Card>
     </div>
@@ -57,7 +58,7 @@ function AccountCard() {
   const a = q.data;
   const signedIn = !!a?.key_source;
   return (
-    <Card title="Nexus Mods account" intro="Your personal API key, kept in the system keyring (else the modman config file).">
+    <Card navSections title="Nexus Mods account" intro="Your personal API key, kept in the system keyring (else the modman config file).">
       {q.isError ? (
         <CardSection>
           <ErrorNote>Could not read the account: {errMsg(q.error)}</ErrorNote>
@@ -190,7 +191,7 @@ export function ApiKeyEntry({ onDone }: { onDone?: () => void }) {
 /** Auto-update and the Steam shortcut: both about running modman unattended / from Game Mode. */
 function AutomationCard() {
   return (
-    <Card title="Auto-update and Steam" intro="Background updates, and starting modman from Steam's Game Mode.">
+    <Card navSections title="Auto-update and Steam" intro="Background updates, and starting modman from Steam's Game Mode.">
       <AutoUpdate />
       <SteamShortcut />
     </Card>
@@ -359,7 +360,7 @@ export function RunLog({ runs }: { runs: RunLogEntry[] }) {
 function ConfigCard() {
   const q = useQuery({ queryKey: ["config"], queryFn: ipc.configList });
   return (
-    <Card title="Configuration" intro="modman's config keys, as on the command line (modman config).">
+    <Card navSections title="Configuration" intro="modman's config keys, as on the command line (modman config).">
       {q.isError ? (
         <CardSection>
           <ErrorNote>Could not read the configuration: {errMsg(q.error)}</ErrorNote>
@@ -410,7 +411,7 @@ function ConfigRow({ entry }: { entry: ConfigEntry }) {
   const label = "min-w-0 flex-[1_1_9rem] wrap-anywhere";
   if (entry.kind === "bool")
     return (
-      <li className={ROW}>
+      <li data-nav-section className={ROW}>
         <span className={label}>{title}</span>
         <Toggle
           label={entry.key}
@@ -423,7 +424,7 @@ function ConfigRow({ entry }: { entry: ConfigEntry }) {
     );
   if (entry.kind === "enum")
     return (
-      <li className={ROW}>
+      <li data-nav-section className={ROW}>
         {/* Visible copy of the dropdown's label, which stays the (screen-reader-only) accessible name. */}
         <span aria-hidden className={label}>
           {title}
@@ -435,7 +436,7 @@ function ConfigRow({ entry }: { entry: ConfigEntry }) {
           options={entry.options.map((o) => ({ value: o, label: o }))}
           busy={busy}
           onChange={(v) => void save(v)}
-          className="w-44 font-mono"
+          className={cx(SETTING_CONTROL, "font-mono")}
         />
       </li>
     );
@@ -459,7 +460,7 @@ function ConfigTextRow({
   const error = value === entry.value ? null : configError(entry, value);
   const id = `config-${entry.key}`;
   return (
-    <li>
+    <li data-nav-section>
       <form
         className={ROW}
         onSubmit={(e) => {
@@ -470,7 +471,7 @@ function ConfigTextRow({
         <label htmlFor={id} className={labelClass}>
           {title}
         </label>
-        <span className="flex min-w-0 flex-[1_1_14rem] items-center gap-2">
+        <span className={cx("flex items-center gap-2", SETTING_CONTROL)}>
           <input
             id={id}
             className="input min-w-0 flex-1 font-mono"

@@ -33,6 +33,7 @@ export {
   MUTED_NOTE,
   PILL,
   SECTION_PAD,
+  SETTING_CONTROL,
   TILE,
   cx,
 } from "./styles";

@@ -12,7 +12,7 @@ import type { PromptEvent } from "../../ipc/events";
 import type { Answer, FomodOption, GroupType, Prompt } from "../../ipc/types";
 import { Dialog } from "./Dialog";
 import { CheckIcon, WarningIcon } from "@phosphor-icons/react";
-import { Badge, Button, TextField, bytes, cx } from "../ui";
+import { Badge, Button, TextField, TILE, bytes, cx } from "../ui";
 
 export function PromptHost() {
   const head = useUi((s) => s.prompts[0]);
