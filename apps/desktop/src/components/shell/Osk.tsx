@@ -4,10 +4,10 @@
 
 import { useState } from "react";
 import { flushSync } from "react-dom";
-import { useUi } from "../app/store";
+import { useUi } from "../../app/store";
 import { ArrowFatUpIcon, BackspaceIcon, ClipboardTextIcon } from "@phosphor-icons/react";
-import { Dialog } from "./Dialog";
-import { Button, cx, TILE } from "./ui";
+import { Dialog } from "../dialogs/Dialog";
+import { Button, cx, TILE } from "../ui";
 
 const ROWS = ["1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm", "-_+/=.:@"];
 

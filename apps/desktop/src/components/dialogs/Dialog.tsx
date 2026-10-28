@@ -7,9 +7,9 @@
 
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { BACK_EVENT } from "../nav/actions";
-import { focusables, navScope, recoverFocus } from "../nav/spatial";
-import { cx } from "./ui";
+import { BACK_EVENT } from "../../nav/actions";
+import { focusables, navScope, recoverFocus } from "../../nav/spatial";
+import { cx } from "../ui";
 
 /**
  * Each open dialog's fallback openers: when a dialog is opened from inside

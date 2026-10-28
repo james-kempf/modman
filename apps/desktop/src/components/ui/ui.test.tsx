@@ -2,7 +2,7 @@
 // The shared Card: header placement and that the default look is unchanged.
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { Card, CardSection, Row, SECTION_PAD } from "./ui";
+import { Card, CardSection, Row, SECTION_PAD } from ".";
 
 const surface = (title: string) => screen.getByRole("heading", { name: title }).closest("section")!.lastElementChild!;
 

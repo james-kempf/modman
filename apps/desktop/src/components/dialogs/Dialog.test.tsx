@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { StrictMode, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { Dialog } from "./Dialog";
-import { Button } from "./ui";
+import { Button } from "../ui";
 
 describe("Dialog focus restore (T16 F1)", () => {
   // Fails when the opener is recorded in an effect: StrictMode's re-run sees the dialog's own button.

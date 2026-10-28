@@ -10,7 +10,7 @@ import { errMsg } from "../app/bridge";
 import { useAccount } from "../app/queries";
 import { useBusy, useRun } from "../app/run";
 import { useUi } from "../app/store";
-import { readClipboard } from "../components/Osk";
+import { readClipboard } from "../components/shell/Osk";
 import { ClipboardTextIcon, FloppyDiskIcon, KeyIcon, KeyboardIcon, SignOutIcon } from "@phosphor-icons/react";
 import {
   Badge,

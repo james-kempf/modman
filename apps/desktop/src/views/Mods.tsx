@@ -8,7 +8,7 @@ import { errMsg } from "../app/bridge";
 import { useActiveGame, useMods } from "../app/queries";
 import { useBusy, useRun } from "../app/run";
 import { useUi } from "../app/store";
-import { Dialog } from "../components/Dialog";
+import { Dialog } from "../components/dialogs/Dialog";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -50,7 +50,7 @@ import type {
   UninstallResult,
   UpdateReport,
 } from "../ipc/types";
-import { NoGame } from "../components/NoGame";
+import { NoGame } from "../components/shell/NoGame";
 
 const TABS = [
   { value: "list", label: "Mods" },

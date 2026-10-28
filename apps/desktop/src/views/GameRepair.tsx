@@ -14,7 +14,7 @@ import { errMsg } from "../app/bridge";
 import { useActiveGame } from "../app/queries";
 import { useBusy, useRun } from "../app/run";
 import { useUi } from "../app/store";
-import { Dialog } from "../components/Dialog";
+import { Dialog } from "../components/dialogs/Dialog";
 import { Badge, Button, Card, CardSection, ErrorNote, ListToggle, Row, Toggle, when } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import type { PoisonedBackup, QuarantineManifest } from "../ipc/types";

@@ -8,7 +8,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
 import { startBridge } from "./app/bridge";
 import { makeQueryClient } from "./app/queries";
-import { RootBoundary } from "./components/ErrorBoundary";
+import { RootBoundary } from "./components/shell/ErrorBoundary";
 // Bundled fonts (no remote origins under the CSP).
 import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";

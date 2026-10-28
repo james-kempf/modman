@@ -7,12 +7,12 @@
 import { MagnifyingGlassIcon, PlusIcon } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import { errMsg } from "../app/bridge";
-import { useBusy, useRun } from "../app/run";
-import { useUi } from "../app/store";
-import * as ipc from "../ipc/commands";
+import { errMsg } from "../../app/bridge";
+import { useBusy, useRun } from "../../app/run";
+import { useUi } from "../../app/store";
+import * as ipc from "../../ipc/commands";
 import { Dialog } from "./Dialog";
-import { Button, Empty, ErrorNote, SupportBadge, TextField } from "./ui";
+import { Button, Empty, ErrorNote, SupportBadge, TextField } from "../ui";
 
 /** A Nexus Mods game domain: lowercase letters and digits (e.g. skyrimspecialedition, fallout4). */
 const DOMAIN = /^[a-z0-9]+$/;

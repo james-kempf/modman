@@ -9,7 +9,7 @@ import { errMsg } from "../app/bridge";
 import { useActiveGame } from "../app/queries";
 import { useBusy, useRun } from "../app/run";
 import { useUi } from "../app/store";
-import { readClipboard } from "../components/Osk";
+import { readClipboard } from "../components/shell/Osk";
 import {
   CheckIcon,
   ClipboardTextIcon,
@@ -28,7 +28,7 @@ function compact(n: number | null): string {
 import * as ipc from "../ipc/commands";
 import type { InstallResult, SearchView } from "../ipc/types";
 import { installKey } from "./Requirements";
-import { NoGame } from "../components/NoGame";
+import { NoGame } from "../components/shell/NoGame";
 
 const FOMOD = [
   { value: "ask", label: "Ask (wizard)" },

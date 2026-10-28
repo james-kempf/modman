@@ -4,8 +4,8 @@
 
 import { GameControllerIcon } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
-import { openView } from "../nav/actions";
-import { Button, Empty } from "./ui";
+import { openView } from "../../nav/actions";
+import { Button, Empty } from "../ui";
 
 export function NoGame({ icon, title = "No active game", children }: { icon?: ReactNode; title?: string; children?: ReactNode }) {
   return (

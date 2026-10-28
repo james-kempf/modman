@@ -20,7 +20,7 @@ import {
 import { Badge, Button, Card, CardSection, Empty, ErrorNote, Segmented, TextField, Toggle, SECTION_PAD, ViewHeader, bytes, cx, monogram, when } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import type { CollectionInfo, CollectionRemoved, CollectionResult } from "../ipc/types";
-import { NoGame } from "../components/NoGame";
+import { NoGame } from "../components/shell/NoGame";
 
 const OPTIONAL = [
   { value: "ask", label: "Ask" },

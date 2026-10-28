@@ -10,9 +10,9 @@
 import { WarningIcon } from "@phosphor-icons/react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Component, type ErrorInfo, type ReactNode } from "react";
-import { errMsg } from "../app/bridge";
-import { focusables } from "../nav/spatial";
-import { Button, ErrorNote } from "./ui";
+import { errMsg } from "../../app/bridge";
+import { focusables } from "../../nav/spatial";
+import { Button, ErrorNote } from "../ui";
 
 interface Props {
   children: ReactNode;

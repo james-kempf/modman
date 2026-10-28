@@ -23,10 +23,10 @@ import {
 } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type JSX, type ReactNode } from "react";
-import { AddGameHost } from "../components/AddGameDialog";
-import { ViewBoundary } from "../components/ErrorBoundary";
-import { OskHost } from "../components/Osk";
-import { PromptHost } from "../components/PromptDialog";
+import { AddGameHost } from "../components/dialogs/AddGameDialog";
+import { ViewBoundary } from "../components/shell/ErrorBoundary";
+import { OskHost } from "../components/shell/Osk";
+import { PromptHost } from "../components/dialogs/PromptDialog";
 import { Button, IconButton, StatusDot, SupportBadge, cx, type DotTone } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import { installKeyboardNav, performNav } from "../nav/actions";

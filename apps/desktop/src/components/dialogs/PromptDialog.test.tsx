@@ -2,10 +2,10 @@
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import type { Prompt } from "../ipc/types";
-import { installKeyboardNav } from "../nav/actions";
-import type { FakeTransport } from "../mock/fake";
-import { setup } from "../test/harness";
+import type { Prompt } from "../../ipc/types";
+import { installKeyboardNav } from "../../nav/actions";
+import type { FakeTransport } from "../../mock/fake";
+import { setup } from "../../test/harness";
 import { PromptHost, fomodInitial, fomodProblem } from "./PromptDialog";
 
 let next = 100;

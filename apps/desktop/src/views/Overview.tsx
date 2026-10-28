@@ -44,7 +44,7 @@ import type {
   Skip,
   VerifyReport,
 } from "../ipc/types";
-import { NoGame } from "../components/NoGame";
+import { NoGame } from "../components/shell/NoGame";
 
 export function Overview() {
   const { game, data: games, error } = useActiveGame();

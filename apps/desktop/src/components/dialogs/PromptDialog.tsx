@@ -5,14 +5,14 @@
 // FOMOD installer wizard (one group per step, re-asked with an error).
 
 import { useState, type ReactNode } from "react";
-import { errMsg } from "../app/bridge";
-import { useUi } from "../app/store";
-import { promptAnswer } from "../ipc/commands";
-import type { PromptEvent } from "../ipc/events";
-import type { Answer, FomodOption, GroupType, Prompt } from "../ipc/types";
+import { errMsg } from "../../app/bridge";
+import { useUi } from "../../app/store";
+import { promptAnswer } from "../../ipc/commands";
+import type { PromptEvent } from "../../ipc/events";
+import type { Answer, FomodOption, GroupType, Prompt } from "../../ipc/types";
 import { Dialog } from "./Dialog";
 import { CheckIcon, WarningIcon } from "@phosphor-icons/react";
-import { Badge, Button, TextField, bytes, cx } from "./ui";
+import { Badge, Button, TextField, bytes, cx } from "../ui";
 
 export function PromptHost() {
   const head = useUi((s) => s.prompts[0]);

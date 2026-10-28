@@ -27,7 +27,7 @@ import {
 } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import type { ReqRow, ReqStatus } from "../ipc/types";
-import { NoGame } from "../components/NoGame";
+import { NoGame } from "../components/shell/NoGame";
 
 const ORDER: ReqStatus[] = ["missing", "disabled", "external", "gone", "ok"];
 const LABEL: Record<ReqStatus, string> = {
