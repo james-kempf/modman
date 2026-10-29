@@ -180,7 +180,7 @@ function GameRepair({ domain, name }: { domain: string; name: string }) {
               {history.map((q) => (
                 <li
                   key={q.id}
-                  className="flex flex-wrap items-center gap-3 rounded-xl border border-white/[0.05] bg-ink px-3 py-1.5 text-[12.5px]"
+                  className="flex flex-wrap items-center gap-3 rounded-control border border-white/[0.05] bg-ink px-3 py-1.5 text-[12.5px]"
                 >
                   <span className="min-w-0 flex-1">
                     <span className="block font-mono text-[12px] break-all text-zinc-200">{q.id}</span>
@@ -261,7 +261,7 @@ function EntryGroup({ label, entries, note }: { label: string; entries: Poisoned
       <ul aria-label={`${label} poisoned backups`} className="grid gap-1.5">
         {entries.map((e) => (
           // Focusable so the list can be read with the keyboard or gamepad.
-          <li key={e.backup_id} tabIndex={0} className="grid gap-0.5 rounded-xl border border-white/[0.05] bg-ink px-3 py-2 text-[12.5px]">
+          <li key={e.backup_id} tabIndex={0} className="grid gap-0.5 rounded-control border border-white/[0.05] bg-ink px-3 py-2 text-[12.5px]">
             <span className="font-mono text-[12px] break-all text-zinc-200">{e.path}</span>
             <span className="text-dim">
               {e.reason}

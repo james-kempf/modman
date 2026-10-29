@@ -33,7 +33,6 @@ import {
   Segmented,
   Select,
   StatusDot,
-  SupportBadge,
   TextField,
   Thumb,
   Toggle,
@@ -214,7 +213,7 @@ function ModList({ game }: { game: string }) {
         hasUpdates={!!updates}
       />
       {mods.data?.changed_since_deploy && (
-        <p className="flex items-center gap-2.5 rounded-2xl border border-amber-400/15 bg-amber-400/[0.05] px-4 py-3 text-[14px] text-amber-200">
+        <p className="flex items-center gap-2.5 rounded-card border border-amber-400/15 bg-amber-400/[0.05] px-4 py-3 text-[14px] text-amber-200">
           <StatusDot tone="amber" live />
           The mod set changed since the last deploy.
         </p>
@@ -249,7 +248,7 @@ function ModList({ game }: { game: string }) {
           {shown.map((m) => (
             <li
               key={m.id}
-              className="flex min-h-16 min-w-0 flex-wrap items-center gap-x-3 gap-y-1 py-2 pr-3 pl-2 transition-colors duration-200 hover:bg-white/[0.02]"
+              className="flex min-h-16 min-w-0 flex-wrap items-center gap-x-3 gap-y-1 py-2 pr-3 pl-2"
             >
               {/* The name keeps about 12rem; on a narrow row the controls wrap below it as one group. */}
               <span className="flex min-w-0 flex-[1_1_18rem] items-center gap-3">
@@ -268,7 +267,7 @@ function ModList({ game }: { game: string }) {
                 <span className="min-w-0 flex-1">
                   <span
                     className={cx(
-                      "block truncate text-[15px] transition-colors",
+                      "block truncate text-[15px]",
                       m.enabled ? "text-zinc-100" : "text-zinc-400",
                     )}
                     title={m.name}
@@ -463,7 +462,7 @@ function ModDetailDialog({
         <p className="mt-5 font-mono text-[12.5px] break-all">
           <a
             href={d.url}
-            className="text-accent-300 underline underline-offset-4 hover:text-accent-200"
+            className="text-accent-300 underline underline-offset-4 [--focus-text:var(--color-accent-700)]"
             onClick={(e) => {
               // The webview must not navigate: the backend opens the page in the browser.
               e.preventDefault();
@@ -555,7 +554,7 @@ function Conflicts({ game }: { game: string }) {
                 <li
                   key={c.rel_path}
                   tabIndex={0}
-                  className="flex items-start gap-3 rounded-lg py-3"
+                  className="flex items-start gap-3 rounded-control py-3"
                 >
                   <SwordIcon
                     aria-hidden
@@ -586,7 +585,7 @@ function Conflicts({ game }: { game: string }) {
                 <li
                   key={p.name}
                   tabIndex={0}
-                  className="flex flex-wrap items-center gap-3 rounded-lg py-2.5"
+                  className="flex flex-wrap items-center gap-3 rounded-control py-2.5"
                 >
                   <span className="w-9 text-right font-mono text-[12px] text-dim">
                     {p.load_index ?? "–"}
@@ -679,7 +678,7 @@ function Updates({ game }: { game: string }) {
                   <li
                     key={u.mod.id}
                     tabIndex={0}
-                    className="flex flex-wrap items-center gap-2 rounded-lg py-3"
+                    className="flex flex-wrap items-center gap-2 rounded-control py-3"
                   >
                     <span className="text-[14.5px] text-zinc-100">
                       {u.mod.name}

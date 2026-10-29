@@ -56,7 +56,7 @@ function Jobs() {
             {list.map((j) => {
               const o = jobOutcome(j);
               return (
-                <li key={j.id} className="flex flex-wrap items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-white/[0.03]">
+                <li key={j.id} className="flex flex-wrap items-center gap-3 rounded-control px-3 py-2.5">
                   <StatusDot tone={o === "running" ? "accent" : o === "failed" ? "rose" : "zinc"} live={o === "running"} />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[14px] text-zinc-200">{jobLabel(j.kind)}</span>
@@ -141,7 +141,7 @@ function LogTail() {
         <pre
           tabIndex={0}
           aria-label="Log"
-          className="max-h-[min(32rem,60vh)] overflow-auto rounded-2xl bg-ink p-4 font-mono text-[12px] leading-[1.7] text-zinc-400"
+          className="max-h-[min(32rem,60vh)] overflow-auto rounded-card bg-ink p-4 font-mono text-[12px] leading-[1.7] text-zinc-400"
         >
           {q.data?.join("\n") || "(empty)"}
         </pre>

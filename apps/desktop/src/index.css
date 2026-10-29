@@ -8,69 +8,101 @@
  */
 @import "tailwindcss";
 
-/* Inside the arrow-key/gamepad-focused control (see the nav focus rules): parts that keep their own fill on the white. */
-@custom-variant in-nav-focus (html[data-input="nav"] :focus &);
+/*
+ * The one highlight (solid white, dark ink; rules in @layer base/utilities):
+ * the arrow-key/gamepad-focused element, or the mouse-hovered interactive
+ * control. Hover: buttons, links, listbox options and focusable list rows
+ * (not text fields, scroll regions or containers); never disabled or
+ * aria-disabled; only the innermost hovered control (a button inside a row
+ * lights alone); only where hover is real (no sticky white on touch).
+ * in-highlight targets parts inside it that keep their own fill.
+ */
+@custom-variant highlighted {
+  html[data-input="nav"] &:focus {
+    @slot;
+  }
+  @media (hover: hover) {
+    &:is(button, a[href], [role="option"], li[tabindex]):not(:disabled, [aria-disabled="true"], :has(:is(button, a[href], [role="option"], li[tabindex]):hover)):hover {
+      @slot;
+    }
+  }
+}
+@custom-variant in-highlight {
+  html[data-input="nav"] :focus & {
+    @slot;
+  }
+  @media (hover: hover) {
+    :is(button, a[href], [role="option"], li[tabindex]):not(:disabled, [aria-disabled="true"], :has(:is(button, a[href], [role="option"], li[tabindex]):hover)):hover & {
+      @slot;
+    }
+  }
+}
 
 @theme {
   /*
    * Design tokens: the one source for sizes, radii, colours and motion.
    * Tailwind generates the utilities from these names (text-body,
    * rounded-card, border-hairline, min-h-control, duration-base, ...).
-   * Tailwind's numeric spacing scale (--spacing, 0.25rem steps) stays the
-   * scale for gaps, margins and paddings; the named sizes below cover the
-   * repeated component dimensions.
+   * Tailwind's numeric spacing scale (--spacing) stays the scale for gaps,
+   * margins and paddings; the named sizes below cover the repeated
+   * component dimensions.
    *
    * Font size (no paired line-height: text inherits it, or sets leading-*)
-   *   --text-micro    11px  chips, mono initials, eyebrows
-   *   --text-caption  12px  mono paths, small meta
-   *   --text-label    13px  field labels, helper/intro text, small buttons
-   *   --text-body     14px  body copy, rows, menus
-   *   --text-lead     15px  inputs, large buttons, intros
-   *   --text-title    16px  card titles, prompt questions
-   *   --text-display  40px  view titles (md and up)
+   *   --text-micro             chips, mono initials, eyebrows
+   *   --text-caption           mono paths, small meta
+   *   --text-label             field labels, helper/intro text, small buttons
+   *   --text-body              body copy, rows, menus
+   *   --text-lead              inputs, large buttons, intros
+   *   --text-title             card titles, prompt questions
+   *   --text-display           view titles (md and up)
    *   (Tailwind text-lg/xl/2xl/3xl remain the heading steps.)
-   * Tracking: --tracking-eyebrow 0.14em (plus tracking-tight/tighter)
-   * Radius
-   *   --radius-control-sm  0.5rem  options inside a control, badges, checks
-   *   --radius-control     0.75rem buttons, inputs, thumbs, menus
-   *   --radius-card        1rem    cards, tiles, dialogs, notes
-   *   --radius-pill        9999px  dots, switches, progress
+   * Tracking: --tracking-eyebrow (plus tracking-tight/tighter)
+   * Radius (scaled from --radius-card; no raw rounded-sm..3xl/full in components)
+   *   --radius-control-sm      options inside a control, badges, checks
+   *   --radius-control         buttons, inputs, thumbs, menus, list rows, nav items,
+   *                            notes nested in a card
+   *   --radius-card            cards, tiles, dialogs, notes, notices, wells
+   *   --radius-card-lg         large media tiles (game posters, featured install
+   *                            results, collection art)
+   *   --radius-pill            dots, switches, progress, counters, job island
    * Spacing / sizing
-   *   --spacing-section     1rem    padding of every card section
-   *   --spacing-control-sm  2.75rem small control height (44px target)
-   *   --spacing-control     3rem    control height and icon-button size
-   *   --spacing-control-lg  3.5rem  large control height
-   *   --spacing-thumb       2.75rem mod thumbnail / monogram
-   *   --spacing-tile        4rem    empty-state icon tile
-   *   --spacing-badge       1.5rem  badge height
-   *   --spacing-icon        1.25rem switch knob, radio/check mark
-   *   --spacing-dot         0.625rem status dot
-   *   --spacing-rail        3px     thin activity bars and their gaps
-   *   --spacing-sidebar     268px   navigation sidebar width
-   *   --container-content   1400px  page content max width
-   *   --container-prose     65ch    long text measure
-   *   --container-prose-sm  52ch    short text measure (empty states)
-   * Colour on white (overlays on the ink surfaces)
-   *   --color-hairline     5%   card borders and dividers
-   *   --color-line         8%   input, well and dashed borders
-   *   --color-line-strong  10%  overlay (glass) border
-   *   --color-fill-1       3%   resting option fill, row hover
-   *   --color-fill-2       6%   default button, track, hover
-   *   --color-fill-3       8%   selected option
-   *   --color-fill-hover   10%  hover on a filled control, switch off
-   *   --color-surface-overlay  zinc-900 at 95%  glass overlays
-   *   --color-scrim            ink at 70%       dialog backdrop
+   *   --spacing-section        padding of every card section
+   *   --spacing-control-sm     small control height (minimum touch target)
+   *   --spacing-control        control height and icon-button size
+   *   --spacing-control-lg     large control height
+   *   --spacing-thumb          mod thumbnail / monogram
+   *   --spacing-tile           empty-state icon tile
+   *   --spacing-badge          badge height
+   *   --spacing-icon           switch knob, radio/check mark
+   *   --spacing-dot            status dot
+   *   --spacing-rail           thin activity bars and their gaps
+   *   --spacing-sidebar        navigation sidebar width
+   *   --container-content      page content max width
+   *   --container-prose        long text measure
+   *   --container-prose-sm     short text measure (empty states)
+   * Colour on white (overlays on the ink surfaces), faintest to strongest
+   *   --color-fill-1           resting option fill, row hover
+   *   --color-hairline         card borders and dividers
+   *   --color-fill-2           default button, track, hover
+   *   --color-line             input, well and dashed borders
+   *   --color-fill-3           selected option
+   *   --color-line-strong      overlay (glass) border
+   *   --color-fill-hover       hover on a filled control, switch off
+   *   --color-surface-overlay  glass overlays
+   *   --color-scrim            dialog backdrop
    * Shadow: --shadow-overlay (dialogs, menus, notices via .glass)
-   * Duration: --transition-duration-fast 150ms, -base 200ms, -slow 300ms
-   * Opacity: --opacity-disabled 0.45, --opacity-grain 0.035
-   * Nav focus (arrow keys / gamepad), one look for every control:
-   *   --color-focus            zinc-100  the solid white fill
-   *   --color-focus-ink        zinc-900  text and icons on it (~17:1)
-   *   --color-focus-ink-muted  zinc-600  dim/secondary text, placeholders (~6.8:1)
-   *   --focus-text (per control, optional) tone text instead of the ink:
-   *     accent-700 on primary (~5.5:1), rose-700 on danger (~5.4:1)
-   *   in-nav-focus:* restyles parts with their own fill (toggle track).
-   *   --color-accent-700 exists for that: the accent at >= 4.5:1 on white.
+   * Duration: --transition-duration-fast, -base, -slow
+   * Opacity: --opacity-disabled, --opacity-grain
+   * Highlight (nav focus and mouse hover), one look for every control:
+   *   --color-focus            the solid white fill
+   *   --color-focus-ink        text and icons on it
+   *   --color-focus-ink-muted  dim/secondary text, placeholders
+   *   --focus-text             tone text instead of the ink (per control,
+   *                            optional): the accent on primary, rose on danger
+   *   Every text colour on the fill keeps at least AA contrast (4.5:1).
+   *   in-highlight:* restyles parts with their own fill (toggle track).
+   *   The same highlight shows on mouse hover (variant highlighted).
+   *   --color-accent-700 exists for that: the accent at AA on white.
    */
   --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, "SFMono-Regular", monospace;
@@ -85,9 +117,10 @@
 
   --tracking-eyebrow: 0.14em;
 
-  --radius-control-sm: 0.5rem;
-  --radius-control: 0.75rem;
-  --radius-card: 1rem;
+  --radius-control-sm: calc(var(--radius-card) * 0.5);
+  --radius-control: calc(var(--radius-card) * 0.75);
+  --radius-card: 0.6rem;
+  --radius-card-lg: calc(var(--radius-card) * 1.0);
   --radius-pill: 9999px;
 
   --spacing-section: 1rem;
@@ -118,7 +151,7 @@
   --color-ink: oklch(0.155 0.004 286);
   --color-ink-2: oklch(0.185 0.005 286);
   --color-ink-3: oklch(0.225 0.006 286);
-  /* Legacy used zinc-500 for secondary text; this keeps that look at >= 4.5:1 on ink-3. */
+  /* Legacy used zinc-500 for secondary text; this keeps that look at AA contrast on ink-3. */
   --color-dim: oklch(0.66 0.012 286);
 
   --color-hairline: rgb(255 255 255 / 0.05);
@@ -152,7 +185,7 @@
   --transition-duration-fast: 150ms;
   --transition-duration-base: 200ms;
   --transition-duration-slow: 300ms;
-  /* Staggered list entrance step (legacy: 15 ms per item, capped at 7 steps). */
+  /* Staggered list entrance step per item (legacy timing, capped at 7 steps). */
   --stagger-step: 15ms;
 
   --opacity-disabled: 0.45;
@@ -226,6 +259,7 @@
    * box-shadow paints solid white over the element's own background (a
    * background-color here would lose to the bg-* utilities) and follows
    * its border radius. The text turns dark in @layer utilities below.
+   * Mouse hover shows the same highlight (the highlighted variant above).
    * The outline stays transparent in every state: transition-colors also
    * animates outline-color, and a resting currentColor (light text) faded
    * out as a white ring on focus. The transparent focus outline is drawn
@@ -234,8 +268,10 @@
   :focus {
     outline: 2px solid transparent;
   }
-  html[data-input="nav"] :focus {
-    box-shadow: inset 0 0 0 100vmax var(--color-focus);
+  * {
+    @variant highlighted {
+      box-shadow: inset 0 0 0 100vmax var(--color-focus);
+    }
   }
   * {
     outline-color: transparent;
@@ -332,25 +368,32 @@
  */
 @layer utilities {
   /*
-   * The highlight snaps between controls: in nav mode no colour, fill,
-   * border or shadow animates (transition-colors etc. would fade the white
-   * in and, since leaving focus uses the same transition, out). Motion stays:
-   * press scale/translate, the toggle knob slide, rotations, fades.
-   * Pseudo-elements (progress bars) are not matched. 0,1,1 beats the
-   * transition-* utilities (0,1,0).
+   * The highlight snaps (focus and hover, in and out): in either input mode
+   * no colour, fill, border or shadow animates (transition-colors etc. would
+   * fade the white in and, since leaving uses the same transition, out).
+   * Motion stays: press scale/translate, the toggle knob slide, rotations,
+   * fades. Pseudo-elements (progress bars) are not matched. 0,1,1 beats the
+   * transition-* utilities (0,1,0); data-input is set at startup.
    */
-  html[data-input="nav"] * {
+  html[data-input] * {
     transition-property: transform, translate, scale, rotate, opacity;
   }
-  html[data-input="nav"] :focus {
-    color: var(--focus-text, var(--color-focus-ink));
+  * {
+    @variant highlighted {
+      color: var(--focus-text, var(--color-focus-ink));
+    }
   }
-  html[data-input="nav"] :focus * {
-    color: inherit;
+  * {
+    @variant in-highlight {
+      color: inherit;
+    }
   }
-  html[data-input="nav"] :focus :is(.text-dim, .text-zinc-400, .text-zinc-500) {
-    color: var(--color-focus-ink-muted);
+  :is(.text-dim, .text-zinc-400, .text-zinc-500) {
+    @variant in-highlight {
+      color: var(--color-focus-ink-muted);
+    }
   }
+  /* Text fields are highlighted on nav focus only (hovering a field stays subtle). */
   html[data-input="nav"] :focus::placeholder {
     color: var(--color-focus-ink-muted);
   }

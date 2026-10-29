@@ -340,7 +340,7 @@ export function RunLog({ runs }: { runs: RunLogEntry[] }) {
   return (
     <ul aria-label="Auto-update runs" className="grid gap-1.5">
       {runs.map((r) => (
-        <li key={r.id} tabIndex={0} className="grid gap-0.5 rounded-xl border border-white/[0.05] bg-ink px-3 py-2 text-[12.5px]">
+        <li key={r.id} tabIndex={0} className="grid gap-0.5 rounded-control border border-white/[0.05] bg-ink px-3 py-2 text-[12.5px]">
           <span className="flex flex-wrap items-center gap-2">
             <StatusDot tone={OUTCOME[r.outcome]} />
             <span className="text-zinc-200">{when(r.started_at)}</span>

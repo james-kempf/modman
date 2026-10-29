@@ -79,7 +79,7 @@ function Osk() {
                   type="button"
                   data-autofocus={row === ROWS[0] && i === 0 ? true : undefined}
                   onClick={() => type(ch)}
-                  className="min-h-control min-w-control rounded-control border border-hairline bg-fill-2 font-mono text-lg text-zinc-100 transition-colors duration-fast hover:bg-fill-hover active:scale-95"
+                  className="min-h-control min-w-control rounded-control border border-hairline bg-fill-2 font-mono text-lg text-zinc-100 transition-colors duration-fast active:scale-95"
                 >
                   {k}
                 </button>
@@ -97,7 +97,7 @@ function Osk() {
             "inline-flex min-h-control items-center gap-2 rounded-control border px-4 text-body font-medium transition-colors duration-base",
             shift
               ? "border-accent-400/40 bg-accent-400/10 text-accent-200"
-              : "border-hairline bg-fill-2 text-zinc-100 hover:bg-fill-hover",
+              : "border-hairline bg-fill-2 text-zinc-100",
           )}
         >
           <ArrowFatUpIcon aria-hidden size={16} weight={shift ? "fill" : "regular"} />

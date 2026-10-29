@@ -123,7 +123,7 @@ function Installed({ game }: { game: string }) {
                   </span>
                 </div>
                 {c.failed.length > 0 && (
-                  <div className="mt-4 rounded-xl border border-amber-400/15 bg-amber-400/[0.05] px-3.5 py-2.5 text-[13px] text-amber-200">
+                  <div className="mt-4 rounded-control border border-amber-400/15 bg-amber-400/[0.05] px-3.5 py-2.5 text-[13px] text-amber-200">
                     <div className="flex items-center gap-2 font-medium">
                       <WarningIcon aria-hidden size={14} /> {c.failed.length} failed
                     </div>
@@ -259,7 +259,7 @@ export function CollectionArt({ game, slug, name }: { game: string; slug: string
     staleTime: Infinity,
   });
   const src = q.data && q.data.startsWith("data:image/") ? q.data : null;
-  const tile = "size-20 shrink-0 rounded-3xl";
+  const tile = "size-20 shrink-0 rounded-card-lg";
   if (src) return <img src={src} alt="" aria-hidden data-testid="collection-art" className={cx(tile, "object-cover")} />;
   const m = monogram(name);
   return (

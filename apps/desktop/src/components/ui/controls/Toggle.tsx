@@ -40,13 +40,13 @@ export function Toggle({
         className={cx(
           "inline-flex h-7 w-12 shrink-0 items-center rounded-pill p-1 transition-colors duration-slow",
           // On the white nav focus fill the at-rest track fades out (the off track is 10% white): >= 3:1 tracks there.
-          checked ? "bg-accent-500/90 in-nav-focus:bg-accent-700" : "bg-fill-hover in-nav-focus:bg-zinc-500",
+          checked ? "bg-accent-500/90 in-highlight:bg-accent-700" : "bg-fill-hover in-highlight:bg-zinc-500",
         )}
       >
         <span
           className={cx(
             "size-icon rounded-pill transition-[transform,background-color] duration-slow ease-spring",
-            checked ? "translate-x-5 bg-white" : "bg-zinc-400 in-nav-focus:bg-white",
+            checked ? "translate-x-5 bg-white" : "bg-zinc-400 in-highlight:bg-white",
           )}
         />
       </span>

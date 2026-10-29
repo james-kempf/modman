@@ -121,8 +121,8 @@ describe("Button nav focus", () => {
 
   // Fails when the toggle track keeps its at-rest colours on the white focus fill (the off track is a 10% white, invisible).
   it.each([
-    [true, "in-nav-focus:bg-accent-700"],
-    [false, "in-nav-focus:bg-zinc-500"],
+    [true, "in-highlight:bg-accent-700"],
+    [false, "in-highlight:bg-zinc-500"],
   ] as const)("toggle track stays >= 3:1 on the white focus fill (checked=%s)", (checked, track) => {
     render(<Toggle label="T" checked={checked} onChange={() => {}} />);
     expect(screen.getByRole("switch").innerHTML).toContain(track);

@@ -152,7 +152,7 @@ function Choice({
         "flex min-h-control-lg w-full items-start gap-3 rounded-card border px-4 py-3 text-left transition-colors duration-base",
         selected
           ? "border-accent-400/40 bg-accent-400/10"
-          : "border-hairline bg-fill-1 hover:bg-fill-2",
+          : "border-hairline bg-fill-1",
       )}
     >
       <span
@@ -161,11 +161,11 @@ function Choice({
           "mt-0.5 grid size-icon shrink-0 place-items-center border-2 transition-colors duration-base",
           multi ? "rounded-control-sm" : "rounded-pill",
           selected
-            ? "border-accent-400 bg-accent-400 text-accent-950 in-nav-focus:border-accent-700 in-nav-focus:bg-accent-700 in-nav-focus:text-white"
+            ? "border-accent-400 bg-accent-400 text-accent-950 in-highlight:border-accent-700 in-highlight:bg-accent-700 in-highlight:text-white"
             : "border-zinc-500",
         )}
       >
-        {selected && (multi ? <CheckIcon size={12} weight="bold" /> : <span className="size-2 rounded-pill bg-accent-950 in-nav-focus:bg-white" />)}
+        {selected && (multi ? <CheckIcon size={12} weight="bold" /> : <span className="size-2 rounded-pill bg-accent-950 in-highlight:bg-white" />)}
       </span>
       <span className="min-w-0 flex-1">{children}</span>
     </button>

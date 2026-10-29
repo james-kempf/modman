@@ -27,7 +27,7 @@ import { AddGameHost } from "../components/dialogs/AddGameDialog";
 import { ViewBoundary } from "../components/shell/ErrorBoundary";
 import { OskHost } from "../components/shell/Osk";
 import { PromptHost } from "../components/dialogs/PromptDialog";
-import { Button, IconButton, StatusDot, SupportBadge, cx, type DotTone } from "../components/ui";
+import { Button, IconButton, cx } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import { installKeyboardNav, performNav } from "../nav/actions";
 import { startGamepadLoop } from "../nav/gamepad";
@@ -43,7 +43,7 @@ import { Requirements } from "../views/Requirements";
 import { Settings } from "../views/Settings";
 import { jobLabel, jobOutcome } from "./jobs";
 import { useAccount, useActiveGame } from "./queries";
-import { useDeploy, useDeployDue } from "./run";
+import { useDeploy } from "./run";
 import { VIEWS, useUi, type JobEntry, type NoticeTone, type ViewId } from "./store";
 
 const VIEW: Record<ViewId, () => JSX.Element> = {
@@ -163,7 +163,7 @@ function Sidebar() {
         <button
           type="button"
           onClick={() => void ipc.quitApp()}
-          className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-[14.5px] text-zinc-400 transition-colors duration-150 hover:bg-white/[0.03] hover:text-zinc-200"
+          className="flex min-h-12 w-full items-center gap-3 rounded-control px-3 text-left text-[14.5px] text-zinc-400 transition-colors duration-150"
         >
           <PowerIcon aria-hidden size={20} />
           <span className="flex-1">Quit</span>
@@ -175,37 +175,29 @@ function Sidebar() {
 }
 
 /**
- * Brand + the active game (picked in the Games view) and its deploy
- * progress. Deploying is done from the Overview's Deployment card. Part of
- * the rail for spatial navigation: Down from here reaches the tabs, not the view.
+ * Brand + the active game's name (picked in the Games view; plain text, the
+ * Games tab is the way to switch) and its deploy progress. Deploying is done
+ * from the Overview's Deployment card. Pinned at the top of the scrolling
+ * sidebar. Part of the rail for spatial navigation: Down from here reaches
+ * the tabs, not the view.
  */
 function GameHeader() {
   const { game, isLoading } = useActiveGame();
-  const needsDeploy = useDeployDue(game?.domain ?? null);
   // Progress of a deploy of another game is not shown under this one (the job island shows it).
   const progress = useUi((s) => (s.deployGame && s.deployGame !== game?.domain ? null : s.deployProgress));
-  const d = game?.deploy;
-  const tone: DotTone = !d?.active ? "zinc" : d.interrupted ? "rose" : needsDeploy ? "amber" : "accent";
   return (
-    <header className="grid grid-cols-[minmax(0,1fr)] gap-5 px-6 pt-6 pb-4">
+    <header className="sticky top-0 z-10 grid grid-cols-[minmax(0,1fr)] gap-5 bg-ink px-6 pt-6 pb-4">
       <Brand />
       <div data-nav-rail className="grid grid-cols-[minmax(0,1fr)] gap-2">
         {isLoading ? (
           <span className="text-[14px] text-zinc-400">Loading…</span>
         ) : game ? (
-          <div className="flex min-h-12 min-w-0 items-center gap-3 rounded-xl border border-white/[0.06] bg-ink-2 px-3">
-            <StatusDot tone={tone} live={game.deploy.active} />
-            <span className="min-w-0 flex-1 truncate text-[14.5px] text-zinc-50" title={game.name}>
-              {game.name}
-            </span>
-            <span className="font-mono text-[11px] text-dim" title={`${game.mod_count} mods`}>
-              {game.mod_count}
-            </span>
-          </div>
+          <span className="min-w-0 truncate text-title font-semibold tracking-tight text-zinc-100" title={game.name}>
+            {game.name}
+          </span>
         ) : (
           <span className="text-[14px] text-zinc-400">No game selected</span>
         )}
-        {game && <SupportBadge support={game.support} />}
         {progress && (
           <span className="grid gap-1.5 pt-1 font-mono text-[11px] text-dim">
             <progress aria-label="Deploy progress" max={progress.total || 1} value={progress.done} />
@@ -234,14 +226,14 @@ function TabRail() {
             aria-current={on ? "page" : undefined}
             onClick={() => setView(v.id)}
             className={cx(
-              "flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-[14.5px] transition-colors duration-150",
-              on ? "bg-white/[0.07] text-zinc-50" : "text-zinc-400 hover:bg-white/[0.03] hover:text-zinc-200",
+              "flex min-h-12 w-full items-center gap-3 rounded-control px-3 text-left text-[14.5px] transition-colors duration-150",
+              on ? "bg-white/[0.07] text-zinc-50" : "text-zinc-400",
             )}
           >
-            <span className={cx("transition-colors duration-150", on && "text-accent-300 in-nav-focus:text-accent-700")}>{ICON[v.id]}</span>
+            <span className={cx("transition-colors duration-150", on && "text-accent-300 in-highlight:text-accent-700")}>{ICON[v.id]}</span>
             <span className="flex-1">{v.label}</span>
             {v.id === "activity" && running + prompts > 0 && (
-              <span className="rounded-full bg-accent-400 px-2 font-mono text-[11px] font-semibold text-accent-950">
+              <span className="rounded-pill bg-accent-400 px-2 font-mono text-[11px] font-semibold text-accent-950">
                 {running + prompts}
               </span>
             )}
@@ -264,7 +256,7 @@ function AccountFooter() {
         <div className="flex items-center gap-3">
           <div
             aria-hidden
-            className="grid size-9 place-items-center rounded-xl bg-accent-950 font-mono text-[12px] font-semibold text-accent-50"
+            className="grid size-9 place-items-center rounded-control bg-accent-950 font-mono text-[12px] font-semibold text-accent-50"
           >
             {(a?.user ?? "?").slice(0, 2).toUpperCase()}
           </div>
@@ -329,7 +321,7 @@ function BottomStack({ island }: { island: JobEntry | null }) {
               key={n.id}
               role={n.tone === "error" ? "alert" : "status"}
               className={cx(
-                "glass pointer-events-auto flex animate-island items-center gap-3 rounded-2xl py-2 pr-2 pl-4",
+                "glass pointer-events-auto flex animate-island items-center gap-3 rounded-card py-2 pr-2 pl-4",
                 NOTICE_TONE[n.tone].border,
               )}
             >
@@ -385,12 +377,12 @@ function JobIsland({ job }: { job: JobEntry }) {
     <div
       role="status"
       aria-label="Current job"
-      className="glass pointer-events-auto relative flex min-h-14 w-full max-w-xl animate-island items-center gap-3 overflow-hidden rounded-full py-2 pr-5 pl-2.5"
+      className="glass pointer-events-auto relative flex min-h-14 w-full max-w-xl animate-island items-center gap-3 overflow-hidden rounded-pill py-2 pr-5 pl-2.5"
     >
       <span
         aria-hidden
         className={cx(
-          "relative grid size-9 shrink-0 place-items-center rounded-full",
+          "relative grid size-9 shrink-0 place-items-center rounded-pill",
           failed
             ? "bg-rose-400/15 text-rose-300"
             : outcome === "cancelled"
@@ -400,9 +392,9 @@ function JobIsland({ job }: { job: JobEntry }) {
       >
         {running ? (
           <span className="flex gap-[3px]">
-            <span className="h-3.5 w-[3px] animate-bar rounded-full bg-current" />
-            <span className="h-3.5 w-[3px] animate-bar rounded-full bg-current [animation-delay:150ms]" />
-            <span className="h-3.5 w-[3px] animate-bar rounded-full bg-current [animation-delay:300ms]" />
+            <span className="h-3.5 w-[3px] animate-bar rounded-pill bg-current" />
+            <span className="h-3.5 w-[3px] animate-bar rounded-pill bg-current [animation-delay:150ms]" />
+            <span className="h-3.5 w-[3px] animate-bar rounded-pill bg-current [animation-delay:300ms]" />
           </span>
         ) : failed ? (
           <WarningIcon size={17} weight="bold" />

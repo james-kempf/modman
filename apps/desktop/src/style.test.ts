@@ -36,60 +36,77 @@ describe("flat look", () => {
   });
 });
 
+describe("radius tokens", () => {
+  // Fails when a component uses Tailwind's raw radius scale (or an arbitrary radius) instead of the
+  // --radius-* tokens, so changing --radius-card in index.css no longer reaches it.
+  it("rounds only with the theme radius tokens", () => {
+    for (const [file, src] of Object.entries(sources)) {
+      expect(src, file).not.toMatch(
+        /(?<![\w-])rounded(-[trblse]{1,2})?(-(none|xs|sm|md|lg|xl|2xl|3xl|4xl|full|\[[^\]]*\]))?(?![\w-])/,
+      );
+    }
+  });
+});
+
 // vitest.config's `css: false` empties `index.css?raw`; read the file itself (no @types/node, hence the untyped id).
 const fsId = "node:fs";
 const { readFileSync } = (await import(/* @vite-ignore */ fsId)) as { readFileSync(p: string, enc: "utf8"): string };
 // Relative to the vitest root (apps/desktop); import.meta.url is not a file: URL under jsdom.
 const cssFile = readFileSync("src/index.css", "utf8");
 
-describe("navigation focus highlight", () => {
+describe("focus and hover highlight", () => {
   const css = cssFile;
-  const rule = (sel: string) => css.match(new RegExp(`\\n  ${sel.replace(/[[\]().*:"=]/g, "\\$&")} \\{[^}]*\\}`))?.[0] ?? "";
-  const navFocus = rule('html[data-input="nav"] :focus');
   const token = (name: string) => css.match(new RegExp(`${name}:\\s*([^;]+);`))?.[1] ?? "";
+  const variant = (name: string) => css.match(new RegExp(`@custom-variant ${name} \\{[\\s\\S]*?\\n\\}`))?.[0] ?? "";
+  const layer = css.slice(css.indexOf("@layer utilities"));
+  // The interactive-control list of the hover branch (also the :has() list that hands hover to the innermost control).
+  const controls = (v: string) => v.match(/&:is\(([^)]*)\)|:is\(([^)]*)\):not/)?.slice(1).find(Boolean) ?? "";
 
-  // Fails when any nav highlight drifts from the one shared solid white (tints, per-control fills, an outline or ring).
-  it("paints every nav focus with the one solid white token, no outline", () => {
-    expect(token("--color-focus")).toBe("var(--color-zinc-100)");
-    expect(navFocus).toMatch(/box-shadow:\s*inset 0 0 0 100vmax var\(--color-focus\);/);
-    expect(navFocus).not.toMatch(/outline/);
-    expect(css).not.toMatch(/--color-focus-fill/);
-    for (const [file, src] of Object.entries(sources)) {
-      expect(src, file).not.toMatch(/(?<!in-)nav-focus:(bg|shadow)-/);
+  // Fails when nav focus and mouse hover stop sharing one definition (the two highlights drift apart), when hover
+  // reaches plain containers (no element list), shows on disabled controls, or sticks on touch screens (no hover media).
+  it("defines one highlighted variant for nav focus and hover, plus its descendant form", () => {
+    for (const name of ["highlighted", "in-highlight"]) {
+      const v = variant(name);
+      expect(v, name).toMatch(/html\[data-input="nav"\] &?:focus/);
+      expect(v, name).toMatch(/@media \(hover: hover\)/);
+      expect(v, name).toMatch(/:not\(:disabled, \[aria-disabled="true"\], :has\(:is\(/);
+      expect(controls(v), name).toBe('button, a[href], [role="option"], li[tabindex]');
     }
   });
 
-  // Fails when light text stays light on the white fill: the focused control and everything inside it must turn dark,
-  // muted text to a readable grey, placeholders too (all >= 4.5:1 on zinc-100).
-  it("darkens text inside the focused control above the utilities", () => {
-    const layer = css.slice(css.indexOf("@layer utilities"));
-    expect(layer).toMatch(/html\[data-input="nav"\] :focus \{\s*color: var\(--focus-text, var\(--color-focus-ink\)\);/);
-    expect(layer).toMatch(/html\[data-input="nav"\] :focus \* \{\s*color: inherit;/);
-    expect(layer).toMatch(/:focus :is\(\.text-dim, \.text-zinc-400, \.text-zinc-500\) \{\s*color: var\(--color-focus-ink-muted\);/);
+  // Fails when any highlight drifts from the one shared solid white (tints, per-control fills, an outline or ring).
+  it("paints the highlight with the one solid white token, no outline", () => {
+    expect(token("--color-focus")).toBe("var(--color-zinc-100)");
+    expect(css).toMatch(/\* \{\s*@variant highlighted \{\s*box-shadow: inset 0 0 0 100vmax var\(--color-focus\);\s*\}/);
+    expect(css).not.toMatch(/--color-focus-fill/);
+  });
+
+  // Fails when light text stays light on the white: the control and everything inside turn dark, muted text a readable
+  // grey, focused-field placeholders too (all >= 4.5:1 on zinc-100); in the utilities layer to beat text-* utilities.
+  it("darkens text inside the highlighted control above the utilities", () => {
+    expect(layer).toMatch(/\* \{\s*@variant highlighted \{\s*color: var\(--focus-text, var\(--color-focus-ink\)\);/);
+    expect(layer).toMatch(/\* \{\s*@variant in-highlight \{\s*color: inherit;/);
+    expect(layer).toMatch(/:is\(\.text-dim, \.text-zinc-400, \.text-zinc-500\) \{\s*@variant in-highlight \{\s*color: var\(--color-focus-ink-muted\);/);
     expect(layer).toMatch(/:focus::placeholder \{\s*color: var\(--color-focus-ink-muted\);/);
     expect(token("--color-focus-ink")).toBe("var(--color-zinc-900)");
     expect(token("--color-focus-ink-muted")).toBe("var(--color-zinc-600)");
   });
 
-  // Fails when the nav highlight fades in or out instead of snapping: a transition on the focus rule, or a
-  // colour property (transition-colors etc. on the control) still animating in nav mode, where focus-out uses it too.
-  it("snaps the nav highlight: no colour or shadow transitions in nav mode", () => {
-    expect(navFocus).not.toMatch(/transition/);
-    const layer = css.slice(css.indexOf("@layer utilities"));
-    const snap = layer.match(/html\[data-input="nav"\] \* \{\s*transition-property: ([^;]+);/)?.[1] ?? "";
-    expect(snap).toBe("transform, translate, scale, rotate, opacity");
-  });
-
-  // Fails when the descendant variant used by toggles, marks and monograms is not defined (classes dropped silently).
-  it("defines the in-nav-focus variant", () => {
-    expect(css).toMatch(/@custom-variant in-nav-focus \(html\[data-input="nav"\] :focus &\);/);
-  });
-
-  // Fails when nav focus grows controls again.
-  it("does not scale on nav focus", () => {
+  // Fails when a control keeps its own hover look under the shared white (or the old variant names come back).
+  it("leaves no per-control hover colours or old focus variants", () => {
     for (const [file, src] of Object.entries(sources)) {
-      expect(src, file).not.toMatch(/nav-focus:scale-/);
+      expect(src, file).not.toMatch(/\bhover:(bg|text|border)-/);
+      expect(src, file).not.toMatch(/\b(in-)?nav-focus:/);
     }
+  });
+
+  // Fails when the highlight fades in or out (focus or hover, either direction) instead of snapping: colour, fill,
+  // border and shadow must not animate in either input mode; transform and opacity still may.
+  it("snaps the highlight: no colour or shadow transitions in any input mode", () => {
+    expect(layer.match(/html\[data-input\] \* \{\s*transition-property: ([^;]+);/)?.[1]).toBe(
+      "transform, translate, scale, rotate, opacity",
+    );
+    expect(css).not.toMatch(/transition: box-shadow/);
   });
 
   // Fails when outline-color can animate from currentColor (white text) to transparent:
@@ -104,6 +121,13 @@ describe("navigation focus highlight", () => {
     expect(css).not.toMatch(/(?<![\w-])focus:border-/);
     for (const [file, src] of Object.entries(sources)) {
       expect(src, file).not.toMatch(/(?<![\w-])focus(-visible|-within)?:(border|ring|outline)-/);
+    }
+  });
+
+  // Fails when nav focus grows controls again.
+  it("does not scale on focus", () => {
+    for (const [file, src] of Object.entries(sources)) {
+      expect(src, file).not.toMatch(/(nav-focus|highlighted):scale-/);
     }
   });
 });

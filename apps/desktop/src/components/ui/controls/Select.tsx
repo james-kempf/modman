@@ -110,11 +110,11 @@ export function Select<T extends string>({
               onClick={() => pick(o.value)}
               className={cx(
                 "flex min-h-control-sm items-center justify-between gap-3 rounded-control-sm px-3 text-left text-body transition-colors duration-fast",
-                o.value === value ? "bg-fill-3 text-zinc-50" : "text-zinc-300 hover:bg-fill-2 hover:text-zinc-100",
+                o.value === value ? "bg-fill-3 text-zinc-50" : "text-zinc-300",
               )}
             >
               <span className="min-w-0 truncate">{o.label}</span>
-              {o.value === value && <CheckIcon aria-hidden size={15} className="shrink-0 text-accent-300 in-nav-focus:text-accent-700" />}
+              {o.value === value && <CheckIcon aria-hidden size={15} className="shrink-0 text-accent-300 in-highlight:text-accent-700" />}
             </button>
           ))}
         </div>

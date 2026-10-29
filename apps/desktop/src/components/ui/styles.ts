@@ -15,8 +15,8 @@ export const DIVIDE = "divide-y divide-hairline";
 export const TILE = "rounded-card border border-hairline bg-ink";
 /** A compact status pill / chip row (mono log lines, repair steps). */
 export const PILL = "rounded-control border border-hairline bg-ink px-3 py-1.5 text-label";
-/** A free-standing list row (jobs, entries) that highlights on hover. */
-export const LIST_ROW = "rounded-control px-3 py-2.5 transition-colors duration-base hover:bg-fill-1";
+/** A free-standing list row (jobs, entries); the shared highlight shows when it is interactive. */
+export const LIST_ROW = "rounded-control px-3 py-2.5 transition-colors duration-base";
 /** Width of a settings row's control (input + Save group, dropdown): grows to fill the row, wraps below 14rem. */
 export const SETTING_CONTROL = "min-w-0 flex-[1_1_14rem]";
 /** A view's outer frame (ViewFrame): one column that never widens past <main>, blocks 1.5rem apart. */

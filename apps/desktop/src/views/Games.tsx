@@ -21,7 +21,7 @@ import { openView } from "../nav/actions";
 const SWITCH = "Switch game";
 
 const TILE =
-  "group flex h-full w-full min-w-0 flex-col gap-3 rounded-3xl border p-2.5 pb-3.5 text-left transition-colors duration-200";
+  "group flex h-full w-full min-w-0 flex-col gap-3 rounded-card-lg border p-2.5 pb-3.5 text-left transition-colors duration-200";
 
 export function Games() {
   const games = useGames();
@@ -100,7 +100,7 @@ function GameTile({ game }: { game: GameView }) {
       onClick={() => void select()}
       className={cx(
         TILE,
-        game.active ? "border-accent-400/50 bg-white/[0.04]" : "border-white/[0.06] bg-ink-2 hover:border-white/15 hover:bg-white/[0.04]",
+        game.active ? "border-accent-400/50 bg-white/[0.04]" : "border-white/[0.06] bg-ink-2",
       )}
     >
       <Art game={game} />
@@ -151,7 +151,7 @@ function Art({ game }: { game: GameView }) {
   const src = q.data && q.data.startsWith("data:image/") ? q.data : null;
   const m = monogram(game.name);
   return (
-    <span aria-hidden className="relative block aspect-[2/3] w-full overflow-hidden rounded-2xl bg-ink-3">
+    <span aria-hidden className="relative block aspect-[2/3] w-full overflow-hidden rounded-card bg-ink-3">
       {src ? (
         <img src={src} alt="" data-testid="game-art" className="size-full object-cover" />
       ) : (
@@ -172,9 +172,9 @@ function AddGameTile() {
     <button
       type="button"
       onClick={() => setAddGame(true)}
-      className={cx(TILE, "border-dashed border-white/15 text-zinc-300 hover:border-white/30 hover:bg-white/[0.03] hover:text-zinc-100")}
+      className={cx(TILE, "border-dashed border-white/15 text-zinc-300")}
     >
-      <span aria-hidden className="grid aspect-[2/3] w-full place-items-center rounded-2xl bg-white/[0.02]">
+      <span aria-hidden className="grid aspect-[2/3] w-full place-items-center rounded-card bg-white/[0.02]">
         <PlusIcon size={40} />
       </span>
       <span className="px-1 text-[15px] font-medium">Add game</span>

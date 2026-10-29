@@ -5,12 +5,12 @@ import { cx } from "../styles";
 
 type Tone = "primary" | "default" | "danger" | "ghost";
 const TONES: Record<Tone, string> = {
-  // Nav focus is the shared white fill (index.css); --focus-text keeps the tone in the text (>= 4.5:1 on it).
-  primary: "bg-accent-400 text-accent-950 font-semibold hover:bg-accent-300 [--focus-text:var(--color-accent-700)]",
-  default: "bg-fill-2 text-zinc-100 border border-hairline hover:bg-fill-hover",
+  // Hover and nav focus are the shared white highlight (index.css); --focus-text keeps the tone in the text (>= 4.5:1).
+  primary: "bg-accent-400 text-accent-950 font-semibold [--focus-text:var(--color-accent-700)]",
+  default: "bg-fill-2 text-zinc-100 border border-hairline",
   // Tonal: a muted rose wash with rose text (no saturated fill, no coloured border); transparent border keeps the size of default.
-  danger: "bg-rose-500/15 text-rose-200 border border-transparent hover:bg-rose-500/25 [--focus-text:var(--color-rose-700)]",
-  ghost: "text-zinc-300 hover:text-zinc-100 hover:bg-fill-2",
+  danger: "bg-rose-500/15 text-rose-200 border border-transparent [--focus-text:var(--color-rose-700)]",
+  ghost: "text-zinc-300",
 };
 type Size = "sm" | "md" | "lg";
 const SIZES: Record<Size, string> = {

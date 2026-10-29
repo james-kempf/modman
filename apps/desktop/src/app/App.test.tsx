@@ -51,14 +51,44 @@ describe("keyboard-only navigation", () => {
   });
 });
 
-describe("experimental badge", () => {
-  it("is shown for a game with support=experimental (header, Mods, Overview)", async () => {
+describe("sidebar game title", () => {
+  // Fails when the active game's name goes back into a card with a status dot and mod count, loses its
+  // full-name tooltip, or scrolls away with the tabs (the header must stay pinned in the scrolling sidebar).
+  it("is plain pinned text: no card, dot or count", async () => {
+    const { renderApp } = await setup();
+    renderApp();
+    const name = await screen.findByText("Skyrim Special Edition", { selector: "header span" });
+    expect(name).toHaveAttribute("title", "Skyrim Special Edition");
+    expect(name.className).toMatch(/\btruncate\b/);
+    expect(name.className).toMatch(/\btext-zinc-100\b/);
+    const header = name.closest("header")!;
+    expect(header.className).toMatch(/\bsticky\b/);
+    expect(header.className).toMatch(/\btop-0\b/);
+    expect(header.querySelector(".rounded-pill, [title$=' mods']")).toBeNull();
+    expect(header.querySelector(".border, [class*='bg-ink-2']")).toBeNull();
+  });
+
+  // Fails when the experimental badge comes back next to the sidebar title (the user removed it there).
+  it("shows no experimental badge, even for an experimental game", async () => {
     const { renderApp } = await setup({}, [experimentalGame()]);
     renderApp();
-    await screen.findByText("Cyberpunk 2077", { selector: "header span" });
-    expect(screen.getAllByTestId("experimental-badge").length).toBeGreaterThanOrEqual(2);
+    const name = await screen.findByText("Cyberpunk 2077", { selector: "header span" });
+    expect(within(name.closest("header")!).queryByTestId("experimental-badge")).toBeNull();
+  });
+});
+
+describe("experimental badge", () => {
+  // Fails when the badge drops off Overview, or comes back in the sidebar header or the Mods header (removed there).
+  it("is shown on Overview for a game with support=experimental, not in the sidebar or Mods", async () => {
+    const { renderApp } = await setup({}, [experimentalGame()]);
+    renderApp();
+    const name = await screen.findByText("Cyberpunk 2077", { selector: "header span" });
+    expect(within(name.closest("header")!).queryByTestId("experimental-badge")).toBeNull();
     act(() => useUi.getState().setView("mods"));
     await heading("Mods");
+    expect(within(screen.getByRole("main")).queryByTestId("experimental-badge")).toBeNull();
+    act(() => useUi.getState().setView("overview"));
+    await heading("Overview");
     expect(within(screen.getByRole("main")).getByTestId("experimental-badge")).toHaveTextContent("Experimental");
   });
 
