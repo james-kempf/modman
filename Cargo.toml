@@ -1,15 +1,15 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/modman-core",
-    "crates/modman-cli",
+    "crates/vessel-core",
+    "crates/vessel-cli",
     "apps/desktop/src-tauri",
 ]
 # The Tauri app needs system WebKitGTK to build, so plain `cargo build`
 # and `cargo test` only cover the core and the CLI.
 default-members = [
-    "crates/modman-core",
-    "crates/modman-cli",
+    "crates/vessel-core",
+    "crates/vessel-cli",
 ]
 
 [workspace.package]
@@ -21,7 +21,7 @@ authors = []
 
 [workspace.dependencies]
 # Exact pins from docs/plan/20261020-rust-migration/spikes.md section 7.
-modman-core = { path = "crates/modman-core" }
+vessel-core = { path = "crates/vessel-core" }
 # core
 thiserror = "=2.0.21"
 tracing = "=0.1.44"

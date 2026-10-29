@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Ported from the legacy bash tool game_preset (L269-300).
+domain = "hades2"
+name = "Hades II"
+steam_appid = 1145350
+subdir = "."
+target = "game_dir"
+profile = "generic"
+support = "experimental"

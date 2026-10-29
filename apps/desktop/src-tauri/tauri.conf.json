@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "modman",
+  "productName": "Vessel",
   "version": "0.1.0",
-  "identifier": "org.modman.app",
+  "identifier": "org.vessel.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "modman",
+        "title": "Vessel",
         "width": 1280,
         "height": 800,
         "minWidth": 1024,
@@ -46,14 +46,14 @@
     ],
     "category": "Game",
     "shortDescription": "Nexus Mods manager for Linux",
-    "longDescription": "Install, order and deploy Nexus Mods for Steam/Proton games on Linux and the Steam Deck. Ships the desktop app (modman-desktop) and the command-line tool (modman), which also handles nxm:// links.",
+    "longDescription": "Install, order and deploy Nexus Mods for Steam/Proton games on Linux and the Steam Deck. Ships the desktop app (vessel-desktop) and the command-line tool (vessel), which also handles nxm:// links.",
     "license": "GPL-3.0-or-later",
     "licenseFile": "../../../LICENSE",
     "linux": {
       "appimage": {
         "bundleMediaFramework": false,
         "files": {
-          "/usr/bin/modman": "../../../target/release/modman"
+          "/usr/bin/vessel": "../../../target/release/vessel"
         }
       },
       "deb": {
@@ -62,8 +62,8 @@
           "libarchive13t64 | libarchive13"
         ],
         "files": {
-          "/usr/bin/modman": "../../../target/release/modman",
-          "/usr/share/applications/modman-nxm.desktop": "../../../packaging/common/modman-nxm.desktop"
+          "/usr/bin/vessel": "../../../target/release/vessel",
+          "/usr/share/applications/vessel-nxm.desktop": "../../../packaging/common/vessel-nxm.desktop"
         }
       },
       "rpm": {
@@ -71,8 +71,8 @@
           "libarchive"
         ],
         "files": {
-          "/usr/bin/modman": "../../../target/release/modman",
-          "/usr/share/applications/modman-nxm.desktop": "../../../packaging/common/modman-nxm.desktop"
+          "/usr/bin/vessel": "../../../target/release/vessel",
+          "/usr/share/applications/vessel-nxm.desktop": "../../../packaging/common/vessel-nxm.desktop"
         }
       }
     }

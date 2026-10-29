@@ -105,7 +105,7 @@ function GameRepair({ domain, name }: { domain: string; name: string }) {
             poisoned.isPending
               ? "Checking held backups…"
               : list.length
-                ? `${confirmed.length} confirmed (placed by modman), ${ambiguous.length} ambiguous (no earlier deploy record).`
+                ? `${confirmed.length} confirmed (placed by Vessel), ${ambiguous.length} ambiguous (no earlier deploy record).`
                 : "None: every held backup differs from the mod files at its path."
           }
         >

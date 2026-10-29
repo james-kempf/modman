@@ -228,7 +228,7 @@ describe("auto-update", () => {
 });
 
 describe("Steam shortcut", () => {
-  const status = (o = {}) => ({ accounts: 1, added: 0, steam_running: false, exe: "/x/modman.AppImage", ...o });
+  const status = (o = {}) => ({ accounts: 1, added: 0, steam_running: false, exe: "/x/vessel.AppImage", ...o });
 
   // Fails when the toggle does not add the shortcut, or works while Steam runs.
   it("adds the shortcut from the toggle", async () => {
@@ -243,7 +243,7 @@ describe("Steam shortcut", () => {
     await waitFor(() => expect(toggle).toBeEnabled());
     // The per-account count and executable path are no longer shown under the toggle.
     expect(screen.queryByText(/have it$/)).toBeNull();
-    expect(screen.queryByText("/x/modman.AppImage")).toBeNull();
+    expect(screen.queryByText("/x/vessel.AppImage")).toBeNull();
     await userEvent.setup().click(toggle);
     await waitFor(() => expect(t.callsOf("steam_shortcut_set")).toHaveLength(1));
     await screen.findByRole("switch", { name: "Steam shortcut on" });

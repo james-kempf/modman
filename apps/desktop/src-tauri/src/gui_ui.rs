@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The webview front end of `modman_core::app`: messages become activity
+//! The webview front end of `vessel_core::app`: messages become activity
 //! events, questions become prompts (see [`crate::prompt`]), including the
 //! FOMOD resolver bridge (`FomodResolver::choose` is synchronous; the job
 //! thread blocks until the webview answers).
@@ -9,12 +9,12 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use modman_core::app::{InstallPrompts, Msg, Ui};
-use modman_core::collections::{Manifest, ManifestMod};
-use modman_core::deploy::Progress;
-use modman_core::download::DownloadEvent;
-use modman_core::fomod::{FomodError, FomodResolver, GroupPrompt};
-use modman_core::nexus::FileInfo;
+use vessel_core::app::{InstallPrompts, Msg, Ui};
+use vessel_core::collections::{Manifest, ManifestMod};
+use vessel_core::deploy::Progress;
+use vessel_core::download::DownloadEvent;
+use vessel_core::fomod::{FomodError, FomodResolver, GroupPrompt};
+use vessel_core::nexus::FileInfo;
 
 use crate::events::{self, Sink};
 use crate::prompt::{Answer, FomodOption, OptionalMod, PromptKind, Prompts};
@@ -271,8 +271,8 @@ mod tests {
         assert_eq!(a["msg"]["spans"][1]["style"], "bold");
     }
 
-    fn plugin(name: &str) -> modman_core::fomod::Plugin {
-        use modman_core::fomod::{Plugin, PluginType, TypeDescriptor};
+    fn plugin(name: &str) -> vessel_core::fomod::Plugin {
+        use vessel_core::fomod::{Plugin, PluginType, TypeDescriptor};
         Plugin {
             name: name.into(),
             description: format!("{name} text"),
@@ -285,7 +285,7 @@ mod tests {
 
     #[test]
     fn fomod_groups_are_bridged_to_prompts_from_a_blocking_thread() {
-        use modman_core::fomod::{Group, GroupType, PluginType};
+        use vessel_core::fomod::{Group, GroupType, PluginType};
         let sink = Arc::new(Recorder::default());
         let prompts = Arc::new(Prompts::default());
         let (s2, p2) = (sink.clone(), prompts.clone());

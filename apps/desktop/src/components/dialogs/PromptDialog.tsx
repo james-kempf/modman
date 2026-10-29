@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// One dialog per backend question (`modman:prompt`), answered through
+// One dialog per backend question (`vessel:prompt`), answered through
 // `prompt_answer`; "back" answers cancel. Questions queue up in order;
-// `modman:prompt-closed` withdraws one. The fomod_group dialog is the
+// `vessel:prompt-closed` withdraws one. The fomod_group dialog is the
 // FOMOD installer wizard (one group per step, re-asked with an error).
 
 import { useState, type ReactNode } from "react";

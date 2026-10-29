@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! nxm:// intake in the GUI (spikes.md §5). `modman nxm <url>` forwards
-//! `["modman-desktop", "nxm", <url>]` over the single-instance D-Bus
+//! nxm:// intake in the GUI (spikes.md §5). `vessel nxm <url>` forwards
+//! `["vessel-desktop", "nxm", <url>]` over the single-instance D-Bus
 //! endpoint; the paste box sends the URL directly. argv is untrusted: every
-//! URL goes through the core parser ([`modman_core::app::nxm::accept`],
+//! URL goes through the core parser ([`vessel_core::app::nxm::accept`],
 //! i.e. `NxmLink::parse`) before a `downloads` row is written, and nothing
 //! else in argv is acted on.
 
@@ -10,9 +10,9 @@ use std::sync::Arc;
 
 use serde::Serialize;
 
-use modman_core::app::nxm::{self as appnxm, Accepted};
-use modman_core::download::NxmLink;
-use modman_core::ipc;
+use vessel_core::app::nxm::{self as appnxm, Accepted};
+use vessel_core::download::NxmLink;
+use vessel_core::ipc;
 
 use crate::events::{self, NxmStatus, Sink};
 use crate::state::{CmdError, Inner};
@@ -112,8 +112,8 @@ mod tests {
     use super::*;
     use crate::events::testing::Recorder;
     use crate::state::AppState;
-    use modman_core::download;
-    use modman_core::paths::Paths;
+    use vessel_core::download;
+    use vessel_core::paths::Paths;
 
     fn argv(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()
@@ -128,11 +128,11 @@ mod tests {
     #[test]
     fn argv_must_be_the_forwarded_shape() {
         let u = "nxm://skyrimspecialedition/mods/1/files/2";
-        assert_eq!(url_in_argv(&argv(&["modman-desktop", "nxm", u])), Some(u));
-        assert_eq!(url_in_argv(&argv(&["modman-desktop", u])), Some(u));
-        assert_eq!(url_in_argv(&argv(&["modman-desktop"])), None);
-        assert_eq!(url_in_argv(&argv(&["modman-desktop", "nxm", u, "x"])), None);
-        assert_eq!(url_in_argv(&argv(&["modman-desktop", "deploy"])), None);
+        assert_eq!(url_in_argv(&argv(&["vessel-desktop", "nxm", u])), Some(u));
+        assert_eq!(url_in_argv(&argv(&["vessel-desktop", u])), Some(u));
+        assert_eq!(url_in_argv(&argv(&["vessel-desktop"])), None);
+        assert_eq!(url_in_argv(&argv(&["vessel-desktop", "nxm", u, "x"])), None);
+        assert_eq!(url_in_argv(&argv(&["vessel-desktop", "deploy"])), None);
         assert_eq!(url_in_argv(&argv(&["x", "--flag", u])), None);
     }
 
@@ -148,7 +148,7 @@ mod tests {
             "nxm://skyrimspecialedition/mods/-1/files/2",
             "file:///etc/passwd",
         ] {
-            let r = on_second_instance(&st.0, &sink, &argv(&["modman-desktop", "nxm", bad]));
+            let r = on_second_instance(&st.0, &sink, &argv(&["vessel-desktop", "nxm", bad]));
             assert!(r.unwrap().is_err(), "{bad}");
         }
         assert_eq!(rows(&st.0), 0);
@@ -164,7 +164,7 @@ mod tests {
         let st = AppState::new(Paths::for_home(home.path()));
         let sink = Recorder::default();
         let url = "nxm://skyrimspecialedition/mods/266/files/1000?key=SECRET&expires=9999999999&user_id=2";
-        let r = on_second_instance(&st.0, &sink, &argv(&["modman-desktop", "nxm", url]))
+        let r = on_second_instance(&st.0, &sink, &argv(&["vessel-desktop", "nxm", url]))
             .unwrap()
             .unwrap();
         assert_eq!(r.kind, "mod");

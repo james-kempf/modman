@@ -11,8 +11,8 @@ function demo() {
   const t = createDemoBackend();
   const prompts: PromptEvent[] = [];
   const jobs: JobEvent[] = [];
-  void t.listen<PromptEvent>("modman:prompt", (p) => prompts.push(p));
-  void t.listen<JobEvent>("modman:job", (j) => jobs.push(j));
+  void t.listen<PromptEvent>("vessel:prompt", (p) => prompts.push(p));
+  void t.listen<JobEvent>("vessel:job", (j) => jobs.push(j));
   const call = <T>(cmd: string, args?: Record<string, unknown>) => t.invoke<T>(cmd, args);
   const tick = () => new Promise((r) => setTimeout(r, 0));
   /** Answer the newest prompt. */
@@ -152,7 +152,7 @@ describe("demo backend", () => {
     const d = demo();
     const r = d.call("purge");
     await d.tick();
-    d.t.emit("modman:prompt-closed", { id: d.prompts[0].id });
+    d.t.emit("vessel:prompt-closed", { id: d.prompts[0].id });
     expect(await r).toBeNull();
     expect(d.jobs[d.jobs.length - 1]).toMatchObject({ kind: "purge", state: "finished" });
   });

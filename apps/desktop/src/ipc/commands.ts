@@ -2,8 +2,8 @@
 // Typed wrappers of every Tauri command (apps/desktop/src-tauri/src/commands.rs).
 // Arguments are snake_case. `game` is a Nexus domain; omitted/null = the
 // active game. Every command rejects with a `CmdError` ({ message }).
-// Long commands ("job") emit `modman:job` start/finish events, stream
-// `modman:activity` messages and may raise `modman:prompt` questions that
+// Long commands ("job") emit `vessel:job` start/finish events, stream
+// `vessel:activity` messages and may raise `vessel:prompt` questions that
 // must be answered with `promptAnswer`.
 
 import { transport } from "./transport";
@@ -262,13 +262,13 @@ export const install = (a: InstallArgs) =>
   });
 export const modFiles = (modId: number, game?: Game) =>
   call<FilesView>("mod_files", { game: game ?? null, mod_id: modId });
-/** Paste-link box: same intake as a link forwarded by `modman nxm`. */
+/** Paste-link box: same intake as a link forwarded by `vessel nxm`. */
 export const nxmSubmit = (url: string) => call<NxmReceived>("nxm_submit", { url });
 export const downloadsList = () => call<Download[]>("downloads_list");
 
 // ── deploy ──────────────────────────────────────────────────
 
-/** Job (progress: modman:deploy-progress). method: auto | hardlink | reflink | symlink | copy. */
+/** Job (progress: vessel:deploy-progress). method: auto | hardlink | reflink | symlink | copy. */
 export const deploy = (opts: { dryRun?: boolean; method?: string | null } = {}, game?: Game) =>
   call<DeployReport>("deploy", {
     game: game ?? null,
@@ -387,7 +387,7 @@ export const search = (query: string, game?: Game) =>
 
 export const autoupdateStatus = (runs?: number) =>
   call<AutoupdateStatus>("autoupdate_status", { runs: runs ?? null });
-/** Installs the systemd user timer (runs the `modman` CLI) and records the baseline. */
+/** Installs the systemd user timer (runs the `vessel` CLI) and records the baseline. */
 export const autoupdateEnable = () => call<AutoupdateStatus>("autoupdate_enable");
 /** false = it was not enabled. */
 export const autoupdateDisable = () => call<boolean>("autoupdate_disable");

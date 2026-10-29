@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=modman (Nexus Mods)
-Comment=Handle Nexus Mods "Mod manager download" links
-Exec=modman nxm %u
-Icon=applications-games
-Terminal=false
-NoDisplay=true
-MimeType=x-scheme-handler/nxm;x-scheme-handler/nxm-protocol;

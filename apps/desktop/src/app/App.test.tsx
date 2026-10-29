@@ -122,13 +122,13 @@ describe("job island", () => {
     const { renderApp, t } = await setup();
     renderApp();
     act(() => {
-      t.emit("modman:job", { id: 4, kind: "deploy", state: "started", error: null });
-      t.emit("modman:activity", { job: 4, msg: { level: "info", spans: [{ text: "Linking files", style: "plain" }] }, text: "Linking files" });
+      t.emit("vessel:job", { id: 4, kind: "deploy", state: "started", error: null });
+      t.emit("vessel:activity", { job: 4, msg: { level: "info", spans: [{ text: "Linking files", style: "plain" }] }, text: "Linking files" });
     });
     const island = await screen.findByRole("status", { name: "Current job" });
     expect(island).toHaveTextContent("Deploy");
     expect(island).toHaveTextContent("Linking files");
-    act(() => t.emit("modman:job", { id: 4, kind: "deploy", state: "failed", error: "disk full" }));
+    act(() => t.emit("vessel:job", { id: 4, kind: "deploy", state: "failed", error: "disk full" }));
     expect(screen.getByRole("status", { name: "Current job" })).toHaveTextContent("Failed: disk full");
   });
 });

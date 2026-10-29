@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! modman desktop backend (Tauri v2): command adapters over
-//! `modman_core::app`, core progress/messages as events, the nxm intake of
+//! vessel desktop backend (Tauri v2): command adapters over
+//! `vessel_core::app`, core progress/messages as events, the nxm intake of
 //! the single-instance D-Bus endpoint (spikes.md §5) and the one-time
 //! auto-update check at start. No HTTP server; no deep-link plugin.
 
+mod abort;
 pub mod commands;
 pub mod events;
 pub mod gui_ui;
@@ -19,8 +20,9 @@ use std::sync::Arc;
 
 use tauri::Manager;
 
-use modman_core::autoupdate::LiveHost;
-use modman_core::paths::Paths;
+use vessel_core::autoupdate::LiveHost;
+use vessel_core::migrate;
+use vessel_core::paths::Paths;
 
 use crate::events::Sink;
 use crate::state::AppState;
@@ -38,12 +40,27 @@ pub fn run() {
     let paths = match Paths::from_env() {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("modman: {e}");
+            eprintln!("vessel: {e}");
+            std::process::exit(1);
+        }
+    };
+    // Before logging and Store::open: both write into the migrated dirs. An
+    // abort (legacy app running, I/O error) stops here, before the window.
+    let migration = match migrate::run(&paths, &migrate::EnvSnapshot::capture()) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("vessel: {e}");
+            abort::show(&e.to_string());
             std::process::exit(1);
         }
     };
     logging::init(&paths.log_path());
-    tracing::info!("GUI start (modman {})", modman_core::VERSION);
+    tracing::info!("GUI start (vessel {})", vessel_core::VERSION);
+    // Buffered until logging is up (R12).
+    migration.emit();
+    for w in migration.user_messages() {
+        eprintln!("vessel: {w}");
+    }
     let state = AppState::new(paths);
     let own_argv: Vec<String> = std::env::args().collect();
 
@@ -53,7 +70,7 @@ pub fn run() {
             focus_main(app);
             let st = app.state::<AppState>();
             let sink: Arc<dyn Sink> = Arc::new(app.clone());
-            // Runs on the D-Bus thread; `modman nxm` waits for this reply,
+            // Runs on the D-Bus thread; `vessel nxm` waits for this reply,
             // so only parse + queue here (the worker installs).
             let _ = nxm::on_second_instance(&st.0, &*sink, &argv);
         }))
@@ -149,8 +166,8 @@ pub fn run() {
         ])
         .run(tauri::generate_context!());
     if let Err(e) = result {
-        tracing::error!("modman GUI stopped: {e}");
-        eprintln!("modman: {e}");
+        tracing::error!("vessel GUI stopped: {e}");
+        eprintln!("vessel: {e}");
         std::process::exit(1);
     }
 }

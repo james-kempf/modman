@@ -143,7 +143,7 @@ function Brand() {
         />
       </svg>
       <div className="leading-tight">
-        <div className="text-[15px] font-semibold tracking-tight text-zinc-50">modman</div>
+        <div className="text-[15px] font-semibold tracking-tight text-zinc-50">Vessel</div>
         <div className="font-mono text-[10.5px] text-dim">v{info.data?.version ?? (info.isError ? "?" : "…")}</div>
       </div>
     </div>

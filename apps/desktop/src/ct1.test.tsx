@@ -457,10 +457,10 @@ describe("CT1 D16/D17 job labels and cancellation", () => {
       },
     });
     act(() => {
-      t.emit("modman:job", { id: 7, kind: "game_add", state: "started", error: null });
+      t.emit("vessel:job", { id: 7, kind: "game_add", state: "started", error: null });
     });
     expect(await screen.findByRole("status", { name: "Current job" })).toHaveTextContent("Add game");
-    act(() => t.emit("modman:job", { id: 7, kind: "game_add", state: "failed", error: "FOMOD installer cancelled" }));
+    act(() => t.emit("vessel:job", { id: 7, kind: "game_add", state: "failed", error: "FOMOD installer cancelled" }));
     const island = screen.getByRole("status", { name: "Current job" });
     expect(island).toHaveTextContent("Cancelled");
     expect(island).not.toHaveTextContent("Failed");

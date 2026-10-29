@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Vessel (Nexus Mods)
+Comment=Handle Nexus Mods "Mod manager download" links
+Exec=vessel nxm %u
+Icon=applications-games
+Terminal=false
+NoDisplay=true
+MimeType=x-scheme-handler/nxm;x-scheme-handler/nxm-protocol;

@@ -43,7 +43,7 @@ jobs:
           cache-dependency-path: apps/desktop/package-lock.json
 
       # tauri::generate_context! embeds apps/desktop/dist, so the frontend
-      # must be built before any cargo command touches modman-desktop.
+      # must be built before any cargo command touches vessel-desktop.
       - name: Build frontend
         working-directory: apps/desktop
         run: |

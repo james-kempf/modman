@@ -1,0 +1,325 @@
+plan_id: 20261027-rebrand-vessel
+status: completed
+tldr: |
+  Rename modman to Vessel across crates, binaries, Tauri/bundle ids, IPC names, env vars, packaging,
+  UI and docs. All old names live in one legacy-constants module. On first launch, a resumable migration
+  runs while holding a lock and keeps a state marker. It aborts if a modman process is alive (deploy.lock
+  or D-Bus name). It stops the old timer, checkpoints the WAL, copies small state, renames bulk data
+  (EXDEV-safe via *.migrating), moves each library's staging dir, rewrites stored absolute paths (incl.
+  journal JSON) and retargets symlink deployments. It then carries over the keyring, systemd, nxm handler
+  and Steam shortcut (keeping the legacy appid). No commits.
+created_at: "2026-10-27"
+created_by: gem-planner
+revision: 2
+replan_count: 1
+planner_revision_used: true
+
+baseline:
+  objective: 'Rebrand the application from "modman" to "Vessel" (repo: /home/jkempf/Repositories/modman, branch rust-rewrite).'
+  acceptance_criteria:
+    - 'All user-facing text (window titles, UI strings, about/settings, README, docs) says Vessel; no remaining user-facing "modman"/"Modman".'
+    - 'Crate/package/binary names, app identifier (e.g. Tauri/bundle identifier if present), and config/data/cache directory paths renamed to Vessel equivalents (lowercase "vessel" where identifiers require).'
+    - 'On first launch, existing user data/config under old modman paths is migrated to the new vessel paths (move/copy once, idempotent, no data loss if new path already exists).'
+    - 'Project builds; existing tests pass; migration has a test.'
+  captured_at: "2026-10-27"
+
+replan:
+  reason: "Critic review blocked revision 1 on migration data-loss risks (findings R1-R14)."
+  changed_tasks: [T01, T02, T03, T04, T05, T06]
+  added_tasks: []
+  removed_tasks: []
+  revised_tasks: [T01, T02, T03, T04, T05, T06]
+  invalidated_tasks: []
+  invalidated_assumptions:
+    - "rev1: 'Env vars renamed with no fallback' (R5: MODMAN_DATA_DIR/MODMAN_CONFIG_DIR are now legacy migration sources)."
+    - "rev1: 'new path exists => conflict' (R3: conflict only when there is no migration marker)."
+    - "rev1: 'prefix rewrite of DB is sufficient' (R7: symlink deployments and deploy_journal_steps.detail JSON also embed absolute paths)."
+  preserved_acceptance_criteria:
+    - "All 4 baseline acceptance criteria unchanged."
+  new_risks:
+    - "Symlink deployments in game dirs point at absolute staging paths; moving staging without retargeting breaks deployed mods (R7)."
+    - "A Flatpak app-id rename changes the sandbox data root ~/.var/app/<id>."
+  progress_signal: "No tasks executed yet; plan revised before dispatch."
+
+decisions:
+  - "Naming table (shared_context.naming) is fixed at plan time so code, packaging and docs tasks need no coordination."
+  - "Identifier org.modman.app -> org.vessel.app (mirrors existing pattern); D-Bus single-instance name follows."
+  - "R10: T01 creates vessel-core/src/legacy.rs, the single home of every old name. T03/T04 import from it. The residual-grep allowlist points only at that file, the migration module/tests, and the README migration section."
+  - "Rename (W1) is separate from migration (W2/W3) so the high-risk data work does not share a retry blast radius with a 160-file rename."
+  - "Migration split: T03 = process safety + filesystem + SQLite + symlinks (data-loss surface). T04 = keyring/systemd-install/nxm/Steam shortcut. They run sequentially because both edit the migrate step list."
+  - "R1: stopping/disabling the old modman-autoupdate timer moves into T03 and runs before any FS move. T04 only removes the old unit files and installs the vessel units."
+  - "R1 step order (fixed): acquire locks -> D-Bus probe -> stop old timer -> wal_checkpoint(TRUNCATE) -> XDG dirs -> db/log rename -> per-library staging -> DB path rewrite -> symlink retarget -> integrations (T04) -> marker done."
+  - "Copy vs move: config dir, DB (+wal/shm after checkpoint) and log are COPIED (small). Bulk data (downloads, per-game data, staging) is moved by atomic rename. Old dirs stay until the marker records every step done, then the old XDG dirs are removed."
+  - "R2 EXDEV fallback for bulk: copy to sibling '<new>.migrating', verify (file count + size + sha256 of each file), atomic rename to <new>, then remove old. At startup a leftover *.migrating whose marker step is unfinished is deleted and the copy restarts. Old is never removed before verify."
+  - "R7 resolution, from code: deploy uses the chain hardlink -> reflink -> symlink -> copy (crates/modman-core/src/deploy.rs:9-11, Method enum :113). The method is recorded per file in deployments.method (migrations/0002_deploy.sql:29), with deployments.source as the absolute staged path. verify() requires read_link(game file) == deployments.source exactly (deploy/engine.rs:972-977). deploy_journal_steps.detail JSON also embeds 'source' (0002_deploy.sql:71). So symlink deployments break when staging moves. T03 retargets them: for each deployments row with method='symlink' whose game-side link currently reads the OLD source, atomically replace the link (temp symlink + rename) with the NEW source. Links whose target was changed by the user are skipped and reported. Hardlinks keep the game-side inode and pass verify (it checks the game file's inode). Reflinks and copies are independent of staging. On EXDEV the hardlink sharing is lost but the content stays valid; this is reported, not an error."
+  - "R5: MODMAN_DATA_DIR / MODMAN_CONFIG_DIR, when set, are the legacy SOURCE paths for migration. Any MODMAN_* variable set at startup gives a loud deprecation warning naming its VESSEL_* replacement. They are not honoured as runtime config after migration."
+  - "R6: if the session bus name org.modman.app.SingleInstance has an owner, or the old deploy.lock is held, the migration aborts before touching anything with 'Close modman before starting Vessel'. The process exits non-zero (CLI) or shows a blocking error (GUI), and no vessel dirs are created (no fresh state while legacy data is unmigrated)."
+  - "R12: MigrationReport is buffered in memory and emitted after logging init, because logging writes into the migrated state dir."
+  - "R14 (orchestrator clarification): the existing Steam shortcut keeps its legacy appid. Name and exe are updated in place so playtime and controller config survive. Only new installs use the vessel-derived appid. Art is untouched because the appid is unchanged."
+  - "Flatpak packaging exists (packaging/flatpak/org.modman.app.yml), so it is in scope: rename via X-Flatpak-RenamedFrom=org.modman.app.desktop plus metainfo <replaces>/<provides>. In-sandbox XDG dirs migrate via the same T03 code once Flatpak has carried ~/.var/app over (verified by T02)."
+  - "R11: docs (T05) run after T04 so the README describes the implemented behaviour; T06 also checks that the README matches the code."
+  - "Out of scope for rewording: legacy/ (reference-only bash tool + web UI) and docs/plan/** (historical records)."
+
+  - "R5 WITHDRAWN (T06 review, 2026-10-27): the HEAD Rust modman never read MODMAN_DATA_DIR/MODMAN_CONFIG_DIR; only the legacy bash tool did. Legacy sources are the XDG siblings only; those vars are reported as bash-tool-only and ignored."
+
+assumptions:
+  - "Linux XDG only (directories::ProjectDirs); no macOS/Windows paths."
+  - "Webview has no persisted storage (no localStorage/IndexedDB in apps/desktop/src), so the Tauri identifier change loses no webview data."
+  - "The deploy lock is a flock on <data>/deploy.lock (store.rs:204-228), so holding the OLD lock path blocks a concurrently running old modman deploy/purge."
+  - "zbus is an existing workspace dependency (used by vessel-cli); the D-Bus probe may use it from cli/desktop entry points or core without adding a new crate."
+  - "A user-customised 'data-dir' outside the old default stays in place; per-game data under it is not moved, and only paths under the old defaults/staging prefixes are rewritten."
+  - "git mv for renames is acceptable (stages, no commit)."
+
+shared_context:
+  naming:
+    - "Display name: Vessel (UI, window title, productName, docs, user-facing messages)."
+    - "Crates: modman-core -> vessel-core (lib vessel_core), modman-cli -> vessel-cli, modman-desktop -> vessel-desktop (lib vessel_desktop). Dirs: crates/vessel-core, crates/vessel-cli."
+    - "Binaries: modman -> vessel, modman-desktop -> vessel-desktop. npm package name -> vessel-desktop."
+    - "Identifier: org.vessel.app; D-Bus SINGLE_INSTANCE_BUS org.vessel.app.SingleInstance, path /org/vessel/app/SingleInstance."
+    - "XDG: ~/.config/vessel, ~/.local/share/vessel, ~/.local/state/vessel; files vessel.db, vessel.log; ProjectDirs::from(\"\", \"\", \"vessel\")."
+    - "Per-library staging: <lib>/.vessel/staging (old <lib>/.modman/staging, deploy.rs:228)."
+    - "Keyring KEYRING_SERVICE vessel (keystore.rs:23). systemd UNIT vessel-autoupdate (autoupdate.rs:39 + Description strings in autoupdate/units.rs)."
+    - "NXM_DESKTOP_FILE vessel-nxm.desktop (ipc.rs:21; cli commands/nxm.rs register/unregister)."
+    - "Steam shortcut APP_NAME Vessel (app/shortcut.rs:17). Lookup accepts legacy::STEAM_APP_NAME; appid of an existing legacy entry is preserved."
+    - "Tauri events 'vessel:*' (apps/desktop/src/ipc/events.ts, nav/actions.ts BACK_EVENT, src-tauri/src/events.rs)."
+    - "Env vars VESSEL_* replace MODMAN_* (DATA_DIR, CONFIG_DIR, NO_COLOR, VERSION, DEBUG, LOOT_URL, TOKEN__, SYSTEMCTL, NXM_TIMEOUT, NXM_HEADLESS, NEXUS_URL, SANDBOX_ROOT, ART_PROBE_*)."
+    - "Temp/backup suffixes .vessel.tmp, .vessel-tmp, vdf.vessel-bak; user agent vessel/<ver>."
+    - "Packaging: packaging/common/{org.vessel.app.desktop, org.vessel.app.metainfo.xml, vessel-nxm.desktop}, packaging/flatpak/org.vessel.app.yml, packaging/rpm/vessel.spec, AUR pkgname vessel."
+    - "legacy.rs (T01) constants: LEGACY_APP_DIR='modman' (XDG leaf), LEGACY_DB_FILE='modman.db', LEGACY_LOG_FILE='modman.log', LEGACY_KEYRING_SERVICE='modman', LEGACY_UNIT='modman-autoupdate', LEGACY_NXM_DESKTOP_FILE='modman-nxm.desktop', LEGACY_STEAM_APP_NAME='modman', LEGACY_STAGING_DIR='.modman/staging', LEGACY_DBUS_NAME='org.modman.app.SingleInstance', LEGACY_ENV_PREFIX='MODMAN_', LEGACY_APP_ID='org.modman.app'. paths::LEGACY_CONFIG_DIR (bash v3) stays where it is."
+    - "Residual-grep gate: `grep -rIi modman --exclude-dir={.git,target,node_modules,legacy,plan} .` returns hits only in crates/vessel-core/src/legacy.rs, crates/vessel-core/src/migrate*/** (incl. tests), packaging rename metadata (Conflicts/Replaces/Obsoletes/RenamedFrom/<replaces>), and the README 'Migrating from modman' section."
+  migration:
+    - "Entry points: crates/vessel-cli/src/main.rs (~:86) and apps/desktop/src-tauri/src/lib.rs (~:38) call Paths::from_env(); migrate::run goes right after, before logging init and Store::open; report emitted after logging init (R12)."
+    - "Old locations: ~/.config/modman (or $MODMAN_CONFIG_DIR), ~/.local/share/modman (or $MODMAN_DATA_DIR) with modman.db(+-wal/-shm), deploy.lock, downloads, per-game <domain>/ dirs; ~/.local/state/modman/modman.log; <lib>/.modman/staging/<domain>."
+    - "Absolute-path columns: mods.archive, mods.staging_dir (0001); backups.store_path, deployments.source (0002); downloads dest_path, part_path (0003); collections.dir (0004); deploy_journal_steps.detail JSON 'source' and other path fields (0002:71); settings 'data-dir' (config.rs ConfigKey::DataDir)."
+    - "Deploy methods: hardlink|reflink|symlink|copy recorded in deployments.method; verify() compares symlink target to deployments.source exactly (deploy/engine.rs:972-977)."
+    - "Marker: <new config dir>/migration.json {version, steps:{name: done|pending|conflict}, libraries:{path: done|offline|conflict}, started_at, finished_at}, written atomically (temp + rename) after each step."
+    - "Locks: old <old data>/deploy.lock (flock, store.rs:204-228) + new <new data parent>/vessel-migration.lock, held for the whole run."
+
+tasks:
+  - id: T01
+    title: Mechanical rename + legacy-constants module
+    description: |
+      Rung: reuse (rename only). Apply shared_context.naming to all Rust crates, the Tauri app, the React
+      frontend, the Cargo workspace, tauri.conf.json, index.html, package.json/package-lock name fields, env
+      var names, temp suffixes, user agent and user-facing messages (App.tsx brand label, Collections.tsx,
+      Settings.tsx, CLI error hints such as "run 'vessel deploy'"). Rename the crate dirs. Create
+      crates/vessel-core/src/legacy.rs with every constant in the naming 'legacy.rs' entry (R10), each with
+      a doc comment, and nothing else. No migration logic.
+    wave: 1
+    depends_on: []
+    agent: gem-implementer
+    status: completed
+    retries_used: 0
+    context_cluster: naming
+    acceptance_criteria:
+      - "crates/vessel-core and crates/vessel-cli exist and crates/modman-* do not; workspace members, default-members and workspace.dependencies use vessel-core."
+      - "crates/vessel-core/src/legacy.rs exists, is pub mod in lib.rs and defines every constant listed in shared_context.naming; no other file under crates/ or apps/ contains a 'modman' string literal."
+      - "cargo build and cargo test (default members) pass; Cargo.lock regenerated with vessel-* names."
+      - "`cargo check -p vessel-desktop` passes, or the exact WebKitGTK error is documented as an environment skip."
+      - "apps/desktop: `npm test` and `npm run build` pass."
+      - "tauri.conf.json: productName Vessel, identifier org.vessel.app, window title Vessel, bundle paths use vessel names."
+      - "Paths::for_home/from_env give ~/.config/vessel, ~/.local/share/vessel/vessel.db and ~/.local/state/vessel/vessel.log; paths.rs tests updated."
+      - "The residual-grep gate over crates/ and apps/ has hits only in legacy.rs and paths::LEGACY_CONFIG_DIR."
+    handoff:
+      constraints:
+        - "Do not commit; git mv allowed."
+        - "Do not touch legacy/, docs/plan/, packaging/ or .github/ (T02)."
+        - "Keep paths::LEGACY_CONFIG_DIR (bash v3) unchanged; reword its comment to 'legacy bash tool (modman v3)'."
+        - "No behaviour change beyond names."
+      high_risk_signals: [breaking_change]
+      critic_signals: [breaking_change]
+
+  - id: T02
+    title: Rename packaging, desktop entries, metainfo, Flatpak and CI with upgrade metadata
+    description: |
+      Rung: reuse. Apply shared_context.naming to packaging/ (appimage, AUR PKGBUILD, common/*.desktop +
+      metainfo, flatpak manifest, rpm spec) and .github/workflows/ci.yml, and rename the files. Add upgrade
+      metadata (R9): AUR conflicts=('modman') replaces=('modman') provides=('modman'); RPM
+      'Obsoletes: modman < %{version}-%{release}' + 'Provides: modman = %{version}-%{release}'; metainfo
+      <replaces><id>org.modman.app</id></replaces> + <provides><id>org.modman.app</id></provides>. Flatpak:
+      app-id org.vessel.app; X-Flatpak-RenamedFrom=org.modman.app.desktop; in the desktop file, nxm desktop
+      file installed as org.vessel.app.nxm.desktop. Verify from Flatpak docs how a RenamedFrom rename treats
+      ~/.var/app/org.modman.app and record the finding in packaging/README.md for T03/T05.
+    wave: 1
+    depends_on: []
+    agent: gem-devops
+    status: completed
+    retries_used: 0
+    acceptance_criteria:
+      - "Under packaging/ and .github/, 'modman' appears only in rename metadata (conflicts/replaces/provides, Obsoletes/Provides, <replaces>/<provides>, X-Flatpak-RenamedFrom) and the packaging/README.md upgrade note."
+      - "File names match the naming table; tauri.conf.json bundle paths (T01) resolve to existing files."
+      - "`desktop-file-validate` on packaging/common/*.desktop and `appstreamcli validate --no-net` on the metainfo pass (or tool absence is documented)."
+      - "PKGBUILD parses (`bash -n`) and has conflicts/replaces/provides=modman; rpm spec has Obsoletes/Provides for modman (`rpmspec -P` if available)."
+      - "packaging/README.md states, with a doc link, whether Flatpak moves ~/.var/app/org.modman.app on RenamedFrom; if it does not, it says so and T03 lists ~/.var/app/org.modman.app/{config,data,.local/state}/modman as an extra legacy source."
+      - "ci.yml uses vessel-* package names; YAML parses."
+    handoff:
+      constraints:
+        - "Do not commit. Only edit packaging/ and .github/."
+        - "Do not run release builds or publish."
+      relevant_context:
+        - "Naming table: plan.yaml shared_context.naming. Flatpak nxm export: packaging/flatpak/org.modman.app.yml:73-76."
+      high_risk_signals: [breaking_change]
+
+  - id: T03
+    title: Resumable, locked first-launch migration of dirs, DB, staging and symlink deployments
+    description: |
+      Rung: new code (nothing in std or the platform does app-specific state migration). Add the vessel-core
+      module `migrate` with `pub fn run(paths: &Paths, env: &EnvSnapshot) -> Result<MigrationReport, MigrateError>`
+      and an ordered step list that T04 extends. Use only legacy.rs names. Order (R1), each step recorded in
+      the marker (R3):
+       1) Detect legacy sources: default XDG dirs only (R5 withdrawn, see decisions R5 WITHDRAWN);
+          warn for every MODMAN_* var set. No sources and no marker -> no-op, create nothing.
+       2) Locks: take vessel-migration.lock and the OLD deploy.lock (flock, non-blocking) for the whole run;
+          probe the D-Bus name legacy::LEGACY_DBUS_NAME (R6). If busy or owned, abort with "Close modman before
+          starting Vessel" and create no vessel dirs.
+       3) Stop and disable the old timer (`systemctl --user disable --now modman-autoupdate.timer` via the
+          existing systemctl seam, VESSEL_SYSTEMCTL). Leave the unit files for T04.
+       4) Open the old DB and run PRAGMA wal_checkpoint(TRUNCATE), then close it.
+       5) Config dir, DB file and log: copy to the new dirs (copy-not-move), verify by sha256, rename the DB to
+          vessel.db and the log to vessel.log.
+       6) Bulk data (downloads, per-game dirs): atomic rename old->new per entry. On EXDEV, copy to
+          '<new>.migrating', verify, rename, then remove old (R2). A leftover *.migrating with its step not done
+          is deleted and redone.
+       7) Per-library staging (R4): for each library from games.folder/Steam libraries, rename
+          '<lib>/.modman/staging' to '<lib>/.vessel/staging'. An unreachable library is marked 'offline'; an
+          existing target with no marker entry is marked 'conflict'. Both are retried on later runs.
+       8) DB rewrite in ONE transaction on vessel.db: replace the exact prefixes '<old data>/' -> '<new data>/'
+          and, only for libraries marked done, '<lib>/.modman/staging/' -> '<lib>/.vessel/staging/', in every
+          column listed in shared_context.migration, incl. deploy_journal_steps.detail JSON (parse and rewrite
+          the path fields, do not string-replace JSON). The 'data-dir' setting changes only if it equals the old
+          default.
+       9) Symlink retarget (R7): for deployments rows with method='symlink' whose source was rewritten, if the
+          game-side read_link equals the OLD source, replace it atomically (temp symlink + rename) with the NEW
+          source; otherwise skip and report.
+      10) After all steps (incl. T04's) are done: remove the old XDG dirs, set the marker to finished, release
+          the locks.
+      Conflict rule (R3): an existing vessel path counts as a conflict only when there is no marker. Then
+      nothing is moved, the old data stays intact and the report says so. With a marker, resume from the
+      first unfinished step. Wire it into the CLI main.rs and desktop lib.rs before logging/Store::open, and
+      emit the buffered report after logging init (R12). An abort is a user-visible error: CLI non-zero exit,
+      GUI blocking dialog/stderr before the window.
+    wave: 2
+    depends_on: [T01]
+    agent: gem-implementer
+    status: completed
+    retries_used: 0
+    context_cluster: migration
+    acceptance_criteria:
+      - "Test (happy path): a legacy layout (config, modman.db in WAL mode, modman.log, downloads, per-game dir, per-library .modman/staging, symlink + hardlink + copy deployments, journal detail JSON) migrates. Every listed DB path column and the detail JSON point at the new paths, symlinks resolve to the new staging, verify() reports all intact, and files are byte-identical."
+      - "Test: a second run is a no-op (nothing moved, DB unchanged, marker finished)."
+      - "Test: a vessel dir already present with no marker -> old data untouched, nothing overwritten, conflict reported."
+      - "Test: fresh install (no legacy sources) -> no dirs and no marker created."
+      - "Test (R8): a crash injected after each step (fault-injection hook) followed by a rerun converges to the happy-path end state."
+      - "Test (R8): a partial EXDEV copy (simulated via a test seam) leaves a *.migrating dir; the next run deletes it, redoes the copy and keeps the old dir intact until verify passes."
+      - "Test (R8): the old deploy.lock held by another fd -> abort error, no vessel dirs and no marker created."
+      - "Test (R8): rows written to the old DB and present only in -wal before migration survive in vessel.db."
+      - "Test (R8): an offline library (path missing on run 1) is marked offline, its staging prefix is not rewritten, and run 2 with the library present migrates it and rewrites its rows."
+      - "Test (R8, R5 withdrawn): MODMAN_DATA_DIR pointing at a bash-tool dir is NOT a source; that dir is untouched and a bash-tool-only warning appears."
+      - "Test: a custom data-dir setting outside the old default is preserved."
+      - "Test: a forced failure inside the DB rewrite leaves vessel.db unchanged (single transaction)."
+      - "Test: a symlink whose target the user changed is not retargeted and is reported."
+      - "D-Bus probe: unit-tested via an injectable probe trait (owned -> abort message)."
+      - "The report is emitted only after logging init (asserted in a test or by code-structure review); cargo test passes; cargo check -p vessel-desktop passes or the skip is documented."
+    handoff:
+      constraints:
+        - "Never delete old data before a verified copy/rename; never overwrite an existing vessel path without a marker."
+        - "Only existing workspace deps (std, rusqlite, walkdir, rustix, sha2, serde_json, zbus); no new crates."
+        - "All old names come from legacy.rs. Do not commit."
+      relevant_context:
+        - "store.rs:204-228 flock deploy lock; deploy.rs:9-11,113-135,228; deploy/engine.rs:942-1000 verify(); migrations/0001-0005.sql; config.rs ConfigKey::DataDir; app/actions.rs SYSTEMCTL_ENV; autoupdate.rs UNIT."
+      high_risk_signals: [migration, breaking_change, data_flow_change]
+      critic_signals: [breaking_change]
+
+  - id: T04
+    title: Migrate external integrations (keyring, systemd units, nxm handler, Steam shortcut)
+    description: |
+      Rung: new code that reuses the existing install/register functions. Add steps to the T03 step list,
+      run before T03 step 10, each recorded in the marker, non-fatal on failure (reported, retried next run):
+      - Keyring: if 'vessel' has no secret and legacy 'modman' has one, copy it, read back, then delete the old one.
+      - systemd: the old timer was already stopped by T03 step 3. Remove the old modman-autoupdate.{service,timer}
+        files, daemon-reload, and install the vessel-autoupdate units with the interval parsed from the old timer
+        via the existing install path. If the old timer was enabled, enable the new one.
+      - nxm (R13): if the user-level legacy modman-nxm.desktop exists, remove it and register vessel-nxm.desktop.
+        Change the mimeapps.list default for x-scheme-handler/nxm ONLY if it currently equals modman-nxm.desktop.
+        Move the needed helpers from cli commands/nxm.rs into core if the GUI path needs them.
+      - Steam shortcut (R14): lookup matches AppName 'Vessel' or legacy::LEGACY_STEAM_APP_NAME. A legacy entry
+        keeps its appid; update AppName and Exe/StartDir in place, back up shortcuts.vdf first (existing
+        safety checks). Art stays as is (appid unchanged). Only a new shortcut uses the vessel-derived appid;
+        never create a duplicate.
+    wave: 3
+    depends_on: [T03]
+    agent: gem-implementer
+    status: completed
+    retries_used: 0
+    context_cluster: migration
+    acceptance_criteria:
+      - "Test (mock keyring store): secret moves modman->vessel; an existing vessel secret is never overwritten; the old secret is deleted only after a successful read-back."
+      - "Test (fake systemctl via VESSEL_SYSTEMCTL): old unit files removed, new units installed with the same interval, enabled only if the old timer was; no-op when there were no old units."
+      - "Test (temp XDG_CONFIG_HOME/XDG_DATA_HOME): legacy nxm registration replaced; a mimeapps default of another handler (e.g. some-other.desktop) is left unchanged; no-op when not registered."
+      - "Test: shortcuts.vdf with a legacy 'modman' entry -> one 'Vessel' entry with the SAME appid and the new exe; art files untouched; second run no-op; the add-shortcut action creates no duplicate; a fresh add uses the vessel-derived appid."
+      - "Every step is idempotent and recorded in the marker; a failure is reported and launch continues; cargo test passes."
+    handoff:
+      constraints:
+        - "Tests must not touch the real keyring, systemd or Steam; use VESSEL_SYSTEMCTL, VESSEL_SANDBOX_ROOT and temp homes."
+        - "Keep existing shortcut.rs safety checks (Steam running, backup). Old names only via legacy.rs. Do not commit."
+      relevant_context:
+        - "keystore.rs:23; autoupdate.rs:39 + autoupdate/units.rs; app/actions.rs:17,44; cli commands/nxm.rs:68-266; app/shortcut.rs:17,151,158,283; app/art.rs."
+      high_risk_signals: [migration, breaking_change]
+      critic_signals: [breaking_change]
+
+  - id: T05
+    title: Rebrand README and top-level docs; document migration as implemented
+    description: |
+      Rung: reuse (edit existing docs). Update README.md, packaging/README.md content (keep T02's upgrade
+      note), linux_mod_manager_tech_stack.md and feature_parity_checklist.md to Vessel names. Add a
+      'Migrating from modman' section to README, written from the T03/T04 code: what moves vs copies, step
+      order, abort when modman is running, marker/resume, conflict rule, offline libraries, symlink retarget,
+      keyring/systemd/nxm/Steam shortcut (appid kept), Flatpak note from T02, and MODMAN_* -> VESSEL_* (legacy
+      DATA_DIR/CONFIG_DIR used only as migration sources, deprecation warning).
+    wave: 4
+    depends_on: [T02, T04]
+    agent: gem-documentation-writer
+    status: completed
+    retries_used: 0
+    acceptance_criteria:
+      - "README.md title is '# Vessel' and cargo commands use -p vessel-cli; 'modman' appears only in the migration section."
+      - "linux_mod_manager_tech_stack.md and feature_parity_checklist.md have no 'modman' except explicit references to the legacy bash tool."
+      - "Every claim in the migration section cites behaviour present in crates/vessel-core/src/migrate* (step order, conflict rule, env var handling, appid kept)."
+    handoff:
+      constraints:
+        - "Do not edit docs/plan/** or legacy/**. Do not commit."
+      relevant_context:
+        - "plan.yaml shared_context.naming and decisions; crates/vessel-core/src/migrate*; packaging/README.md Flatpak finding."
+
+  - id: T06
+    title: Critic review of rename + migration and final verification gates
+    description: Independent review of data-loss and breaking-change risk in T03/T04, the docs/code match, and the whole-tree gates.
+    wave: 5
+    depends_on: [T01, T02, T03, T04, T05]
+    agent: gem-reviewer
+    status: completed
+    retries_used: 0
+    acceptance_criteria:
+      - "cargo build, cargo test and cargo clippy --all-targets (default members) pass; npm test and npm run build in apps/desktop pass; cargo check -p vessel-desktop passes or the environment skip is documented."
+      - "The residual-grep gate shows hits only in allowlisted locations (legacy.rs, migrate*, packaging rename metadata, README migration section); each hit is listed."
+      - "Migration checked against R1-R14: step order, lock + D-Bus abort with no vessel state created, WAL checkpoint, *.migrating handling, marker resume, per-library exact-prefix rewrite, journal JSON rewrite, symlink retarget, conditional mimeapps change, Steam appid kept, report after logging init."
+      - "README migration section matches the implemented behaviour (R11)."
+      - "Findings returned as a fixable list with file:line; status needs_revision if any data-loss path exists."
+    handoff:
+      constraints:
+        - "Review only; do not modify code. Do not commit."
+      high_risk_signals: [migration, breaking_change]
+      critic_signals: [breaking_change]
+
+  - id: T07
+    title: Reusable rebrand script (user request, added after T06)
+    description: |
+      Script that repeats the mechanical rename for any future old->new name pair, parameterised
+      (old/new display name, lowercase id, reverse-DNS app id). Covers crate/dir/file renames (git mv),
+      content replacement with case variants, packaging upgrade metadata, and updating legacy.rs to the
+      outgoing names so the existing migration engine migrates from them. Dry-run by default.
+    wave: 6
+    depends_on: [T06]
+    agent: gem-devops
+    status: completed
+    retries_used: 0

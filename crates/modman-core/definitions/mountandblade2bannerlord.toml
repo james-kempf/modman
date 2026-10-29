@@ -1,9 +1,0 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-# Ported from legacy/modman game_preset (L269-300).
-domain = "mountandblade2bannerlord"
-name = "Mount & Blade II: Bannerlord"
-steam_appid = 261550
-subdir = "Modules"
-target = "game_dir"
-profile = "bannerlord"
-support = "experimental"

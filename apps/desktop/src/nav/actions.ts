@@ -12,7 +12,7 @@ export type NavAction =
   | { type: "tab"; delta: 1 | -1 };
 
 /** Dispatched on the topmost nav scope (a dialog) for "back"; dialogs close on it. */
-export const BACK_EVENT = "modman:back";
+export const BACK_EVENT = "vessel:back";
 
 export function focusCurrentTab(doc: Document = document): void {
   doc.querySelector<HTMLElement>("[data-tab][aria-current='page']")?.focus();

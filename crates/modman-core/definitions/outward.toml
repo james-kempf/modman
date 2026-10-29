@@ -1,9 +1,0 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-# Ported from legacy/modman game_preset (L269-300).
-domain = "outward"
-name = "Outward"
-steam_appid = 794260
-subdir = "."
-target = "game_dir"
-profile = "bepinex"
-support = "experimental"

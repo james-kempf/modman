@@ -12,8 +12,8 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use modman_core::fomod::{GroupType, PluginType};
-use modman_core::nexus::FileInfo;
+use vessel_core::fomod::{GroupType, PluginType};
+use vessel_core::nexus::FileInfo;
 
 use crate::events::{self, Sink};
 

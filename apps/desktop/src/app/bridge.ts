@@ -19,22 +19,22 @@ export function startBridge(qc: QueryClient): Promise<ReadyInfo | null> {
   const ui = useUi.getState();
   started = (async () => {
     unlisteners = await Promise.all([
-      on("modman:activity", (e) => ui.onActivity(e)),
-      on("modman:job", (e) => {
+      on("vessel:activity", (e) => ui.onActivity(e)),
+      on("vessel:job", (e) => {
         ui.onJob(e);
         // Any job may change mods, games, deploy state or downloads.
         if (e.state !== "started") void refreshAll(qc);
       }),
-      on("modman:prompt", (e) => ui.onPrompt(e)),
-      on("modman:prompt-closed", (e) => ui.dropPrompt(e.id)),
-      on("modman:download", (e) => ui.onDownload(e.job, e.name, e.event)),
-      on("modman:deploy-progress", (e) => ui.onDeployProgress(e)),
-      on("modman:nxm", (e) => {
+      on("vessel:prompt", (e) => ui.onPrompt(e)),
+      on("vessel:prompt-closed", (e) => ui.dropPrompt(e.id)),
+      on("vessel:download", (e) => ui.onDownload(e.job, e.name, e.event)),
+      on("vessel:deploy-progress", (e) => ui.onDeployProgress(e)),
+      on("vessel:nxm", (e) => {
         ui.onNxm(e);
         if (e.status === "rejected") ui.notify("error", `nxm link rejected: ${e.error ?? "unknown"}`);
         void qc.invalidateQueries({ queryKey: ["downloads"] });
       }),
-      on("modman:startup-check", (c) => ui.setStartupCheck(c)),
+      on("vessel:startup-check", (c) => ui.setStartupCheck(c)),
     ]);
     try {
       const info = await appReady();

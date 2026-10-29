@@ -1,9 +1,0 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-# Ported from legacy/modman game_preset (L269-300).
-domain = "monsterhunterwilds"
-name = "Monster Hunter Wilds"
-steam_appid = 2246340
-subdir = "."
-target = "game_dir"
-profile = "generic"
-support = "experimental"

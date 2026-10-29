@@ -5,26 +5,26 @@
 
 use serde::Serialize;
 
-use modman_core::app::Msg;
-use modman_core::download::DownloadEvent;
+use vessel_core::app::Msg;
+use vessel_core::download::DownloadEvent;
 
 /// A core message shown in the activity log.
-pub const ACTIVITY: &str = "modman:activity";
+pub const ACTIVITY: &str = "vessel:activity";
 /// A job started, finished or failed.
-pub const JOB: &str = "modman:job";
+pub const JOB: &str = "vessel:job";
 /// A question for the user; answer with the `prompt_answer` command.
-pub const PROMPT: &str = "modman:prompt";
+pub const PROMPT: &str = "vessel:prompt";
 /// A pending prompt was withdrawn (job ended, window closing).
-pub const PROMPT_CLOSED: &str = "modman:prompt-closed";
+pub const PROMPT_CLOSED: &str = "vessel:prompt-closed";
 /// Download progress.
-pub const DOWNLOAD: &str = "modman:download";
+pub const DOWNLOAD: &str = "vessel:download";
 /// Deploy/purge progress (files done of total).
-pub const DEPLOY_PROGRESS: &str = "modman:deploy-progress";
+pub const DEPLOY_PROGRESS: &str = "vessel:deploy-progress";
 /// An nxm:// link from another instance or the paste box was accepted or
 /// rejected.
-pub const NXM: &str = "modman:nxm";
+pub const NXM: &str = "vessel:nxm";
 /// Result of the one-time auto-update check at start.
-pub const STARTUP_CHECK: &str = "modman:startup-check";
+pub const STARTUP_CHECK: &str = "vessel:startup-check";
 
 /// Where events go: the app handle, or a recorder in tests.
 pub trait Sink: Send + Sync {

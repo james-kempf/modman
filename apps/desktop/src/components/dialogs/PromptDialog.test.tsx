@@ -13,7 +13,7 @@ async function ask(prompt: Prompt) {
   const env = await setup();
   env.renderIn(<PromptHost />);
   const id = ++next;
-  act(() => env.t.emit("modman:prompt", { id, job: 1, prompt }));
+  act(() => env.t.emit("vessel:prompt", { id, job: 1, prompt }));
   await screen.findByRole("dialog");
   return { ...env, id, user: userEvent.setup() };
 }
@@ -134,7 +134,7 @@ describe("prompt dialogs answer via prompt_answer", () => {
     await user.click(screen.getByRole("button", { name: "Next" }));
     await gone();
     act(() =>
-      t.emit("modman:prompt", {
+      t.emit("vessel:prompt", {
         id: 999,
         job: 1,
         prompt: {
@@ -162,16 +162,16 @@ describe("prompt dialogs answer via prompt_answer", () => {
     await gone();
   });
 
-  it("modman:prompt-closed dismisses without answering", async () => {
+  it("vessel:prompt-closed dismisses without answering", async () => {
     const { t, id } = await ask({ type: "confirm", question: "Still there?", default_yes: true });
-    act(() => t.emit("modman:prompt-closed", { id }));
+    act(() => t.emit("vessel:prompt-closed", { id }));
     await gone();
     expect(t.callsOf("prompt_answer")).toHaveLength(0);
   });
 
   it("queues prompts and shows them in order", async () => {
     const { t, user } = await ask({ type: "confirm", question: "First?", default_yes: true });
-    act(() => t.emit("modman:prompt", { id: 5000, job: 2, prompt: { type: "confirm", question: "Second?", default_yes: true } }));
+    act(() => t.emit("vessel:prompt", { id: 5000, job: 2, prompt: { type: "confirm", question: "Second?", default_yes: true } }));
     expect(screen.getByText("First?")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Yes" }));
     expect(await screen.findByText("Second?")).toBeInTheDocument();

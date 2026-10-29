@@ -28,7 +28,7 @@ export function demoPoisoned(): PoisonedBackup[] {
     class: cls,
     reason:
       cls === "confirmed"
-        ? "modman placed this path before the backup was taken"
+        ? "Vessel placed this path before the backup was taken"
         : "no deploy record before the backup; the bytes match a mod file",
     mods: ["mod-1"],
     deployed: false,
@@ -96,7 +96,7 @@ export function repairHandlers(h: RepairHost, seed: Record<string, PoisonedBacku
           })),
         });
         h.say(id, `Quarantined ${take.length} backup(s) as ${qid}.`);
-        return { id: qid, dir: `~/.local/share/modman/${h.domain(a)}/quarantine/${qid}`, backups: take.length, game_files: 0, skipped_ambiguous: skipped };
+        return { id: qid, dir: `~/.local/share/vessel/${h.domain(a)}/quarantine/${qid}`, backups: take.length, game_files: 0, skipped_ambiguous: skipped };
       }),
     quarantines_list: (a: Args) => qs(a).map((q) => ({ ...q, items: q.items.map((i) => ({ ...i })) })),
     quarantine_restore: (a: Args) =>
@@ -119,9 +119,9 @@ export function repairHandlers(h: RepairHost, seed: Record<string, PoisonedBacku
         if (confirmed > 0 && a?.ignore_poisoned !== true)
           throw {
             message:
-              `Restage blocked: ${confirmed} held backup(s) are mod files modman placed, not game originals, ` +
+              `Restage blocked: ${confirmed} held backup(s) are mod files Vessel placed, not game originals, ` +
               "so a purge would put mod files back. Review and quarantine them first: " +
-              "modman deploy clean-backups (then --apply), or pass --ignore-poisoned.",
+              "vessel deploy clean-backups (then --apply), or pass --ignore-poisoned.",
           };
         const d = h.domain(a);
         const done = restaged.get(d) ?? new Set<number>();
@@ -135,7 +135,7 @@ export function repairHandlers(h: RepairHost, seed: Record<string, PoisonedBacku
           restaged: pick.map((m) => ({ id: m.id, uid: m.uid, files: 4, carried: [], backed_up: [] })),
           no_archive: [],
           failed: [],
-          backup_dir: pick.length ? `~/.local/share/modman/${d}/restage-backup` : null,
+          backup_dir: pick.length ? `~/.local/share/vessel/${d}/restage-backup` : null,
           poisoned_confirmed: confirmed,
           poisoned_ambiguous: all.length - confirmed,
         };

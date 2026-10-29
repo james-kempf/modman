@@ -1,10 +1,10 @@
-# Tech Stack: Linux Mod Manager (modman rewrite)
+# Tech Stack: Vessel (Linux mod manager, Rust rewrite)
 
 ## 1. Decisions
 
 | Area | Decision |
 | :--- | :--- |
-| Relationship to existing code | Full rewrite. The bash `modman` (v3.2.0) and the Python/Vite web UI are replaced. They stay in the repo as the behavioural reference until the feature-parity checklist (§9) is complete. |
+| Relationship to existing code | Full rewrite. The legacy bash tool (`modman` v3.2.0) and its Python/Vite web UI are replaced. They stay in the repo as the behavioural reference until the feature-parity checklist (§9) is complete. |
 | Language / core | Rust, in a Cargo workspace |
 | GUI | Tauri v2 + React + Vite + TypeScript |
 | CLI | Rust + clap, built on the same core crate |
@@ -27,14 +27,14 @@
 ```
 +------------------------------------------------------------+
 |                        USER INTERFACE                      |
-|   [ CLI: modman ]            [ GUI: Tauri v2 + React ]     |
+|   [ CLI: vessel ]            [ GUI: Tauri v2 + React ]     |
 |    clap, same binary name     Vite, TS, Tailwind           |
 |                               Gamepad API + spatial nav    |
 +-----------------------+------------------------------------+
                         |  Rust function calls / tauri::command (IPC)
                         v
 +------------------------------------------------------------+
-|                  modman-core  (library crate)              |
+|                  vessel-core  (library crate)              |
 |  games     Steam library + appmanifest (.acf) detection    |
 |  nexus     REST v1 + GraphQL v2 client, auth, rate limits  |
 |  download  resumable downloads, nxm:// intake queue        |
@@ -52,21 +52,21 @@ The core has no UI dependencies and does no printing. It exposes typed functions
 ### Workspace layout
 
 ```
-modman/
+vessel/
   Cargo.toml                 # workspace
   crates/
-    modman-core/             # all logic, no UI
-    modman-cli/              # clap binary -> `modman`
+    vessel-core/             # all logic, no UI
+    vessel-cli/              # clap binary -> `vessel`
   apps/
     desktop/                 # Tauri v2 app (src-tauri + React/Vite frontend)
   packaging/                 # AppImage, Flatpak manifest, PKGBUILD, rpm spec, deb
-  legacy/                    # old bash modman + web UI, kept as reference
+  legacy/                    # legacy bash tool + web UI, kept as reference
 ```
 
 ### Process model
 - The GUI runs the core in-process. The CLI runs it in its own process.
-- Both open the same SQLite database. Use WAL mode and a lock file for deploy and purge, so a CLI deploy cannot race a GUI deploy (replaces the current `modman.lock`).
-- The GUI must also be able to run headless commands. For example, `modman nxm <url>` hands the link to a running GUI instance when one exists, otherwise it enqueues the download.
+- Both open the same SQLite database. Use WAL mode and a lock file for deploy and purge, so a CLI deploy cannot race a GUI deploy (replaces the legacy bash tool's global lock file).
+- The GUI must also be able to run headless commands. For example, `vessel nxm <url>` hands the link to a running GUI instance when one exists, otherwise it enqueues the download.
 
 ---
 
@@ -94,7 +94,7 @@ modman/
 ### 4.1 Deployment engine
 - **Default: hardlinks.** Fast, no extra disk, and purge restores the game exactly.
 - **Constraint:** a hardlink needs staging and the game on the same filesystem. On Steam Deck the game may live on the SD card while `$HOME` is on internal storage.
-  - Staging therefore lives **per Steam library**, for example `<library>/.modman/staging/`, not in a single global directory.
+  - Staging therefore lives **per Steam library**, for example `<library>/.vessel/staging/`, not in a single global directory.
   - Detect the case where staging and game differ at deploy time (compare `st_dev`) and choose the fallback automatically.
 - **Fallback order:** hardlink, then reflink (if the fs supports it), then symlink, then copy. Record the chosen method per file in SQLite.
 - **Safety:** before overwriting any game file, back it up to a content-addressed backup store and record it in the manifest. Purge restores originals. Deploy runs inside a transaction journaled in SQLite; an interrupted deploy resumes or rolls back at next launch.
@@ -106,13 +106,13 @@ modman/
 - **Auth:** API key first, stored in the system keyring via the Secret Service API (`keyring` crate), with a config-file fallback on systems without one (common on Deck Game Mode). OAuth2/SSO later behind the same `AuthProvider` trait.
 - **Downloads:**
   - Premium: request a download link directly from the API.
-  - Free: register as the `nxm://` handler. The user clicks "Download with manager" in the browser; the link carries `key` and `expires`, which modman exchanges for the CDN URL.
+  - Free: register as the `nxm://` handler. The user clicks "Download with manager" in the browser; the link carries `key` and `expires`, which Vessel exchanges for the CDN URL.
 - **`nxm://` plumbing:** install a `.desktop` file with `MimeType=x-scheme-handler/nxm;`. Use Tauri's single-instance and deep-link plugins so the second invocation forwards the URL to the running app. In Game Mode there is no browser integration, so the Deck flow is: switch to Desktop Mode to click the link, or paste the link into the app.
 - **Rate limits:** read the `x-rl-*` response headers and throttle. Persist the state (replaces the current `ratelimit` file).
 - **Updates:** poll `updated.json`-style endpoints rather than checking every mod; cache results in SQLite.
 
 ### 4.3 Collections, FOMOD, load order
-- **Collections:** fetch the collection manifest via GraphQL, queue every mod, apply per-mod choices and rules. Same behaviour as the current `modman` collection install.
+- **Collections:** fetch the collection manifest via GraphQL, queue every mod, apply per-mod choices and rules. Same behaviour as the legacy bash tool's collection install.
 - **FOMOD:** parse `ModuleConfig.xml` into a step/group/option tree with visibility conditions. The GUI renders it as a wizard, the CLI as prompts. Collections supply pre-recorded choices, so no prompt is needed.
 - **Load order:** run LOOT sorting for Bethesda games and merge it with collection-provided rules. Write the result to `plugins.txt` in the correct Proton prefix location. Non-plugin games skip this stage.
 
@@ -129,7 +129,7 @@ modman/
 | **AppImage** | Primary for Steam Deck. Full filesystem access, so hardlinks and Steam libraries work. Add as a non-Steam shortcut. |
 | **Flatpak** | Needs `--filesystem` access to Steam libraries and the staging dirs. Hardlinks across sandbox mount boundaries can fail; test on a real SD card library. Handle `nxm://` via a `.desktop` entry in the manifest. |
 | **Distro packages** | AUR (`PKGBUILD`), RPM, deb. These depend on system `webkit2gtk-4.1`. |
-| **CLI** | Shipped in the same packages as `modman`. |
+| **CLI** | `vessel`, shipped in the same packages as the `vessel-desktop` GUI. |
 
 ---
 
@@ -146,7 +146,7 @@ modman/
 | `collections` | Installed collection revisions and their rules |
 | `schema_migrations` | Migration history |
 
-No migration from the legacy bash tool: the rewrite starts fresh. It does not read `~/.config/nexus-mod-manager` or `deployed.manifest`. Users must purge with the legacy `modman` before switching, so the game folder is clean. The new tool should warn if it finds legacy state.
+No migration from the legacy bash tool: the rewrite starts fresh. It does not read `~/.config/nexus-mod-manager` or `deployed.manifest`. Users must purge with the legacy bash tool before switching, so the game folder is clean. The new tool should warn if it finds legacy state.
 
 ---
 
@@ -169,7 +169,7 @@ No migration from the legacy bash tool: the rewrite starts fresh. It does not re
 
 ## 8. Milestones
 
-1. **Core skeleton:** workspace, SQLite schema, Steam game detection, `modman games list`.
+1. **Core skeleton:** workspace, SQLite schema, Steam game detection, `vessel games list`.
 2. **Deploy/purge:** staging, hardlink engine with fallbacks, backups, manifest, crash recovery. This is the highest-risk core and comes first.
 3. **Nexus:** API key auth, single mod download and install (Premium and `nxm://`), update checks.
 4. **GUI v1:** Tauri shell, game and mod lists, deploy/purge, keyboard and gamepad navigation, 1280x800 layout.
@@ -188,7 +188,7 @@ No migration from the legacy bash tool: the rewrite starts fresh. It does not re
 
 A game definition tells the core where mods go and how to treat them. It is data (one TOML file per game, embedded in the binary and overridable by the user), not code. Fields: Nexus domain, Steam appid, deploy subdirectory, target (game dir or Proton prefix), layout profile, and extras (plugins.txt format, Paks folder).
 
-The legacy `modman` already has these presets, so v1 ports them as data. Layout profiles to port: `bethesda`, `cyberpunk`, `stardew`, `bannerlord`, `witcher3`, `bepinex`, `melonloader`, `ue` (Unreal pak mods), `generic`.
+The legacy bash tool already has these presets, so v1 ports them as data. Layout profiles to port: `bethesda`, `cyberpunk`, `stardew`, `bannerlord`, `witcher3`, `bepinex`, `melonloader`, `ue` (Unreal pak mods), `generic`.
 
 | Profile | Games in the legacy presets |
 | :--- | :--- |
@@ -206,7 +206,7 @@ Proposal: all presets ship as definitions, but only a small set is "supported" (
 ### 9.2 Auto-update (kept)
 
 The legacy tool updates mods and redeploys after system or game updates. The rewrite keeps it:
-- `modman autoupdate` is a CLI command and the single implementation. The GUI calls the same core function.
+- `vessel autoupdate` is a CLI command and the single implementation. The GUI calls the same core function.
 - Scheduler: systemd user timer only (cron and autostart are dropped). GUI-only: no headless web mode.
 - Trigger: a systemd **user** timer (periodic, interval configurable, 0 = only after updates) plus a check at app start. Game updates are detected by watching `appmanifest_*.acf` build ids. System updates are detected by watching for running package managers, as the legacy tool does via `/proc`.
 - Steam Deck: user timers work in Desktop Mode and Game Mode, but SteamOS resets system files on update, so keep everything under `$HOME` (`~/.config/systemd/user`).

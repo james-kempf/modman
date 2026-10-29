@@ -241,15 +241,15 @@ describe("Activity", () => {
     expect(cols.className).toMatch(/\bgrid-cols-1\b/);
     expect(cols.className).toMatch(/xl:grid-cols-\[minmax\(0,1fr\)_minmax\(0,2fr\)\]/);
     expect(cols.className).not.toMatch(/\d+px/);
-    for (const section of [...cols.children, screen.getByRole("heading", { name: "modman log" }).closest("section")!])
+    for (const section of [...cols.children, screen.getByRole("heading", { name: "Vessel log" }).closest("section")!])
       expect(section.className).toMatch(/\bmin-w-0\b/);
   });
 
   it("shows jobs and streamed messages from events, and the log tail", async () => {
     const { t } = await open("activity", { log_tail: () => ["line one"] });
     act(() => {
-      t.emit("modman:job", { id: 9, kind: "install", state: "started", error: null });
-      t.emit("modman:activity", { job: 9, msg: { level: "info", spans: [{ text: "Extracting", style: "plain" }] }, text: "Extracting" });
+      t.emit("vessel:job", { id: 9, kind: "install", state: "started", error: null });
+      t.emit("vessel:activity", { job: 9, msg: { level: "info", spans: [{ text: "Extracting", style: "plain" }] }, text: "Extracting" });
     });
     expect(await screen.findByRole("list", { name: "Jobs" })).toHaveTextContent("Install");
     expect(screen.getByRole("list", { name: "Messages" })).toHaveTextContent("Extracting");

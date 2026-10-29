@@ -5,14 +5,14 @@ import { transport, type Unlisten } from "./transport";
 import type { Msg, Prompt, StartupCheck } from "./types";
 
 export const EVENTS = {
-  activity: "modman:activity",
-  job: "modman:job",
-  prompt: "modman:prompt",
-  promptClosed: "modman:prompt-closed",
-  download: "modman:download",
-  deployProgress: "modman:deploy-progress",
-  nxm: "modman:nxm",
-  startupCheck: "modman:startup-check",
+  activity: "vessel:activity",
+  job: "vessel:job",
+  prompt: "vessel:prompt",
+  promptClosed: "vessel:prompt-closed",
+  download: "vessel:download",
+  deployProgress: "vessel:deploy-progress",
+  nxm: "vessel:nxm",
+  startupCheck: "vessel:startup-check",
 } as const;
 
 /** A core message for the activity log. */
@@ -70,15 +70,15 @@ export interface NxmEvent {
 }
 
 export interface EventPayloads {
-  "modman:activity": ActivityEvent;
-  "modman:job": JobEvent;
-  "modman:prompt": PromptEvent;
-  "modman:prompt-closed": PromptClosedEvent;
-  "modman:download": DownloadEvent;
-  "modman:deploy-progress": DeployProgressEvent;
-  "modman:nxm": NxmEvent;
+  "vessel:activity": ActivityEvent;
+  "vessel:job": JobEvent;
+  "vessel:prompt": PromptEvent;
+  "vessel:prompt-closed": PromptClosedEvent;
+  "vessel:download": DownloadEvent;
+  "vessel:deploy-progress": DeployProgressEvent;
+  "vessel:nxm": NxmEvent;
   /** null = the check failed (see the log). */
-  "modman:startup-check": StartupCheck | null;
+  "vessel:startup-check": StartupCheck | null;
 }
 export type EventName = keyof EventPayloads;
 

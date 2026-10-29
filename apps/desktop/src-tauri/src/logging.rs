@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Tracing to the shared log file (`$XDG_STATE_HOME/modman/modman.log`), the
+//! Tracing to the shared log file (`$XDG_STATE_HOME/vessel/vessel.log`), the
 //! same file the CLI writes and the `log_tail` command reads.
 
 use std::path::Path;
@@ -62,6 +62,6 @@ mod tests {
         let t = super::target_cap();
         assert!(!t.would_enable("reqwest::connect", &Level::INFO));
         assert!(!t.would_enable("tauri::ipc", &Level::INFO));
-        assert!(t.would_enable("modman_core::app", &Level::INFO));
+        assert!(t.would_enable("vessel_core::app", &Level::INFO));
     }
 }

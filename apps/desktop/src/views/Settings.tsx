@@ -59,7 +59,7 @@ function AccountCard() {
   const a = q.data;
   const signedIn = !!a?.key_source;
   return (
-    <Card navSections title="Nexus Mods account" intro="Your personal API key, kept in the system keyring (else the modman config file).">
+    <Card navSections title="Nexus Mods account" intro="Your personal API key, kept in the system keyring (else the Vessel config file).">
       {q.isError ? (
         <CardSection>
           <ErrorNote>Could not read the account: {errMsg(q.error)}</ErrorNote>
@@ -189,10 +189,10 @@ export function ApiKeyEntry({ onDone }: { onDone?: () => void }) {
   );
 }
 
-/** Auto-update and the Steam shortcut: both about running modman unattended / from Game Mode. */
+/** Auto-update and the Steam shortcut: both about running Vessel unattended / from Game Mode. */
 function AutomationCard() {
   return (
-    <Card navSections title="Auto-update and Steam" intro="Background updates, and starting modman from Steam's Game Mode.">
+    <Card navSections title="Auto-update and Steam" intro="Background updates, and starting Vessel from Steam's Game Mode.">
       <AutoUpdate />
       <SteamShortcut />
     </Card>
@@ -224,7 +224,7 @@ function SteamShortcut() {
   return (
     <div className="rows">
       <Row
-        title="Show modman in Steam"
+        title="Show Vessel in Steam"
         desc={
           s?.steam_running
             ? "A non-Steam game entry. Steam is running: restart Steam for the change to show up."
@@ -242,7 +242,7 @@ function SteamShortcut() {
             const r = await run("Steam shortcut", () => ipc.steamShortcutSet(v), { key: "Steam shortcut" });
             if (r) {
               qc.setQueryData(["steam-shortcut"], r);
-              notify("success", `${v ? "Added modman to Steam" : "Removed modman from Steam"}. Restart Steam to apply it.`);
+              notify("success", `${v ? "Added Vessel to Steam" : "Removed Vessel from Steam"}. Restart Steam to apply it.`);
             }
           }}
         />
@@ -361,7 +361,7 @@ export function RunLog({ runs }: { runs: RunLogEntry[] }) {
 function ConfigCard() {
   const q = useQuery({ queryKey: ["config"], queryFn: ipc.configList });
   return (
-    <Card navSections title="Configuration" intro="modman's config keys, as on the command line (modman config).">
+    <Card navSections title="Configuration" intro="Vessel's config keys, as on the command line (vessel config).">
       {q.isError ? (
         <CardSection>
           <ErrorNote>Could not read the configuration: {errMsg(q.error)}</ErrorNote>
@@ -518,7 +518,7 @@ function AppInfo() {
       <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-0.5 font-mono text-[12px] leading-relaxed text-zinc-400">
         {(
           [
-            ["modman", i.version],
+            ["Vessel", i.version],
             ["config", i.config_dir],
             ["data", i.data_dir],
             ["log", i.log_path],

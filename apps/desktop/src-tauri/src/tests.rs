@@ -26,9 +26,9 @@ fn conf() -> Value {
 #[test]
 fn identifier_matches_the_single_instance_bus_name() {
     let c = conf();
-    assert_eq!(c["identifier"], "org.modman.app");
+    assert_eq!(c["identifier"], "org.vessel.app");
     assert_eq!(
-        modman_core::ipc::SINGLE_INSTANCE_BUS,
+        vessel_core::ipc::SINGLE_INSTANCE_BUS,
         format!("{}.SingleInstance", c["identifier"].as_str().unwrap())
     );
     // The plugin's `semver` feature would suffix the bus name.
@@ -163,12 +163,12 @@ fn a_rejected_api_key_is_never_echoed_to_the_webview() {
     const KEY: &str = "SECRETKEY0123456789";
     let base = unauthorized_server();
     // Only this test talks to Nexus in this crate.
-    std::env::set_var(modman_core::app::nexus::BASE_URL_ENV, &base);
+    std::env::set_var(vessel_core::app::nexus::BASE_URL_ENV, &base);
     let home = tempfile::tempdir().unwrap();
-    let st = AppState::new(modman_core::paths::Paths::for_home(home.path()));
+    let st = AppState::new(vessel_core::paths::Paths::for_home(home.path()));
     let sink = Arc::new(Recorder::default());
     let r = st.0.query(sink.clone(), None, |cx| {
-        modman_core::app::nexus::login(cx.paths, cx.store, KEY)
+        vessel_core::app::nexus::login(cx.paths, cx.store, KEY)
     });
     let e = r.unwrap_err();
     assert!(
@@ -183,7 +183,7 @@ fn a_rejected_api_key_is_never_echoed_to_the_webview() {
     let store = st.0.open_store().unwrap();
     assert_eq!(
         store
-            .setting(modman_core::app::nexus::AUTH_BACKEND_KEY)
+            .setting(vessel_core::app::nexus::AUTH_BACKEND_KEY)
             .unwrap(),
         None
     );

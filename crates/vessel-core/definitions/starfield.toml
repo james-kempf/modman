@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Ported from the legacy bash tool game_preset (L269-300).
+domain = "starfield"
+name = "Starfield"
+steam_appid = 1716740
+subdir = "Data"
+target = "game_dir"
+profile = "bethesda"
+support = "experimental"
+
+[plugins]
+format = "star"
+appdata_folder = "Starfield"

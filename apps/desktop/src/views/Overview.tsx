@@ -64,7 +64,7 @@ export function Overview() {
         <NoGame title={games?.length ? "No game selected" : "No game yet"}>
           {games?.length
             ? "Pick a game in Games, or add another one."
-            : "Add a game in Games to get started. modman keeps every mod in its own folder and links them into the game only when you deploy."}
+            : "Add a game in Games to get started. Vessel keeps every mod in its own folder and links them into the game only when you deploy."}
         </NoGame>
       )}
     </ViewFrame>
@@ -174,7 +174,7 @@ function PlayCard({ game, outOfSync }: { game: GameView; outOfSync: boolean }) {
           {(game.appid === null || outOfSync) && (
             <p className="text-[13px] leading-relaxed text-dim">
               {game.appid === null
-                ? "No Steam app id is set for this game, so it cannot be started from here (modman game set appid <id>)."
+                ? "No Steam app id is set for this game, so it cannot be started from here (vessel game set appid <id>)."
                 : "Your mod changes are not deployed yet: Play asks to deploy them first."}
             </p>
           )}
@@ -637,7 +637,7 @@ function PluginsCard({ game }: { game: string }) {
             <Count n={lines.length} label="in plugins.txt" />
           </div>
           <p className="mt-5 text-[13.5px] text-zinc-400">
-            {managed} written by modman for your mods.
+            {managed} written by Vessel for your mods.
           </p>
         </>
       )}

@@ -42,7 +42,7 @@ const BLURB: Partial<Record<ReqStatus, string>> = {
   missing: "The mods that need these will not work until they are installed.",
   disabled: "Enable them and deploy again.",
   external:
-    "Hosted outside Nexus, so modman cannot tell whether they are installed. Mark them once you have.",
+    "Hosted outside Nexus, so Vessel cannot tell whether they are installed. Mark them once you have.",
   gone: "Listed as required, but the page was removed. Usually safe to ignore.",
 };
 const TONE = {
@@ -217,7 +217,7 @@ function Row({ r }: { r: ReqRow }) {
           )}
           {r.hint && !target && r.status !== "ok" && (
             <p className="mt-2 font-mono text-[12px] wrap-anywhere text-zinc-400">
-              fix: modman {r.hint}
+              fix: vessel {r.hint}
             </p>
           )}
           {r.urls.map((u) => (

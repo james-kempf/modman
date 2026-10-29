@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Typed IPC to the modman backend: commands, events, payload types.
+// Typed IPC to the vessel backend: commands, events, payload types.
 
 export * from "./commands";
 export * from "./events";

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! `#[tauri::command]` adapters over `modman_core::app` and the core
+//! `#[tauri::command]` adapters over `vessel_core::app` and the core
 //! modules. No business logic here: each command picks the game, runs one
 //! core call on a blocking thread and returns its (serializable) result.
 //! Argument names are snake_case on the JS side too. Contract mirrored in
@@ -12,30 +12,30 @@ use std::sync::Arc;
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
-use modman_core::app::collection::{
+use vessel_core::app::collection::{
     self as appcol, CollectionInfo, CollectionResult, RemoveResult,
 };
-use modman_core::app::deploy::{run_deploy, run_purge};
-use modman_core::app::games::{
+use vessel_core::app::deploy::{run_deploy, run_purge};
+use vessel_core::app::games::{
     self as appgames, AddGame, Detected, GameFolder, GameView, Launched,
 };
-use modman_core::app::install::{self as appinst, InstallRequest, InstallResult, Reinstalled};
-use modman_core::app::mods::{
+use vessel_core::app::install::{self as appinst, InstallRequest, InstallResult, Reinstalled};
+use vessel_core::app::mods::{
     self as appmods, ModDetail, ModsView, MoveResult, ProfileLoaded, UninstallResult,
 };
-use modman_core::app::nexus::{self as appnx, AccountInfo, LoginResult};
-use modman_core::app::shortcut::{self, ShortcutStatus};
-use modman_core::app::updates::{self as appup, UpdateReport};
-use modman_core::app::views::{self, ConfigChange, ConfigEntry, FilesView, SearchView};
-use modman_core::app::{actions, art, games_hint, plugins as appplug, thumbs, Cx, R};
-use modman_core::autoupdate::{self, LiveHost, RunLogEntry, StartupCheck, Status};
-use modman_core::collections::{self, CollectionSummary};
-use modman_core::deploy::{self, DeployReport, DeployStatus, PurgeReport, VerifyReport};
-use modman_core::download::Download;
-use modman_core::games::{self, GameConfig};
-use modman_core::loadorder::{ConflictData, PluginLine, PluginStage};
-use modman_core::mods::{self, ProfileSummary};
-use modman_core::requirements::ReqRow;
+use vessel_core::app::nexus::{self as appnx, AccountInfo, LoginResult};
+use vessel_core::app::shortcut::{self, ShortcutStatus};
+use vessel_core::app::updates::{self as appup, UpdateReport};
+use vessel_core::app::views::{self, ConfigChange, ConfigEntry, FilesView, SearchView};
+use vessel_core::app::{actions, art, games_hint, plugins as appplug, thumbs, Cx, R};
+use vessel_core::autoupdate::{self, LiveHost, RunLogEntry, StartupCheck, Status};
+use vessel_core::collections::{self, CollectionSummary};
+use vessel_core::deploy::{self, DeployReport, DeployStatus, PurgeReport, VerifyReport};
+use vessel_core::download::Download;
+use vessel_core::games::{self, GameConfig};
+use vessel_core::loadorder::{ConflictData, PluginLine, PluginStage};
+use vessel_core::mods::{self, ProfileSummary};
+use vessel_core::requirements::ReqRow;
 
 use crate::events::Sink;
 use crate::prompt::Answer;
@@ -90,7 +90,7 @@ pub struct AppInfo {
     pub data_dir: PathBuf,
     pub log_path: PathBuf,
     pub db_path: PathBuf,
-    /// Legacy bash modman state found (purge with the legacy tool first).
+    /// Legacy bash tool state found (purge with the legacy tool first).
     pub legacy_state_dir: Option<PathBuf>,
 }
 
@@ -104,7 +104,7 @@ pub fn quit_app(app: AppHandle) {
 pub fn app_info(state: St<'_>) -> AppInfo {
     let p = &state.0.paths;
     AppInfo {
-        version: modman_core::VERSION,
+        version: vessel_core::VERSION,
         config_dir: p.config_dir.clone(),
         data_dir: p.data_dir.clone(),
         log_path: p.log_path(),
@@ -123,7 +123,7 @@ pub async fn steam_shortcut_status(state: St<'_>) -> CmdResult<ShortcutStatus> {
     blocking(move || Ok(shortcut::status(&home, &exe()?)?)).await
 }
 
-/// Adds modman to (or removes it from) Steam as a non-Steam game; refused
+/// Adds vessel to (or removes it from) Steam as a non-Steam game; refused
 /// while Steam runs.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn steam_shortcut_set(state: St<'_>, enabled: bool) -> CmdResult<ShortcutStatus> {
@@ -169,7 +169,7 @@ pub async fn startup_check(state: St<'_>) -> CmdResult<Option<StartupCheck>> {
     .await
 }
 
-/// Answers a `modman:prompt`; `false` when that prompt is gone.
+/// Answers a `vessel:prompt`; `false` when that prompt is gone.
 #[tauri::command(rename_all = "snake_case")]
 pub fn prompt_answer(state: St<'_>, id: u64, answer: Answer) -> bool {
     state.0.prompts.answer(id, answer)
@@ -424,7 +424,7 @@ pub async fn mod_reinstall(
 
 /// The game's library art (`kind`: portrait `library_600x900`, the
 /// default, or wide `library_hero`) as a `data:` URL: the local Steam
-/// cache, else modman's cache of Steam's CDN copy; `None` = no art.
+/// cache, else vessel's cache of Steam's CDN copy; `None` = no art.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn game_art(
     app: AppHandle,
@@ -921,7 +921,7 @@ pub async fn autoupdate_status(
     .await
 }
 
-/// Installs the systemd user timer for the `modman` CLI next to the app
+/// Installs the systemd user timer for the `vessel` CLI next to the app
 /// (or on PATH) and records the baseline; returns the new status.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn autoupdate_enable(app: AppHandle, state: St<'_>) -> CmdResult<Status> {
@@ -965,9 +965,9 @@ pub async fn autoupdate_runs(
 
 // ── backup cleanup and restage ──────────────────────────────
 
-use modman_core::app::backups as appbk;
-use modman_core::app::restage::{self as apprs, RestageReport, RestageRequest};
-use modman_core::deploy::{PoisonedBackup, QuarantineManifest, QuarantineReport, RestoreReport};
+use vessel_core::app::backups as appbk;
+use vessel_core::app::restage::{self as apprs, RestageReport, RestageRequest};
+use vessel_core::deploy::{PoisonedBackup, QuarantineManifest, QuarantineReport, RestoreReport};
 
 /// Held backups that hold mod files instead of game originals (dry run of
 /// `deploy clean-backups`; changes nothing).

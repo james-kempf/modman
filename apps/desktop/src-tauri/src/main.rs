@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! modman desktop app entry point.
+//! vessel desktop app entry point.
 
 use std::ffi::OsStr;
 
@@ -18,7 +18,7 @@ fn main() {
         // Still single-threaded: no other thread can read the environment.
         std::env::set_var(DMABUF_VAR, v);
     }
-    modman_desktop::run();
+    vessel_desktop::run();
 }
 
 #[cfg(test)]

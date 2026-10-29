@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Ported from the legacy bash tool game_preset (L269-300).
+domain = "enderalspecialedition"
+name = "Enderal Special Edition"
+steam_appid = 976620
+subdir = "Data"
+target = "game_dir"
+profile = "bethesda"
+support = "experimental"
+
+[plugins]
+format = "star"
+appdata_folder = "Enderal Special Edition"

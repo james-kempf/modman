@@ -1,13 +1,13 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# modman AppImage entry point.
+# vessel AppImage entry point.
 #
 # - No arguments: start the desktop app through the original linuxdeploy
 #   AppRun (AppRun.gui), which runs the GTK/WebKit apprun-hooks.
-# - Any argument: run the bundled `modman` CLI with the arguments unchanged.
+# - Any argument: run the bundled `vessel` CLI with the arguments unchanged.
 #   This makes `<AppImage> nxm <url>` (the nxm handler written by
-#   `modman nxm register`) and `<AppImage> autoupdate run` (the systemd
+#   `vessel nxm register`) and `<AppImage> autoupdate run` (the systemd
 #   timer ExecStart) work, as well as every other CLI subcommand.
 # - `--gui` / `gui` as the first argument forces the desktop app.
 #
@@ -27,4 +27,4 @@ if [ "$#" -eq 0 ] || [ "$1" = "--gui" ] || [ "$1" = "gui" ]; then
     exec "$APPDIR/AppRun.gui" "$@"
 fi
 
-exec "$APPDIR/usr/bin/modman" "$@"
+exec "$APPDIR/usr/bin/vessel" "$@"

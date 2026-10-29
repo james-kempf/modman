@@ -3,8 +3,8 @@
 //! (`autoupdate::startup_check`: which deployed games a run would update or
 //! redeploy, and what blocks them).
 
-use modman_core::autoupdate::{self, Host, RunOptions, StartupCheck};
-use modman_core::config::Config;
+use vessel_core::autoupdate::{self, Host, RunOptions, StartupCheck};
+use vessel_core::config::Config;
 
 use crate::state::Inner;
 
@@ -14,7 +14,7 @@ pub fn startup_check(inner: &Inner, host: &dyn Host) -> Option<StartupCheck> {
     inner
         .startup
         .get_or_init(|| {
-            let res = (|| -> modman_core::app::R<StartupCheck> {
+            let res = (|| -> vessel_core::app::R<StartupCheck> {
                 let store = inner.open_store()?;
                 let opts = RunOptions::new(&Config::load(&store, &inner.paths)?, &inner.paths);
                 Ok(autoupdate::startup_check(store.conn(), host, &opts)?)
@@ -31,9 +31,9 @@ mod tests {
 
     use super::*;
     use crate::state::AppState;
-    use modman_core::autoupdate::{SteamState, SystemSnapshot};
-    use modman_core::games::GameConfig;
-    use modman_core::paths::Paths;
+    use vessel_core::autoupdate::{SteamState, SystemSnapshot};
+    use vessel_core::games::GameConfig;
+    use vessel_core::paths::Paths;
 
     /// Counts how often the machine is inspected.
     #[derive(Default)]

@@ -2822,70 +2822,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "modman-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "clap",
- "modman-core",
- "predicates",
- "tempfile",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "zbus",
-]
-
-[[package]]
-name = "modman-core"
-version = "0.1.0"
-dependencies = [
- "compress-tools",
- "directories",
- "keyring-core",
- "keyvalues-parser",
- "libloot",
- "md-5",
- "quick-xml",
- "reflink-copy",
- "reqwest",
- "rusqlite",
- "rustix",
- "rustls",
- "serde",
- "serde_json",
- "sevenz-rust2",
- "sha2 0.11.1",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "toml 1.1.8+spec-1.1.0",
- "tracing",
- "url",
- "walkdir",
- "wiremock",
- "zbus-secret-service-keyring-store",
- "zip",
-]
-
-[[package]]
-name = "modman-desktop"
-version = "0.1.0"
-dependencies = [
- "modman-core",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-single-instance",
- "tempfile",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "muda"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5562,6 +5498,72 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vessel-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "clap",
+ "predicates",
+ "tempfile",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "vessel-core",
+ "zbus",
+]
+
+[[package]]
+name = "vessel-core"
+version = "0.1.0"
+dependencies = [
+ "compress-tools",
+ "directories",
+ "keyring-core",
+ "keyvalues-parser",
+ "libloot",
+ "md-5",
+ "quick-xml",
+ "reflink-copy",
+ "reqwest",
+ "rusqlite",
+ "rustix",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sevenz-rust2",
+ "sha2 0.11.1",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "toml 1.1.8+spec-1.1.0",
+ "tracing",
+ "url",
+ "walkdir",
+ "wiremock",
+ "zbus",
+ "zbus-secret-service-keyring-store",
+ "zip",
+]
+
+[[package]]
+name = "vessel-desktop"
+version = "0.1.0"
+dependencies = [
+ "gtk",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-single-instance",
+ "tempfile",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "vessel-core",
+]
 
 [[package]]
 name = "vswhom"

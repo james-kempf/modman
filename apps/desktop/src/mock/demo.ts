@@ -55,7 +55,7 @@ export function createDemoBackend(): FakeTransport {
   const bools = ["true", "false"];
   // The core's 9 keys with their kinds and options (config.rs).
   const config: ConfigEntry[] = [
-    { key: "data-dir", value: "~/.local/share/modman", description: "where downloads and per-game data live", kind: "path", options: [] },
+    { key: "data-dir", value: "~/.local/share/vessel", description: "where downloads and per-game data live", kind: "path", options: [] },
     {
       key: "deploy-method",
       value: "auto",
@@ -96,22 +96,22 @@ export function createDemoBackend(): FakeTransport {
 
   const t = createFakeTransport();
   const say = (job: number, text: string, level: Msg["level"] = "info") =>
-    t.emit("modman:activity", { job, msg: { level, spans: [{ text, style: "plain" }] }, text });
+    t.emit("vessel:activity", { job, msg: { level, spans: [{ text, style: "plain" }] }, text });
   const ask = (job: number, prompt: Prompt) =>
     new Promise<Answer>((resolve) => {
       const id = ++promptSeq;
       waiting.set(id, resolve);
-      t.emit("modman:prompt", { id, job, prompt });
+      t.emit("vessel:prompt", { id, job, prompt });
     });
   const job = async <T>(kind: string, body: (id: number) => Promise<T>): Promise<T> => {
     const id = ++jobSeq;
-    t.emit("modman:job", { id, kind, state: "started", error: null });
+    t.emit("vessel:job", { id, kind, state: "started", error: null });
     try {
       const r = await body(id);
-      t.emit("modman:job", { id, kind, state: "finished", error: null });
+      t.emit("vessel:job", { id, kind, state: "finished", error: null });
       return r;
     } catch (e) {
-      t.emit("modman:job", { id, kind, state: "failed", error: String((e as { message?: string }).message ?? e) });
+      t.emit("vessel:job", { id, kind, state: "failed", error: String((e as { message?: string }).message ?? e) });
       throw e;
     }
   };
@@ -151,8 +151,8 @@ export function createDemoBackend(): FakeTransport {
     const a = await ask(id, { type: "confirm", question, default_yes });
     return a.type === "confirm" && a.yes;
   };
-  // A withdrawn prompt (modman:prompt-closed without an answer) cancels the question, as in the real backend.
-  void t.listen<{ id: number }>("modman:prompt-closed", ({ id }) => {
+  // A withdrawn prompt (vessel:prompt-closed without an answer) cancels the question, as in the real backend.
+  void t.listen<{ id: number }>("vessel:prompt-closed", ({ id }) => {
     const r = waiting.get(id);
     waiting.delete(id);
     r?.({ type: "cancel" });
@@ -161,16 +161,16 @@ export function createDemoBackend(): FakeTransport {
   Object.assign(t.handlers, {
     app_info: () => ({
       version: "0.1.0-demo",
-      config_dir: "~/.config/modman",
-      data_dir: "~/.local/share/modman",
-      log_path: "~/.local/state/modman/modman.log",
-      db_path: "~/.local/share/modman/modman.db",
+      config_dir: "~/.config/vessel",
+      data_dir: "~/.local/share/vessel",
+      log_path: "~/.local/state/vessel/vessel.log",
+      db_path: "~/.local/share/vessel/vessel.db",
       legacy_state_dir: null,
     }),
-    steam_shortcut_status: () => ({ accounts: 1, added: shortcut ? 1 : 0, steam_running: false, exe: "/home/deck/Applications/modman.AppImage" }),
+    steam_shortcut_status: () => ({ accounts: 1, added: shortcut ? 1 : 0, steam_running: false, exe: "/home/deck/Applications/vessel.AppImage" }),
     steam_shortcut_set: (a: Args) => {
       shortcut = !!a!.enabled;
-      return { accounts: 1, added: shortcut ? 1 : 0, steam_running: false, exe: "/home/deck/Applications/modman.AppImage" };
+      return { accounts: 1, added: shortcut ? 1 : 0, steam_running: false, exe: "/home/deck/Applications/vessel.AppImage" };
     },
     quit_app: () => undefined,
     app_ready: () => ({ startup_check: { system_busy: null, pending: [] }, queued: 0 }),
@@ -179,7 +179,7 @@ export function createDemoBackend(): FakeTransport {
       const r = waiting.get(a!.id as number);
       waiting.delete(a!.id as number);
       r?.(a!.answer as Answer);
-      t.emit("modman:prompt-closed", { id: a!.id as number });
+      t.emit("vessel:prompt-closed", { id: a!.id as number });
       return !!r;
     },
     log_tail: () => ["demo backend: no log file"],
@@ -261,7 +261,7 @@ export function createDemoBackend(): FakeTransport {
     open_folder: (a: Args) => {
       const g = games.find((x) => x.domain === a!.game);
       if (!g) throw { message: `no game '${String(a!.game)}'` };
-      const p = a!.which === "prefix" ? g.prefix : a!.which === "game" ? g.folder : a!.which === "mods" ? `~/.local/share/modman/${g.domain}/staging` : undefined;
+      const p = a!.which === "prefix" ? g.prefix : a!.which === "game" ? g.folder : a!.which === "mods" ? `~/.local/share/vessel/${g.domain}/staging` : undefined;
       if (p === undefined) throw { message: `unknown folder '${String(a!.which)}'` };
       if (!p) throw { message: `${g.domain}: no ${a!.which === "prefix" ? "Proton prefix" : "game folder"} is set` };
       return p;
@@ -354,7 +354,7 @@ export function createDemoBackend(): FakeTransport {
     deploy: (a: Args) =>
       job("deploy", async (id) => {
         const g = st(a);
-        for (let d = 0; d <= 20; d += 5) t.emit("modman:deploy-progress", { job: id, done: d, total: 20 });
+        for (let d = 0; d <= 20; d += 5) t.emit("vessel:deploy-progress", { job: id, done: d, total: 20 });
         g.dirty = false;
         g.deployed = new Set(g.mods.filter((m) => m.enabled).map((m) => m.id));
         return deployReport({ mods: g.mods.filter((m) => m.enabled).length });

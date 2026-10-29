@@ -10,11 +10,11 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::Serialize;
 
-use modman_core::app::nxm::{self as appnxm, Accepted};
-use modman_core::app::{chain, AppError, Cx, R};
-use modman_core::autoupdate::StartupCheck;
-use modman_core::paths::Paths;
-use modman_core::store::Store;
+use vessel_core::app::nxm::{self as appnxm, Accepted};
+use vessel_core::app::{chain, AppError, Cx, R};
+use vessel_core::autoupdate::StartupCheck;
+use vessel_core::paths::Paths;
+use vessel_core::store::Store;
 
 use crate::events::{self, JobState, Sink};
 use crate::gui_ui::GuiUi;

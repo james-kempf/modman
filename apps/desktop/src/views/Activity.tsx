@@ -120,7 +120,7 @@ function LogTail() {
   const q = useQuery({ queryKey: ["log", lines], queryFn: () => ipc.logTail(lines) });
   return (
     <Card
-      title="modman log"
+      title="Vessel log"
       actions={
         <>
           <Button size="sm" tone="ghost" icon={<ArrowClockwiseIcon aria-hidden size={14} />} onClick={() => q.refetch()}>

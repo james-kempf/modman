@@ -99,7 +99,7 @@ function Installed({ game }: { game: string }) {
       ) : !list.length ? (
         <CardSection>
           <Empty icon={<BooksIcon size={28} weight="duotone" />} title="No collections installed">
-            Paste a collection link above. modman downloads every file, replays the curator&apos;s FOMOD choices and applies the
+            Paste a collection link above. Vessel downloads every file, replays the curator&apos;s FOMOD choices and applies the
             load-order rules.
           </Empty>
         </CardSection>

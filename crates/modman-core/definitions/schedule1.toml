@@ -1,9 +1,0 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-# Ported from legacy/modman game_preset (L269-300).
-domain = "schedule1"
-name = "Schedule I"
-steam_appid = 3164500
-subdir = "."
-target = "game_dir"
-profile = "melonloader"
-support = "experimental"

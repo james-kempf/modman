@@ -1,9 +1,0 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-# Ported from legacy/modman game_preset (L269-300).
-domain = "stardewvalley"
-name = "Stardew Valley"
-steam_appid = 413150
-subdir = "Mods"
-target = "game_dir"
-profile = "stardew"
-support = "experimental"

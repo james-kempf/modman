@@ -45,7 +45,7 @@ export const game = (o: Partial<GameView> = {}): GameView => ({
   support: "tested",
   mod_count: 2,
   deploy: deployStatus(),
-  data_dir: "/home/deck/.local/share/modman/skyrimspecialedition",
+  data_dir: "/home/deck/.local/share/vessel/skyrimspecialedition",
   plugins_txt: null,
   ...o,
 });

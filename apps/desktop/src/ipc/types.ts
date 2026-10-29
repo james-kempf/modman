@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Payload types of the Tauri commands and events, mirroring the serde
-// output of modman-core / modman-desktop exactly (snake_case fields,
+// output of vessel-core / vessel-desktop exactly (snake_case fields,
 // `null` for `None`, paths as strings, integers as numbers).
 
 // ── messages ────────────────────────────────────────────────
@@ -428,7 +428,7 @@ export interface ReqRow {
   /** Ack key. */
   key: string;
   name: string;
-  /** modman arguments that fix it, e.g. "install 123". */
+  /** vessel arguments that fix it, e.g. "install 123". */
   hint: string;
   urls: string[];
   by: string[];
@@ -500,7 +500,7 @@ export interface ConfigChange extends ConfigEntry {
   old_data_left: string | null;
 }
 
-/** The modman shortcut in Steam (as a non-Steam game). */
+/** The Vessel shortcut in Steam (as a non-Steam game). */
 export interface ShortcutStatus {
   accounts: number;
   added: number;
@@ -601,7 +601,7 @@ export interface OptionalMod {
   size: number;
 }
 
-/** A question from a running job (`modman:prompt`). */
+/** A question from a running job (`vessel:prompt`). */
 export type Prompt =
   | { type: "confirm"; question: string; default_yes: boolean }
   | { type: "text"; question: string; default: string }
@@ -638,7 +638,7 @@ export interface CmdError {
 
 // ── backup cleanup and restage ──────────────────────────────
 
-/** confirmed: modman placed the path before the backup was taken; ambiguous: no earlier record. */
+/** confirmed: Vessel placed the path before the backup was taken; ambiguous: no earlier record. */
 export type PoisonClass = "confirmed" | "ambiguous";
 
 /** A held backup holding the bytes a mod ships for the same path (`backups_poisoned`). */
