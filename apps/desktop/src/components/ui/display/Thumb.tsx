@@ -29,7 +29,7 @@ export function Thumb({
     <span
       aria-hidden
       className={cx(
-        "grid size-thumb shrink-0 place-items-center rounded-control font-mono text-micro font-semibold text-white/75",
+        "grid size-thumb shrink-0 place-items-center rounded-control font-mono text-micro font-semibold text-white/75 in-nav-focus:text-white/75",
         m.cls,
         className,
       )}

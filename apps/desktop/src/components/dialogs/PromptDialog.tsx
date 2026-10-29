@@ -160,10 +160,12 @@ function Choice({
         className={cx(
           "mt-0.5 grid size-icon shrink-0 place-items-center border-2 transition-colors duration-base",
           multi ? "rounded-control-sm" : "rounded-pill",
-          selected ? "border-accent-400 bg-accent-400 text-accent-950" : "border-zinc-500",
+          selected
+            ? "border-accent-400 bg-accent-400 text-accent-950 in-nav-focus:border-accent-700 in-nav-focus:bg-accent-700 in-nav-focus:text-white"
+            : "border-zinc-500",
         )}
       >
-        {selected && (multi ? <CheckIcon size={12} weight="bold" /> : <span className="size-2 rounded-pill bg-accent-950" />)}
+        {selected && (multi ? <CheckIcon size={12} weight="bold" /> : <span className="size-2 rounded-pill bg-accent-950 in-nav-focus:bg-white" />)}
       </span>
       <span className="min-w-0 flex-1">{children}</span>
     </button>

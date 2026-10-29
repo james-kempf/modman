@@ -19,7 +19,7 @@ export function IconButton({
       aria-busy={busy || undefined}
       onClick={busy ? (e) => e.preventDefault() : rest.onClick}
       className={cx(
-        "grid size-control shrink-0 place-items-center rounded-control text-zinc-300 transition-colors duration-base hover:bg-fill-2 hover:text-zinc-100 active:scale-95",
+        "grid size-control shrink-0 place-items-center rounded-control text-zinc-300 transition-[background-color,color,transform] duration-base hover:bg-fill-2 hover:text-zinc-100 active:scale-95",
         className,
       )}
     >

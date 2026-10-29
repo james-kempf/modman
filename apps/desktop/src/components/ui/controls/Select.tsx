@@ -114,7 +114,7 @@ export function Select<T extends string>({
               )}
             >
               <span className="min-w-0 truncate">{o.label}</span>
-              {o.value === value && <CheckIcon aria-hidden size={15} className="shrink-0 text-accent-300" />}
+              {o.value === value && <CheckIcon aria-hidden size={15} className="shrink-0 text-accent-300 in-nav-focus:text-accent-700" />}
             </button>
           ))}
         </div>

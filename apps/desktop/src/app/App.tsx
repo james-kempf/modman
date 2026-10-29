@@ -238,7 +238,7 @@ function TabRail() {
               on ? "bg-white/[0.07] text-zinc-50" : "text-zinc-400 hover:bg-white/[0.03] hover:text-zinc-200",
             )}
           >
-            <span className={cx("transition-colors duration-150", on && "text-accent-300")}>{ICON[v.id]}</span>
+            <span className={cx("transition-colors duration-150", on && "text-accent-300 in-nav-focus:text-accent-700")}>{ICON[v.id]}</span>
             <span className="flex-1">{v.label}</span>
             {v.id === "activity" && running + prompts > 0 && (
               <span className="rounded-full bg-accent-400 px-2 font-mono text-[11px] font-semibold text-accent-950">

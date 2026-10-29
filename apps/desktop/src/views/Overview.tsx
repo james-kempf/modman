@@ -537,22 +537,43 @@ function CollectionsCard({ game }: { game: string }) {
         <ErrorNote>{errMsg(q.error)}</ErrorNote>
       ) : q.isPending ? (
         <p className="text-[14px] text-zinc-400">Reading collections…</p>
-      ) : !list.length ? (
-        <p className="text-[14px] text-zinc-400">
-          No collections installed. Add one from the Collections tab.
-        </p>
       ) : (
         <>
           <div className="grid grid-cols-2 gap-4">
             <Count n={list.length} label="installed" />
             <Count n={`${enabled}/${members}`} label="mods enabled" />
           </div>
-          <progress
-            aria-label="Collection mods enabled"
-            className="mt-5"
-            max={members || 1}
-            value={enabled}
-          />
+          {!list.length ? (
+            <p className="mt-5 text-[13.5px] text-zinc-400">
+              No collections installed. Add one from the Collections tab.
+            </p>
+          ) : (
+            <>
+              <div data-testid="collections-tracker" className="mt-5 grid gap-2">
+                <div className="flex items-center gap-3">
+                  <progress
+                    aria-label="Collection mods enabled"
+                    className="flex-1"
+                    max={members || 1}
+                    value={enabled}
+                  />
+                  <span className="w-12 text-right font-mono text-[13px] text-zinc-200">
+                    {members ? Math.floor((enabled / members) * 100) : 0}%
+                  </span>
+                </div>
+                <p className="font-mono text-[12px] text-zinc-400">
+                  {enabled} of {members} collection{" "}
+                  {members === 1 ? "mod" : "mods"} enabled
+                </p>
+              </div>
+              <p className="mt-5 flex items-center gap-2 text-[13.5px] text-zinc-400">
+                <StatusDot tone={enabled < members ? "amber" : "zinc"} />
+                {enabled < members
+                  ? `${members - enabled} collection ${members - enabled === 1 ? "mod" : "mods"} still disabled`
+                  : "Every collection mod is enabled"}
+              </p>
+            </>
+          )}
         </>
       )}
     </SummaryCard>

@@ -29,21 +29,24 @@ export function Toggle({
       aria-busy={busy || undefined}
       onClick={() => !busy && onChange(!checked)}
       className={cx(
-        "inline-flex min-h-control min-w-control shrink-0 items-center gap-3 rounded-control text-body text-zinc-200",
-        showLabel ? "px-2" : "justify-center",
+        // px-2.5 matches the 10px above/below the h-7 track in min-h-control, so the nav highlight pads it evenly;
+        // the negative margin keeps the track where it sat before (px-2 with a label, flush without one).
+        "inline-flex min-h-control min-w-control shrink-0 items-center justify-center gap-3 rounded-control px-2.5 text-body text-zinc-200",
+        showLabel ? "-mx-0.5" : "-mx-2.5",
       )}
     >
       <span
         aria-hidden
         className={cx(
           "inline-flex h-7 w-12 shrink-0 items-center rounded-pill p-1 transition-colors duration-slow",
-          checked ? "bg-accent-500/90" : "bg-fill-hover",
+          // On the white nav focus fill the at-rest track fades out (the off track is 10% white): >= 3:1 tracks there.
+          checked ? "bg-accent-500/90 in-nav-focus:bg-accent-700" : "bg-fill-hover in-nav-focus:bg-zinc-500",
         )}
       >
         <span
           className={cx(
             "size-icon rounded-pill transition-[transform,background-color] duration-slow ease-spring",
-            checked ? "translate-x-5 bg-white" : "bg-zinc-400",
+            checked ? "translate-x-5 bg-white" : "bg-zinc-400 in-nav-focus:bg-white",
           )}
         />
       </span>

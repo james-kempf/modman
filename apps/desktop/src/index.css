@@ -8,6 +8,9 @@
  */
 @import "tailwindcss";
 
+/* Inside the arrow-key/gamepad-focused control (see the nav focus rules): parts that keep their own fill on the white. */
+@custom-variant in-nav-focus (html[data-input="nav"] :focus &);
+
 @theme {
   /*
    * Design tokens: the one source for sizes, radii, colours and motion.
@@ -51,7 +54,6 @@
    *   --color-hairline     5%   card borders and dividers
    *   --color-line         8%   input, well and dashed borders
    *   --color-line-strong  10%  overlay (glass) border
-   *   --color-line-focus   25%  focused input border
    *   --color-fill-1       3%   resting option fill, row hover
    *   --color-fill-2       6%   default button, track, hover
    *   --color-fill-3       8%   selected option
@@ -61,6 +63,14 @@
    * Shadow: --shadow-overlay (dialogs, menus, notices via .glass)
    * Duration: --transition-duration-fast 150ms, -base 200ms, -slow 300ms
    * Opacity: --opacity-disabled 0.45, --opacity-grain 0.035
+   * Nav focus (arrow keys / gamepad), one look for every control:
+   *   --color-focus            zinc-100  the solid white fill
+   *   --color-focus-ink        zinc-900  text and icons on it (~17:1)
+   *   --color-focus-ink-muted  zinc-600  dim/secondary text, placeholders (~6.8:1)
+   *   --focus-text (per control, optional) tone text instead of the ink:
+   *     accent-700 on primary (~5.5:1), rose-700 on danger (~5.4:1)
+   *   in-nav-focus:* restyles parts with their own fill (toggle track).
+   *   --color-accent-700 exists for that: the accent at >= 4.5:1 on white.
    */
   --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, "SFMono-Regular", monospace;
@@ -102,6 +112,7 @@
   --color-accent-400: oklch(0.78 0.12 165);
   --color-accent-500: oklch(0.7 0.12 165);
   --color-accent-600: oklch(0.58 0.11 165);
+  --color-accent-700: oklch(0.5 0.1 165);
   --color-accent-950: oklch(0.24 0.04 165);
 
   --color-ink: oklch(0.155 0.004 286);
@@ -113,7 +124,6 @@
   --color-hairline: rgb(255 255 255 / 0.05);
   --color-line: rgb(255 255 255 / 0.08);
   --color-line-strong: rgb(255 255 255 / 0.1);
-  --color-line-focus: rgb(255 255 255 / 0.25);
   --color-fill-1: rgb(255 255 255 / 0.03);
   --color-fill-2: rgb(255 255 255 / 0.06);
   --color-fill-3: rgb(255 255 255 / 0.08);
@@ -122,7 +132,10 @@
   --color-scrim: color-mix(in oklab, var(--color-ink) 70%, transparent);
   --color-selection: color-mix(in oklch, var(--color-accent-400) 35%, transparent);
   --color-scrollbar: oklch(0.32 0.006 286);
+  /* Arrow-key/gamepad highlight: solid white with dark ink (see the token list above). */
   --color-focus: var(--color-zinc-100);
+  --color-focus-ink: var(--color-zinc-900);
+  --color-focus-ink-muted: var(--color-zinc-600);
 
   /* Monogram fills: --color-mono-* (see @theme). */
   --color-mono-0: oklch(0.34 0.05 20);
@@ -144,8 +157,6 @@
 
   --opacity-disabled: 0.45;
   --opacity-grain: 0.035;
-  --focus-ring-width: 2px;
-  --focus-ring-offset: 2px;
 
   --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
 
@@ -211,17 +222,23 @@
    * Focus ring only for keyboard/gamepad use (html[data-input], set by
    * nav/modality.ts), not :focus-visible: spatial navigation driven by the
    * gamepad moves focus without a key event, and WebKit would then hide a
-   * :focus-visible ring. Neutral light ring, not the accent, so it reads as
-   * focus rather than a green border.
+   * :focus-visible ring. A highlight, not an outline: a full-spread inset
+   * box-shadow paints solid white over the element's own background (a
+   * background-color here would lose to the bg-* utilities) and follows
+   * its border radius. The text turns dark in @layer utilities below.
+   * The outline stays transparent in every state: transition-colors also
+   * animates outline-color, and a resting currentColor (light text) faded
+   * out as a white ring on focus. The transparent focus outline is drawn
+   * only in forced-colors mode, where shadows are dropped.
    */
   :focus {
-    outline: none;
+    outline: 2px solid transparent;
   }
   html[data-input="nav"] :focus {
-    outline: var(--focus-ring-width) solid var(--color-focus);
-    outline-offset: var(--focus-ring-offset);
+    box-shadow: inset 0 0 0 100vmax var(--color-focus);
   }
   * {
+    outline-color: transparent;
     scrollbar-width: thin;
     scrollbar-color: var(--color-scrollbar) transparent;
   }
@@ -266,7 +283,7 @@
     @apply font-mono text-micro tracking-eyebrow text-dim uppercase;
   }
   .input {
-    @apply min-h-control w-full rounded-control border border-line bg-ink px-3.5 text-lead text-zinc-100 transition-colors duration-base placeholder:text-zinc-500 focus:border-line-focus focus:bg-ink-3;
+    @apply min-h-control w-full rounded-control border border-line bg-ink px-3.5 text-lead text-zinc-100 transition-colors duration-base placeholder:text-zinc-500 focus:bg-ink-3;
   }
   /* Divided row list (inside a Card section, lists). */
   .rows > * + * {
@@ -303,5 +320,38 @@
     animation-iteration-count: 1 !important;
     animation-delay: 0ms !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/*
+ * Text on the white nav focus fill. In the utilities layer so the selector
+ * specificity (0,2,1+) beats the text-* utilities (0,1,0) on the control and
+ * inside it, while in-nav-focus:* utilities (0,3,1) can still opt a part out.
+ * Everything inherits the control's ink (icons use currentColor), muted text
+ * takes the readable grey; a control may set --focus-text to keep its tone.
+ */
+@layer utilities {
+  /*
+   * The highlight snaps between controls: in nav mode no colour, fill,
+   * border or shadow animates (transition-colors etc. would fade the white
+   * in and, since leaving focus uses the same transition, out). Motion stays:
+   * press scale/translate, the toggle knob slide, rotations, fades.
+   * Pseudo-elements (progress bars) are not matched. 0,1,1 beats the
+   * transition-* utilities (0,1,0).
+   */
+  html[data-input="nav"] * {
+    transition-property: transform, translate, scale, rotate, opacity;
+  }
+  html[data-input="nav"] :focus {
+    color: var(--focus-text, var(--color-focus-ink));
+  }
+  html[data-input="nav"] :focus * {
+    color: inherit;
+  }
+  html[data-input="nav"] :focus :is(.text-dim, .text-zinc-400, .text-zinc-500) {
+    color: var(--color-focus-ink-muted);
+  }
+  html[data-input="nav"] :focus::placeholder {
+    color: var(--color-focus-ink-muted);
   }
 }

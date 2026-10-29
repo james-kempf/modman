@@ -130,6 +130,8 @@ describe("Overview Collections card", () => {
     await open("overview");
     const card = await screen.findByRole("region", { name: "Collections" });
     await waitFor(() => expect(card).toHaveTextContent("No collections installed"));
+    expect(card).toHaveTextContent("0installed0/0mods enabled");
+    expect(within(card).queryByTestId("collections-tracker")).toBeNull();
   });
 });
 
