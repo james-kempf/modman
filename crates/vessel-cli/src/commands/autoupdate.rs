@@ -149,7 +149,7 @@ fn status(ctx: &mut Ctx) -> Result<()> {
         println!(
             "  {} {}",
             out.bold(&g.name),
-            out.dim(&format!("({})", g.domain))
+            out.dim(&format!("({})", g.game))
         );
         println!(
             "      Last auto-update : {}{}",
@@ -222,7 +222,7 @@ fn run_now(ctx: &mut Ctx, a: &RunArgs) -> Result<()> {
     for g in &report.games {
         if let GameOutcome::Nothing(s) = &g.outcome {
             if s.is_blocked() {
-                tracing::info!("auto-update {}: {}", g.domain, s.describe());
+                tracing::info!("auto-update {}: {}", g.game, s.describe());
             }
         }
     }

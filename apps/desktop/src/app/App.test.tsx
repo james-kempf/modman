@@ -138,7 +138,7 @@ describe("structured results", () => {
       },
     });
     renderApp();
-    act(() => useUi.getState().setView("install"));
+    act(() => useUi.getState().setView("browse"));
     const user = userEvent.setup();
     await user.type(await screen.findByLabelText("nxm link"), "nxm://bad");
     await user.click(screen.getByRole("button", { name: "Download" }));

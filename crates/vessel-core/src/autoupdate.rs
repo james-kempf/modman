@@ -305,7 +305,8 @@ impl GameOutcome {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GameRun {
-    pub domain: String,
+    /// Game id.
+    pub game: String,
     pub name: String,
     pub outcome: GameOutcome,
     pub reasons: Vec<String>,
@@ -358,8 +359,8 @@ impl RunReport {
     }
 }
 
-fn mod_files(conn: &Connection, domain: &str) -> R<BTreeSet<(u64, u64)>> {
-    Ok(mods::list_mods(conn, domain)?
+fn mod_files(conn: &Connection, game: &str) -> R<BTreeSet<(u64, u64)>> {
+    Ok(mods::list_mods(conn, game)?
         .into_iter()
         .filter_map(|m| Some((m.nexus_mod_id?, m.nexus_file_id?)))
         .collect())
@@ -402,7 +403,7 @@ pub fn run(actions: &mut dyn Actions, host: &dyn Host, opts: &RunOptions) -> R<R
         let g = match run_game(actions, host, opts, &game, &snapshot) {
             Ok(g) => g,
             Err(e) => GameRun {
-                domain: game.domain.clone(),
+                game: game.id.clone(),
                 name: game.name.clone(),
                 outcome: GameOutcome::Failed,
                 reasons: Vec::new(),
@@ -418,7 +419,7 @@ pub fn run(actions: &mut dyn Actions, host: &dyn Host, opts: &RunOptions) -> R<R
                 actions.store().conn(),
                 &RunLogEntry {
                     id: 0,
-                    game: Some(g.domain.clone()),
+                    game: Some(g.game.clone()),
                     started_at: report.started_at,
                     finished_at: Some(host.now()),
                     forced: opts.force,
@@ -480,8 +481,8 @@ fn run_game(
     snapshot: &SystemSnapshot,
 ) -> R<GameRun> {
     let conn = actions.store().conn();
-    let mut st = state::load_state(conn, &game.domain)?;
-    let deployed = games::deployment_active(conn, &game.domain)?;
+    let mut st = state::load_state(conn, &game.id)?;
+    let deployed = games::deployment_active(conn, &game.id)?;
     let steam = host.steam_state(game);
     let build = steam.as_ref().and_then(|s| s.buildid.clone());
     let now = host.now();
@@ -496,7 +497,7 @@ fn run_game(
     let (reasons, verdict) = decide(&facts, host, opts.force, opts.interval_hours);
     let why = join(&reasons);
     let mut run = GameRun {
-        domain: game.domain.clone(),
+        game: game.id.clone(),
         name: game.name.clone(),
         outcome: GameOutcome::Acted,
         reasons,
@@ -508,7 +509,7 @@ fn run_game(
             st.system = Some(snapshot.fingerprint.clone());
             st.build = build;
             st.ok_at = Some(now);
-            state::save_state(conn, &game.domain, &st)?;
+            state::save_state(conn, &game.id, &st)?;
         }
         if skip.is_blocked() {
             run.summary = Some(format!("{}: {}", game.name, skip.describe()));
@@ -523,14 +524,14 @@ fn run_game(
     }
     if !opts.force {
         st.tried_at = Some(now);
-        state::save_state(conn, &game.domain, &st)?;
+        state::save_state(conn, &game.id, &st)?;
     }
-    let before = mod_files(actions.store().conn(), &game.domain)?;
+    let before = mod_files(actions.store().conn(), &game.id)?;
     let mut errs = Vec::new();
     match actions.account() {
         Account::Premium => {
             if opts.collections {
-                let cols = collections::list(actions.store().conn(), &game.domain)?;
+                let cols = collections::list(actions.store().conn(), &game.id)?;
                 for c in cols {
                     let slug = c.record.slug;
                     match actions.update_collection(game, &slug) {
@@ -552,17 +553,17 @@ fn run_game(
         }
         Account::None => {}
     }
-    let after = mod_files(actions.store().conn(), &game.domain)?;
+    let after = mod_files(actions.store().conn(), &game.id)?;
     let updated = after.difference(&before).count();
     match actions.redeploy(game) {
         Ok(()) => run.actions.push("redeploy".into()),
         Err(e) => errs.push(("deploy".into(), e)),
     }
     let conn = actions.store().conn();
-    let mut st = state::load_state(conn, &game.domain)?;
+    let mut st = state::load_state(conn, &game.id)?;
     if !errs.is_empty() {
         st.failed = true;
-        state::save_state(conn, &game.domain, &st)?;
+        state::save_state(conn, &game.id, &st)?;
         let names: Vec<String> = errs.iter().map(|(n, _)| n.clone()).collect();
         for (n, e) in &errs {
             run.actions.push(format!("{n} failed: {e}"));
@@ -579,7 +580,7 @@ fn run_game(
     st.build = build;
     st.ok_at = Some(host.now());
     st.failed = false;
-    state::save_state(conn, &game.domain, &st)?;
+    state::save_state(conn, &game.id, &st)?;
     run.summary = Some(if updated > 0 {
         format!(
             "{}: {updated} mod(s) updated and redeployed ({why})",
@@ -607,7 +608,8 @@ fn planned(actions: &mut dyn Actions, opts: &RunOptions) -> Vec<String> {
 /// A game that is due (or due but blocked).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Pending {
-    pub domain: String,
+    /// Game id.
+    pub game: String,
     pub name: String,
     pub reasons: Vec<String>,
     /// `None` = a run now would update and redeploy it.
@@ -634,12 +636,12 @@ pub fn startup_check(conn: &Connection, host: &dyn Host, opts: &RunOptions) -> R
         .then_some(Busy::SystemUpdating { by });
     let mut pending = Vec::new();
     for game in games::list_games(conn)? {
-        let st = state::load_state(conn, &game.domain)?;
+        let st = state::load_state(conn, &game.id)?;
         let steam = host.steam_state(&game);
         let facts = Facts {
             game: &game,
             state: &st,
-            deployed: games::deployment_active(conn, &game.domain)?,
+            deployed: games::deployment_active(conn, &game.id)?,
             snapshot: &snapshot,
             steam: steam.as_ref(),
             now,
@@ -651,7 +653,7 @@ pub fn startup_check(conn: &Connection, host: &dyn Host, opts: &RunOptions) -> R
             Verdict::Skip(_) => continue,
         };
         pending.push(Pending {
-            domain: game.domain.clone(),
+            game: game.id.clone(),
             name: game.name.clone(),
             reasons,
             blocked,
@@ -666,7 +668,8 @@ pub fn startup_check(conn: &Connection, host: &dyn Host, opts: &RunOptions) -> R
 /// Per deployed game, for `status`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GameStatus {
-    pub domain: String,
+    /// Game id.
+    pub game: String,
     pub name: String,
     pub last_ok: Option<i64>,
     pub last_failed: bool,
@@ -701,10 +704,10 @@ pub fn status(
     let snapshot = host.system_snapshot();
     let mut out = Vec::new();
     for game in games::list_games(conn)? {
-        if !games::deployment_active(conn, &game.domain)? {
+        if !games::deployment_active(conn, &game.id)? {
             continue;
         }
-        let st = state::load_state(conn, &game.domain)?;
+        let st = state::load_state(conn, &game.id)?;
         let steam = host.steam_state(&game);
         let build = steam.as_ref().and_then(|s| s.buildid.clone());
         let mut pending = Vec::new();
@@ -717,7 +720,7 @@ pub fn status(
             }
         }
         out.push(GameStatus {
-            domain: game.domain.clone(),
+            game: game.id.clone(),
             name: game.name.clone(),
             last_ok: st.ok_at,
             last_failed: st.failed,

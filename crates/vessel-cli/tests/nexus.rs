@@ -329,7 +329,7 @@ fn game_add_checks_domain_on_nexus_when_logged_in() {
     let (name, id): (String, i64) = s
         .conn()
         .query_row(
-            "SELECT name, nexus_game_id FROM games WHERE domain = 'testgame'",
+            "SELECT name, nexus_game_id FROM games WHERE id = 'testgame'",
             [],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )

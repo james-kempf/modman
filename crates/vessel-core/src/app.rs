@@ -329,10 +329,11 @@ impl<'a> Cx<'a> {
         crate::games::resolve_game(self.store, self.game).map_err(games_hint)
     }
 
-    /// The game named by a target, else [`Self::need_game`].
+    /// The game linked to the Nexus domain a target names, else
+    /// [`Self::need_game`].
     pub fn game_for(&self, domain: Option<&str>) -> R<GameConfig> {
         match domain {
-            Some(d) => crate::games::require_game(self.store.conn(), d).map_err(games_hint),
+            Some(d) => crate::games::resolve_nexus_game(self.store, d).map_err(games_hint),
             None => self.need_game(),
         }
     }

@@ -160,7 +160,7 @@ pub fn game_id(store: &Store, nx: &Nexus, game: &mut GameConfig) -> R<u64> {
     if let Some(id) = game.nexus_game_id.and_then(|i| u64::try_from(i).ok()) {
         return Ok(id);
     }
-    let info = nx.run(nx.client.game(&game.domain))??;
+    let info = nx.run(nx.client.game(game.nexus_domain()?))??;
     game.nexus_game_id = Some(info.id as i64);
     games::save_game(store.conn(), game)?;
     Ok(info.id)
@@ -217,7 +217,7 @@ pub fn fetch_with_progress(
 
 /// A Nexus file to download.
 pub struct FileRequest<'a> {
-    pub game: &'a str,
+    pub game: &'a GameConfig,
     pub mod_id: u64,
     pub file_id: u64,
     pub info: Option<&'a FileInfo>,
@@ -233,7 +233,9 @@ pub fn download_file(
     nx: &Nexus,
     req: FileRequest<'_>,
 ) -> R<(PathBuf, Option<String>)> {
-    let (game, mod_id, file_id) = (req.game, req.mod_id, req.file_id);
+    let (mod_id, file_id) = (req.mod_id, req.file_id);
+    // Download rows and links name the Nexus domain; the archive folder is the game's.
+    let game = req.game.nexus_domain()?;
     if let Some(found) = existing_download(cx.store, game, mod_id, file_id)? {
         if let Some(r) = req.row {
             download::set_status(cx.store, r, DownloadStatus::Done)?;
@@ -279,7 +281,7 @@ pub fn download_file(
                 })
                 .unwrap_or_else(|| format!("{mod_id}-{file_id}")),
         };
-        let dest = downloads_dir(&cfg.data_dir, game).join(&name);
+        let dest = downloads_dir(&cfg.data_dir, &req.game.id).join(&name);
         cx.ui.info(&format!("Downloading {name}..."));
         let fetched = fetch_with_progress(
             nx,

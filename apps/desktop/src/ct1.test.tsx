@@ -231,7 +231,7 @@ describe("CT1 D05 focus across back-to-back dialogs", () => {
 
   // Fails when the Install button is natively disabled once the field is cleared: focus cannot return to it.
   it("Install stays focusable (aria-disabled) with an empty target", async () => {
-    await open("install");
+    await open("browse");
     const form = (await screen.findByLabelText(/Mod id, Nexus URL/)).closest("form")!;
     const b = within(form).getByRole("button", { name: "Install" });
     expect(b).not.toBeDisabled();
@@ -249,13 +249,18 @@ describe("CT1 D06 per-game results", () => {
     };
   };
 
-  // Fails when Verify, Collections lookup or Install search results survive a game switch.
-  it("Verify, lookup and search results reset when the active game changes", async () => {
+  // Fails when Verify, Collections lookup or Browse results survive a game switch.
+  it("Verify, lookup and browse results reset when the active game changes", async () => {
     const g = two();
     const { user, qc } = await open("overview", {
       games_list: g.list,
       verify: () => ({ intact: 20, issues: [], interrupted: false }),
-      search: () => ({ total: 1, mods: [{ modId: 1, name: "Hit", author: "a", version: "1", summary: null, downloads: 1, endorsements: 1, category: null, installed: false, picture: null }] }),
+      // Each game's listing names it, so a stale page shows the other game's hit.
+      browse: () => ({
+        kind: "mods",
+        total: 1,
+        mods: [{ modId: 1, name: `Hit ${g.list().find((x) => x.active)!.id}`, author: "a", version: "1", summary: null, downloads: 1, endorsements: 1, thumbnailUrl: null, category: null, updatedAt: null, installed: false }],
+      }),
       collection_info: () => ({
         game: "skyrimspecialedition",
         slug: "abc",
@@ -275,13 +280,11 @@ describe("CT1 D06 per-game results", () => {
     await within(main()).findByRole("heading", { level: 2, name: "Cyberpunk 2077" });
     expect(screen.queryByText(/20 files intact/)).toBeNull();
 
-    act(() => useUi.getState().setView("install"));
-    await user.type(await screen.findByLabelText("Search"), "x");
-    await user.click(screen.getByRole("button", { name: "Search" }));
-    expect(await screen.findByText("Hit")).toBeInTheDocument();
+    act(() => useUi.getState().setView("browse"));
+    expect(await screen.findByText("Hit cyberpunk2077")).toBeInTheDocument();
     await flip("skyrimspecialedition");
-    await within(main()).findByText("Skyrim Special Edition");
-    expect(screen.queryByText("Hit")).toBeNull();
+    expect(await screen.findByText("Hit skyrimspecialedition")).toBeInTheDocument();
+    expect(screen.queryByText("Hit cyberpunk2077")).toBeNull();
 
     act(() => useUi.getState().setView("collections"));
     await user.type(await screen.findByLabelText(/Collection URL/), "abc");
@@ -383,7 +386,7 @@ describe("CT1 D10 failing queries", () => {
 
   it.each([
     ["collections", "collections_list"],
-    ["install", "downloads_list"],
+    ["browse", "downloads_list"],
     ["activity", "log_tail"],
   ] as const)("%s shows a note when %s fails", async (view, cmd) => {
     await open(view, { [cmd]: fail(cmd) });
@@ -434,7 +437,7 @@ describe("CT1 D13 profile save failure", () => {
 describe("CT1 D15 Install without games", () => {
   // Fails when Install offers its forms with no game to install into.
   it("shows the No active game empty state", async () => {
-    await open("install", {}, []);
+    await open("browse", {}, []);
     expect(await within(main()).findByRole("heading", { name: "No active game" })).toBeInTheDocument();
     expect(within(main()).queryByLabelText(/Mod id, Nexus URL/)).toBeNull();
   });
@@ -451,7 +454,7 @@ describe("CT1 D16/D17 job labels and cancellation", () => {
 
   // D17: fails when a cancelled FOMOD wizard is shown as a failed job / error notice.
   it("a cancelled job shows a neutral Cancelled state, not an error", async () => {
-    const { t, user } = await open("install", {
+    const { t, user } = await open("browse", {
       install: () => {
         throw { message: "FOMOD installer cancelled" };
       },

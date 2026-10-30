@@ -233,7 +233,7 @@ describe("add-game dialog", () => {
 
 describe("no active game", () => {
   // Fails when a per-game view does not point back to the library.
-  it.each(["mods", "install", "collections", "requirements"] as const)("%s points back to Games", async (view) => {
+  it.each(["mods", "browse", "collections", "requirements"] as const)("%s points back to Games", async (view) => {
     const { user } = await library({}, [experimentalGame({ active: false })]);
     act(() => useUi.getState().setView(view));
     await user.click(await within(screen.getByRole("main")).findByRole("button", { name: "Go to Games" }));

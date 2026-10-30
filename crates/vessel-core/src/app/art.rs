@@ -191,8 +191,8 @@ pub fn lookup(
 
 /// The game's library art as a `data:` URL (`None`: no Steam app id, or
 /// no art anywhere).
-pub fn game_art(cx: &Cx<'_>, domain: &str, kind: ArtKind) -> R<Option<String>> {
-    let g = games::require_game(cx.store.conn(), domain)?;
+pub fn game_art(cx: &Cx<'_>, game: &str, kind: ArtKind) -> R<Option<String>> {
+    let g = games::require_game(cx.store.conn(), game)?;
     let Some(appid) = g.appid else {
         return Ok(None);
     };

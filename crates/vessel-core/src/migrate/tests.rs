@@ -141,7 +141,7 @@ impl Fx {
         let d = s(&self.old_data);
         c.execute_batch(&format!(
             "INSERT INTO settings VALUES ('data-dir', '{d}');
-             INSERT INTO games (domain, name, folder, added_at) VALUES ('skyrim', 'Skyrim', '{}', 0);
+             INSERT INTO games (id, name, folder, added_at) VALUES ('skyrim', 'Skyrim', '{}', 0);
              INSERT INTO mods (id, game, uid, name, archive, staging_dir, priority, installed_at)
                VALUES (1, 'skyrim', 'm1', 'Mod', '{d}/skyrim/downloads/a.zip', '{}', 0, 0);
              INSERT INTO backups (id, game, target, rel_path, sha256, store_path, size, mode, created_at)

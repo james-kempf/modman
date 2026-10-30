@@ -213,7 +213,7 @@ describe("CT2 D05 error boundary recovery", () => {
     await open("mods", { mods_list: () => ({ mods, changed_since_deploy: false }) });
     await screen.findByText(/This view hit an error/);
     mods = [mod({ name: "Fixed" })];
-    act(() => useUi.getState().setView("install"));
+    act(() => useUi.getState().setView("browse"));
     act(() => useUi.getState().setView("mods"));
     expect(await screen.findByText("Fixed")).toBeInTheDocument();
   });
@@ -285,7 +285,7 @@ describe("CT2 D06/D08 layout guards", () => {
 describe("CT2 D09 multi-line paste", () => {
   // Fails when a multi-line nxm paste is sent as one glued string.
   it("nxm field: each pasted link is shown and sent separately", async () => {
-    const { user, t } = await open("install", { nxm_submit: (a) => ({ row: 1, link: String(a!.url).split("?")[0], kind: "mod" }) });
+    const { user, t } = await open("browse", { nxm_submit: (a) => ({ row: 1, link: String(a!.url).split("?")[0], kind: "mod" }) });
     const field = await screen.findByLabelText("nxm link");
     fireEvent.paste(field, { clipboardData: { getData: () => "nxm://a/mods/1/files/1?key=k\nnxm://a/mods/2/files/2?key=k\n" } });
     expect(field).toHaveValue("nxm://a/mods/1/files/1?key=k nxm://a/mods/2/files/2?key=k");
@@ -297,7 +297,7 @@ describe("CT2 D09 multi-line paste", () => {
 
   // Fails when lines are glued together ("266267") in the install field.
   it("install field keeps the first pasted line and says so", async () => {
-    await open("install");
+    await open("browse");
     const field = await screen.findByLabelText(/Mod id, Nexus URL/);
     fireEvent.paste(field, { clipboardData: { getData: () => "266\n267\n" } });
     expect(field).toHaveValue("266");

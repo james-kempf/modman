@@ -246,9 +246,21 @@ fn fresh(p: &Path, now: i64) -> Option<Vec<u8>> {
     std::fs::read(p).ok().filter(|b| sniff(b).is_some())
 }
 
+/// Nexus domain of the game with id `game` (`None`: not linked to Nexus).
+fn nexus_domain_of(cx: &Cx<'_>, game: &str) -> R<Option<String>> {
+    Ok(games::require_game(cx.store.conn(), game)
+        .map_err(super::games_hint)?
+        .nexus_domain)
+}
+
 /// A collection's tile picture from Nexus as a `data:` URL (`None`: it has
-/// none, or Nexus could not be asked).
+/// none, the game is not linked to Nexus, or Nexus could not be asked).
+/// `game` is the game id.
 pub fn collection_art(cx: &Cx<'_>, game: &str, slug: &str) -> R<Option<String>> {
+    let Some(domain) = nexus_domain_of(cx, game)? else {
+        return Ok(None);
+    };
+    let game = domain.as_str();
     let adult = cx.config()?.adult;
     collection_art_lookup(
         &thumbs_dir(cx.paths),
@@ -269,8 +281,14 @@ pub fn collection_art(cx: &Cx<'_>, game: &str, slug: &str) -> R<Option<String>> 
     )
 }
 
-/// The mod's picture as a `data:` URL (`None`: the mod has none).
+/// The mod's picture as a `data:` URL (`None`: the mod has none, or the
+/// game is not linked to Nexus). `game` is the game id; pictures are cached
+/// by Nexus domain.
 pub fn thumbnail(cx: &Cx<'_>, game: &str, mod_id: u64) -> R<Option<String>> {
+    let Some(domain) = nexus_domain_of(cx, game)? else {
+        return Ok(None);
+    };
+    let game = domain.as_str();
     let dir = thumbs_dir(cx.paths);
     if let Some(b) = cached(&dir, game, mod_id, store::now())? {
         return Ok(data_url(&b));
@@ -284,6 +302,36 @@ pub fn thumbnail(cx: &Cx<'_>, game: &str, mod_id: u64) -> R<Option<String>> {
     };
     let bytes = fetch_into(&dir, game, mod_id, &url, allowed_url)?;
     Ok(data_url(&bytes))
+}
+
+/// Cache file of a picture fetched by URL: `<dir>/url/<sha256 of the URL>`.
+pub fn url_cache_path(dir: &Path, url: &str) -> PathBuf {
+    use sha2::{Digest, Sha256};
+    let name: String = Sha256::digest(url.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    dir.join("url").join(name)
+}
+
+/// A Nexus picture by URL (browse listings carry their thumbnail URLs) as
+/// a `data:` URL, cached for [`TTL_SECS`]. Only https Nexus hosts, as for
+/// every picture; `None` when the URL is not one or the fetch fails.
+pub fn picture(cx: &Cx<'_>, url: &str) -> R<Option<String>> {
+    if !allowed_url(url) {
+        return Ok(None);
+    }
+    let dest = url_cache_path(&thumbs_dir(cx.paths), url);
+    if let Some(b) = fresh(&dest, store::now()) {
+        return Ok(data_url(&b));
+    }
+    match fetch_image(&dest, url, MAX_BYTES, allowed_url) {
+        Ok(b) => Ok(data_url(&b)),
+        Err(e) => {
+            tracing::debug!("no picture from {}: {e}", super::nxm::redact_url(url));
+            Ok(None)
+        }
+    }
 }
 
 #[cfg(test)]

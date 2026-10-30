@@ -90,7 +90,7 @@ pub fn deploy(
     report.recovered = recover_locked(store, game, env)?;
     let plan = build_plan(store.conn(), game)?;
     fill_plan_info(&mut report, &plan);
-    if games::deployment_active(store.conn(), &game.domain)? {
+    if games::deployment_active(store.conn(), &game.id)? {
         report.purged = Some(purge_locked(store, game, env)?);
     }
     if plan.items.is_empty() {
@@ -168,16 +168,16 @@ fn dry_run(
         "SELECT rel_path, backup_id IS NOT NULL FROM deployments WHERE game = ?1 AND target = ?2",
     )?;
     let deployed: HashMap<String, bool> = stmt
-        .query_map(params![game.domain, plan.target.as_str()], |r| {
+        .query_map(params![game.id, plan.target.as_str()], |r| {
             Ok((r.get::<_, String>(0)?.to_lowercase(), r.get(1)?))
         })?
         .collect::<Result<_, _>>()?;
     // A real deploy purges an active deployment first, which ends the
     // provenance of every earlier placement.
-    let ours = if games::deployment_active(conn, &game.domain)? {
+    let ours = if games::deployment_active(conn, &game.id)? {
         Default::default()
     } else {
-        untracked_placements(conn, &game.domain, plan.target.as_str())?
+        untracked_placements(conn, &game.id, plan.target.as_str())?
     };
     report.placed = pre.items.len();
     report.new_dirs = pre.new_dirs.len();
@@ -209,19 +209,19 @@ fn run_deploy(
     let crash = |n: usize| env.faults.crash_after_files == Some(n);
     // Runs after the purge of the previous deployment, so only placements
     // whose tracking was lost remain (see `untracked_placements`).
-    let ours = untracked_placements(store.conn(), &game.domain, target)?;
+    let ours = untracked_placements(store.conn(), &game.id, target)?;
 
     let journal = {
         let tx = store.conn_mut().transaction()?;
         tx.execute(
             "INSERT INTO deploy_journal (game, op, method, started_at) VALUES (?1, 'deploy', ?2, ?3)",
-            params![game.domain, opts.method.as_str(), now()],
+            params![game.id, opts.method.as_str(), now()],
         )?;
         let id = tx.last_insert_rowid();
         for d in &pre.new_dirs {
             tx.execute(
                 "INSERT OR IGNORE INTO deployment_dirs (game, target, rel_path) VALUES (?1, ?2, ?3)",
-                params![game.domain, target, d],
+                params![game.id, target, d],
             )?;
         }
         tx.commit()?;
@@ -273,7 +273,7 @@ fn run_deploy(
                             "INSERT INTO backups (game, target, rel_path, sha256, store_path, size, mode, mtime_ns, created_at)
                              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                             params![
-                                game.domain,
+                                game.id,
                                 target,
                                 p.rel,
                                 b.sha256,
@@ -352,7 +352,7 @@ fn run_deploy(
                 "INSERT INTO deployments (game, target, rel_path, mod_id, method, source, dev, inode, size, mtime_ns, sha256, backup_id, deployed_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                 params![
-                    game.domain,
+                    game.id,
                     target,
                     p.rel,
                     m.id,
@@ -454,13 +454,13 @@ fn purge_locked(
     env: &DeployEnv,
 ) -> Result<PurgeReport, DeployError> {
     let mut report = PurgeReport::default();
-    if !games::deployment_active(store.conn(), &game.domain)? {
+    if !games::deployment_active(store.conn(), &game.id)? {
         report.nothing_deployed = true;
         return Ok(report);
     }
     store.conn().execute(
         "INSERT INTO deploy_journal (game, op, started_at) VALUES (?1, 'purge', ?2)",
-        params![game.domain, now()],
+        params![game.id, now()],
     )?;
     let journal = store.conn().last_insert_rowid();
     undo_all(store, game, env, &mut report, env.faults.crash_after_files)?;
@@ -492,7 +492,7 @@ fn recover_locked(
         let mut stmt = store.conn().prepare(
             "SELECT id, op FROM deploy_journal WHERE game = ?1 AND state = 'started' ORDER BY id",
         )?;
-        let rows = stmt.query_map([&game.domain], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        let rows = stmt.query_map([&game.id], |r| Ok((r.get(0)?, r.get(1)?)))?;
         rows.collect::<Result<_, _>>()?
     };
     let mut last = None;
@@ -818,7 +818,7 @@ fn undo_all(
             "SELECT id, target, rel_path, method, source, inode, size, mtime_ns, backup_id
              FROM deployments WHERE game = ?1 ORDER BY id DESC",
         )?;
-        let rows = stmt.query_map([&game.domain], |r| {
+        let rows = stmt.query_map([&game.id], |r| {
             Ok((
                 r.get(0)?,
                 r.get(1)?,
@@ -862,7 +862,7 @@ fn undo_all(
         let mut stmt = store.conn().prepare(
             "SELECT id, target, rel_path FROM backups WHERE game = ?1 AND restored_at IS NULL ORDER BY id",
         )?;
-        let rows = stmt.query_map([&game.domain], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        let rows = stmt.query_map([&game.id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
         rows.collect::<Result<_, _>>()?
     };
     let blobs = BlobStore {
@@ -912,7 +912,7 @@ fn undo_all(
         let mut stmt = store.conn().prepare(
             "SELECT target, rel_path FROM deployment_dirs WHERE game = ?1 ORDER BY rel_path DESC",
         )?;
-        let rows = stmt.query_map([&game.domain], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        let rows = stmt.query_map([&game.id], |r| Ok((r.get(0)?, r.get(1)?)))?;
         rows.collect::<Result<_, _>>()?
     };
     for (target, rel) in dirs {
@@ -923,10 +923,9 @@ fn undo_all(
             }
         }
     }
-    store.conn().execute(
-        "DELETE FROM deployment_dirs WHERE game = ?1",
-        [&game.domain],
-    )?;
+    store
+        .conn()
+        .execute("DELETE FROM deployment_dirs WHERE game = ?1", [&game.id])?;
     Ok(())
 }
 
@@ -943,14 +942,14 @@ pub(super) fn interrupted(conn: &Connection, domain: &str) -> Result<bool, Deplo
 /// link target, which must still resolve. Read-only; takes no lock.
 pub fn verify(conn: &Connection, game: &GameConfig) -> Result<VerifyReport, DeployError> {
     let mut report = VerifyReport {
-        interrupted: interrupted(conn, &game.domain)?,
+        interrupted: interrupted(conn, &game.id)?,
         ..Default::default()
     };
     let mut stmt = conn.prepare(
         "SELECT target, rel_path, method, source, inode, size, mtime_ns FROM deployments
          WHERE game = ?1 ORDER BY rel_path",
     )?;
-    let rows = stmt.query_map([&game.domain], |r| {
+    let rows = stmt.query_map([&game.id], |r| {
         Ok((
             r.get::<_, String>(0)?,
             r.get::<_, String>(1)?,

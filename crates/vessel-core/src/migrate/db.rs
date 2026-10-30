@@ -84,6 +84,17 @@ fn has_table(conn: &Connection, t: &str) -> Result<bool, MigrateError> {
     )?)
 }
 
+/// Key column of `games`: `id`, or `domain` in a database from before the
+/// game_identity migration (the old database is read as it is).
+fn games_key(conn: &Connection) -> Result<&'static str, MigrateError> {
+    let has_id: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM pragma_table_info('games') WHERE name = 'id')",
+        [],
+        |r| r.get(0),
+    )?;
+    Ok(if has_id { "id" } else { "domain" })
+}
+
 /// Steam libraries of the configured games, as staging_root sees them.
 pub fn libraries(db: &Path) -> Result<Vec<PathBuf>, MigrateError> {
     if !db.is_file() {
@@ -207,11 +218,12 @@ pub fn retarget(db: &Path, map: &PrefixMap) -> Result<Retarget, MigrateError> {
     if !has_table(&conn, "deployments")? {
         return Ok(out);
     }
-    let mut stmt = conn.prepare(
+    let key = games_key(&conn)?;
+    let mut stmt = conn.prepare(&format!(
         "SELECT d.target, d.rel_path, d.source, g.folder, g.prefix
-         FROM deployments d JOIN games g ON g.domain = d.game
-         WHERE d.method = 'symlink' ORDER BY d.id",
-    )?;
+         FROM deployments d JOIN games g ON g.{key} = d.game
+         WHERE d.method = 'symlink' ORDER BY d.id"
+    ))?;
     let rows = stmt.query_map([], |r| {
         Ok((
             r.get::<_, String>(0)?,

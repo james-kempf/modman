@@ -122,7 +122,7 @@ impl Fx {
             .execute(
                 "INSERT INTO mods (game, uid, name, priority, staging_dir, installed_at)
                  VALUES (?1, ?2, ?2, ?3, ?4, 0)",
-                rusqlite::params![self.game.domain, uid, priority, dir.to_string_lossy()],
+                rusqlite::params![self.game.id, uid, priority, dir.to_string_lossy()],
             )
             .unwrap();
         self.store.conn().last_insert_rowid()
@@ -149,7 +149,7 @@ impl Fx {
             .execute(
                 "INSERT INTO collections (game, slug, revision, manifest, installed_at)
                  VALUES (?1, 'abc123', 1, ?2, 0)",
-                rusqlite::params![self.game.domain, manifest.to_string()],
+                rusqlite::params![self.game.id, manifest.to_string()],
             )
             .unwrap();
     }

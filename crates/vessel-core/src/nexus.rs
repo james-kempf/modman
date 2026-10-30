@@ -30,7 +30,10 @@ pub use deps::{
     cached_requirements, refresh_requirements, CachedRequirements, Requirement, BATCH_SIZE,
     REQUIREMENTS_TTL,
 };
-pub use graphql::{SearchMod, SearchResults, REQUIREMENT_FIELDS};
+pub use graphql::{
+    utc_date, BrowseCollection, BrowseCollections, BrowseQuery, BrowseSort, SearchMod,
+    SearchResults, REQUIREMENT_FIELDS,
+};
 pub use keystore::{
     keyring_opener, probe_keyring, Backend, KeyStorage, KeyringOpener, ProbeOutcome, API_KEY_ENV,
     CREDENTIALS_FILE, KEYRING_SERVICE, KEYRING_USER, PROBE_TIMEOUT,

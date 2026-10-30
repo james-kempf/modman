@@ -80,7 +80,7 @@ impl AppActions<'_, '_> {
     ) -> Result<(), String> {
         let r = f(self.cx).map_err(|e| chain(&e));
         if let Err(e) = &r {
-            tracing::warn!("auto-update {}: {e}", game.domain);
+            tracing::warn!("auto-update {}: {e}", game.id);
         }
         r
     }
@@ -111,8 +111,9 @@ impl Actions for AppActions<'_, '_> {
     }
 
     fn update_collection(&mut self, game: &GameConfig, slug: &str) -> Result<(), String> {
+        let domain = game.nexus_domain().map_err(|e| e.to_string())?;
         let opts = InstallOpts {
-            reference: format!("nxm://{}/collections/{slug}", game.domain),
+            reference: format!("nxm://{domain}/collections/{slug}"),
             optional: Some("none".into()),
             ..Default::default()
         };

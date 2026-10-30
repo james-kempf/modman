@@ -7,9 +7,10 @@
 // prompt counts as cancel. Mods, the "changed since deploy" flag, profiles
 // and collections are kept per game.
 
-import type { Answer, CollectionRecord, ConfigEntry, ModView, Msg, ProfileSummary, Prompt, ReqRow, UpdateReport } from "../ipc/types";
+import type { Answer, BrowseRequest, CollectionRecord, ConfigEntry, ModView, Msg, ProfileSummary, Prompt, ReqRow, UpdateReport } from "../ipc/types";
 import { createFakeTransport, type Args, type FakeTransport } from "./fake";
 import { afterChange, autoupdateStatus, deployReport, experimentalGame, game, mod } from "./fixtures";
+import { demoBrowse } from "./browse";
 import { demoPoisoned, repairHandlers } from "./repair";
 
 export function createDemoBackend(): FakeTransport {
@@ -301,6 +302,8 @@ export function createDemoBackend(): FakeTransport {
         return { uid: a!.reference, from: i + 1, to: j + 1, of: mods.length, after: changed(g) };
       }),
     thumbnail: () => null,
+    // Every demo listing picture is a generated tile (no network).
+    picture: (a: Args) => placeholderTile(String(a!.url).split("/").pop()!.replace(/\.\w+$/, "")),
     install: (a: Args) =>
       job("install", async (id) => {
         const g = st(a);
@@ -311,7 +314,15 @@ export function createDemoBackend(): FakeTransport {
           say(id, "Cancelled.");
           return { game: active().id, installed: null, collection: null, after: afterChange({ needs_deploy: false }) };
         }
-        const m = mod({ name: `Demo Mod ${a!.target}`, game: active().id, installed_at: now(), position: g.mods.length + 1 });
+        // A bare mod id (as Browse sends) is a Nexus mod, so Browse marks it installed.
+        const nexusId = /^\d+$/.test(String(a!.target)) ? Number(a!.target) : null;
+        const m = mod({
+          name: `Demo Mod ${a!.target}`,
+          game: active().id,
+          installed_at: now(),
+          position: g.mods.length + 1,
+          nexus_mod_id: nexusId,
+        });
         g.mods.push(m);
         renumber(g);
         say(id, `Installed ${m.name}`, "success");
@@ -555,7 +566,14 @@ export function createDemoBackend(): FakeTransport {
         if (installed) changed(g);
         return { ...rep, updates: rep.updates.filter((u) => u.pinned), installed };
       }),
-    search: () => ({ total: 0, mods: [] }),
+    browse: (a: Args) => {
+      const g = st(a);
+      return demoBrowse(
+        a!.request as BrowseRequest,
+        new Set(g.mods.map((m) => m.nexus_mod_id).filter((n): n is number => n !== null)),
+        new Map(g.collections.map((c) => [c.slug, c.revision])),
+      );
+    },
     autoupdate_status: () =>
       autoupdateStatus({ timer: { installed: timer, active: timer ? "active" : null, next_elapse: null, every_hours: 1 } }),
     autoupdate_enable: () => {

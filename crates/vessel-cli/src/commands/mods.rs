@@ -147,8 +147,8 @@ pub type LaunchArgs = IgnoredArgs;
 pub type CleanArgs = IgnoredArgs;
 
 fn changed_hint(ctx: &Ctx, game: &GameConfig) -> Result<bool> {
-    let st = deploy::status(ctx.store.conn(), &game.domain)?;
-    Ok(mods::changed_since(&ctx.store, &game.domain, st.last_deployed_at)? && st.active)
+    let st = deploy::status(ctx.store.conn(), &game.id)?;
+    Ok(mods::changed_since(&ctx.store, &game.id, st.last_deployed_at)? && st.active)
 }
 
 /// Shows the requirement report of `rows`.
@@ -167,18 +167,14 @@ fn refresh_deps(ctx: &mut Ctx, game: &GameConfig, ids: &[u64], refresh: bool, qu
 pub fn list(ctx: &mut Ctx, args: ListArgs) -> Result<()> {
     let game = ctx.need_game()?;
     let out = ctx.out;
-    let all = mods::list_mods(ctx.store.conn(), &game.domain)?;
+    let all = mods::list_mods(ctx.store.conn(), &game.id)?;
     out.heading(&format!("Mods — {}", game.name));
     if all.is_empty() {
         out.info("No mods installed. Try: vessel install <mod-id|url|archive>");
         return Ok(());
     }
     let members = match &args.collection {
-        Some(slug) => Some(mods::collection_mod_ids(
-            ctx.store.conn(),
-            &game.domain,
-            slug,
-        )?),
+        Some(slug) => Some(mods::collection_mod_ids(ctx.store.conn(), &game.id, slug)?),
         None => None,
     };
     let q = args.text.as_deref().map(str::to_lowercase);
@@ -263,7 +259,7 @@ pub(crate) fn fmt_time(epoch: i64) -> String {
 pub fn info(ctx: &mut Ctx, args: InfoArgs) -> Result<()> {
     let game = ctx.need_game()?;
     let out = ctx.out;
-    let m = mods::resolve(ctx.store.conn(), &game.domain, &args.reference)?;
+    let m = mods::resolve(ctx.store.conn(), &game.id, &args.reference)?;
     out.heading(&m.name);
     let d = |v: Option<&str>| v.filter(|s| !s.is_empty()).unwrap_or("—").to_string();
     println!("  ID          : {}", m.uid);
@@ -274,10 +270,13 @@ pub fn info(ctx: &mut Ctx, args: InfoArgs) -> Result<()> {
     );
     println!("  Version     : {}", d(m.version.as_deref()));
     println!("  Author      : {}", d(m.author.as_deref()));
-    let link = match (m.nexus_mod_id, m.nexus_file_id) {
-        (Some(mi), f) => format!(
-            "   https://www.nexusmods.com/{}/mods/{mi}?tab=files{}",
-            game.domain,
+    let link = match (
+        game.nexus_domain.as_deref(),
+        m.nexus_mod_id,
+        m.nexus_file_id,
+    ) {
+        (Some(nd), Some(mi), f) => format!(
+            "   https://www.nexusmods.com/{nd}/mods/{mi}?tab=files{}",
             f.map_or(String::new(), |f| format!("&file_id={f}"))
         ),
         _ => String::new(),
@@ -360,12 +359,12 @@ pub fn info(ctx: &mut Ctx, args: InfoArgs) -> Result<()> {
 }
 
 fn ids_for(ctx: &Ctx, game: &GameConfig, a: &ToggleArgs) -> Result<Vec<i64>> {
-    let all = mods::list_mods(ctx.store.conn(), &game.domain)?;
+    let all = mods::list_mods(ctx.store.conn(), &game.id)?;
     let mut ids: Vec<i64> = Vec::new();
     if a.all {
         ids.extend(all.iter().map(|m| m.id));
     } else if let Some(slug) = &a.collection {
-        let c = mods::collection_mod_ids(ctx.store.conn(), &game.domain, slug)?;
+        let c = mods::collection_mod_ids(ctx.store.conn(), &game.id, slug)?;
         if c.is_empty() {
             return Err(mods::ModsError::NoCollectionMods(slug.clone()).into());
         }
@@ -423,7 +422,7 @@ pub fn order(ctx: &mut Ctx, args: OrderArgs) -> Result<()> {
 pub fn conflicts(ctx: &mut Ctx, args: ConflictsArgs) -> Result<()> {
     let game = ctx.need_game()?;
     let out = ctx.out;
-    let all = mods::list_mods(ctx.store.conn(), &game.domain)?;
+    let all = mods::list_mods(ctx.store.conn(), &game.id)?;
     let filter = match &args.reference {
         Some(r) => Some(mods::resolve_in(&all, r)?),
         None => None,
@@ -519,7 +518,7 @@ fn rows_json(rows: &[ReqRow]) -> String {
 pub fn deps(ctx: &mut Ctx, args: DepsArgs) -> Result<()> {
     let game = ctx.need_game()?;
     let out = ctx.out;
-    let all = mods::list_mods(ctx.store.conn(), &game.domain)?;
+    let all = mods::list_mods(ctx.store.conn(), &game.id)?;
     let (sub, words) = match args.words.split_first() {
         Some((w, rest)) if w == "ack" || w == "unack" => (Some(w.as_str()), rest.to_vec()),
         _ => (None, args.words.clone()),
@@ -607,8 +606,8 @@ pub fn search(ctx: &mut Ctx, args: SearchArgs) -> Result<()> {
     let out = ctx.out;
     let q = args.words.join(" ");
     let nexus = nx::connect(ctx)?.ok_or_else(|| anyhow::anyhow!("no Nexus client"))?;
-    let res = nexus.run(nexus.client.search(&game.domain, &q))??;
-    let installed: Vec<u64> = mods::list_mods(ctx.store.conn(), &game.domain)?
+    let res = nexus.run(nexus.client.search(game.nexus_domain()?, &q))??;
+    let installed: Vec<u64> = mods::list_mods(ctx.store.conn(), &game.id)?
         .iter()
         .filter_map(|m| m.nexus_mod_id)
         .collect();
@@ -675,7 +674,7 @@ pub fn profile(ctx: &mut Ctx, args: ProfileArgs) -> Result<()> {
     match args.cmd.unwrap_or(ProfileCmd::List) {
         ProfileCmd::List => {
             out.heading(&format!("Profiles — {}", game.name));
-            let list = mods::list_profiles(&ctx.store, &game.domain)?;
+            let list = mods::list_profiles(&ctx.store, &game.id)?;
             if list.is_empty() {
                 out.info("No profiles yet. Save one with: vessel profile save <name>");
             }
@@ -701,7 +700,7 @@ pub fn profile(ctx: &mut Ctx, args: ProfileArgs) -> Result<()> {
             appmods::load_profile(&mut ctx.cx(&ui), &game, &name)?;
         }
         ProfileCmd::Delete { name } => {
-            mods::delete_profile(&ctx.store, &game.domain, &name)?;
+            mods::delete_profile(&ctx.store, &game.id, &name)?;
             out.success(&format!("Deleted profile '{name}'."));
         }
     }
@@ -726,11 +725,11 @@ pub fn clean(ctx: &mut Ctx, _args: CleanArgs) -> Result<()> {
     let lock = staging_lock(&ctx.paths)?;
     let tmp = deploy::staging_root(&game, &cfg.data_dir).join(".tmp");
     let _ = std::fs::remove_dir_all(&tmp);
-    let referenced: Vec<std::path::PathBuf> = mods::list_mods(ctx.store.conn(), &game.domain)?
+    let referenced: Vec<std::path::PathBuf> = mods::list_mods(ctx.store.conn(), &game.id)?
         .into_iter()
         .filter_map(|m| m.archive)
         .collect();
-    let dl = mods::downloads_dir(&cfg.data_dir, &game.domain);
+    let dl = mods::downloads_dir(&cfg.data_dir, &game.id);
     let mut cands: Vec<(std::path::PathBuf, u64)> = Vec::new();
     if let Ok(rd) = std::fs::read_dir(&dl) {
         for e in rd.flatten() {
@@ -830,7 +829,7 @@ fn restage(ctx: &mut Ctx, args: RestageArgs) -> Result<()> {
     let ids = args
         .refs
         .iter()
-        .map(|r| Ok(mods::resolve(ctx.store.conn(), &game.domain, r)?.id))
+        .map(|r| Ok(mods::resolve(ctx.store.conn(), &game.id, r)?.id))
         .collect::<Result<Vec<_>>>()?;
     let req = app::restage::RestageRequest {
         ids,

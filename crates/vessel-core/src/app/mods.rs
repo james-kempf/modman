@@ -20,10 +20,10 @@ pub fn set_enabled(
     ids: &[i64],
     enable: bool,
 ) -> R<AfterChange> {
-    mods::set_enabled(cx.store, &game.domain, ids, enable)?;
+    mods::set_enabled(cx.store, &game.id, ids, enable)?;
     let word = if enable { "Enabled" } else { "Disabled" };
     if ids.len() <= 10 {
-        let all = mods::list_mods(cx.store.conn(), &game.domain)?;
+        let all = mods::list_mods(cx.store.conn(), &game.id)?;
         for m in all.iter().filter(|m| ids.contains(&m.id)) {
             cx.ui.success(&format!("{word}: {}", m.uid));
         }
@@ -53,7 +53,7 @@ pub fn move_mod(
     arg: Option<&str>,
 ) -> R<MoveResult> {
     let spec = OrderSpec::parse(spec, arg)?;
-    let (m, mv) = mods::move_mod(cx.store, &game.domain, reference, &spec)?;
+    let (m, mv) = mods::move_mod(cx.store, &game.id, reference, &spec)?;
     cx.ui.success(&format!(
         "{}: #{} → #{}  (of {})",
         m.uid, mv.from, mv.to, mv.of
@@ -86,7 +86,7 @@ pub fn uninstall(
     refs: &[String],
     delete_archive: bool,
 ) -> R<UninstallResult> {
-    let all = mods::list_mods(cx.store.conn(), &game.domain)?;
+    let all = mods::list_mods(cx.store.conn(), &game.id)?;
     let mut targets: Vec<&ModRecord> = Vec::new();
     for r in refs {
         let m = mods::resolve_in(&all, r)?;
@@ -107,11 +107,11 @@ pub fn uninstall(
         return Ok(UninstallResult::default());
     }
     let ids: Vec<i64> = targets.iter().map(|t| t.id).collect();
-    let dl = mods::downloads_dir(&cx.config()?.data_dir, &game.domain);
+    let dl = mods::downloads_dir(&cx.config()?.data_dir, &game.id);
     let lock = staging_lock(cx.paths)?;
     let r = mods::remove_mods(
         cx.store,
-        &game.domain,
+        &game.id,
         &ids,
         delete_archive.then_some(dl.as_path()),
     )?;
@@ -135,13 +135,13 @@ pub fn save_profile(cx: &mut Cx<'_>, game: &GameConfig, name: &str) -> R<Option<
     if !mods::valid_profile_name(name) {
         return Err(ModsError::InvalidProfileName(name.to_string()).into());
     }
-    let exists = mods::list_profiles(cx.store, &game.domain)?
+    let exists = mods::list_profiles(cx.store, &game.id)?
         .iter()
         .any(|p| p.name == name);
     if exists && !cx.ui.confirm(&format!("Overwrite profile '{name}'?"), true) {
         return Ok(None);
     }
-    let n = mods::save_profile(cx.store, &game.domain, name)?;
+    let n = mods::save_profile(cx.store, &game.id, name)?;
     cx.ui
         .success(&format!("Saved profile '{name}' ({n} mods)."));
     Ok(Some(n))
@@ -157,7 +157,7 @@ pub struct ProfileLoaded {
 
 /// Restores a saved profile, then auto-deploys or hints.
 pub fn load_profile(cx: &mut Cx<'_>, game: &GameConfig, name: &str) -> R<ProfileLoaded> {
-    let r = mods::load_profile(cx.store, &game.domain, name)?;
+    let r = mods::load_profile(cx.store, &game.id, name)?;
     cx.ui.success(&format!("Loaded profile '{name}'."));
     if r.missing > 0 {
         cx.ui.warn(&format!(
@@ -193,14 +193,14 @@ pub struct ModsView {
 
 pub fn mods_view(cx: &Cx<'_>, game: &GameConfig) -> R<ModsView> {
     let mut v = Vec::new();
-    for m in mods::list_mods(cx.store.conn(), &game.domain)? {
+    for m in mods::list_mods(cx.store.conn(), &game.id)? {
         v.push(ModView {
             collections: mods::collections_of(cx.store.conn(), m.id)?,
             record: m,
         });
     }
-    let st = deploy::status(cx.store.conn(), &game.domain)?;
-    let changed = st.active && mods::changed_since(cx.store, &game.domain, st.last_deployed_at)?;
+    let st = deploy::status(cx.store.conn(), &game.id)?;
+    let changed = st.active && mods::changed_since(cx.store, &game.id, st.last_deployed_at)?;
     Ok(ModsView {
         mods: v,
         changed_since_deploy: changed,
@@ -230,8 +230,9 @@ pub struct ModDetail {
 }
 
 /// The mod's Nexus Mods page (its files tab, on the mod's file when known);
-/// `None` for a mod that did not come from Nexus.
-fn nexus_page_url(domain: &str, m: &ModRecord) -> Option<String> {
+/// `None` for a mod that did not come from Nexus or a game not linked to it.
+fn nexus_page_url(game: &GameConfig, m: &ModRecord) -> Option<String> {
+    let domain = game.nexus_domain.as_deref()?;
     m.nexus_mod_id.map(|mi| {
         format!(
             "https://www.nexusmods.com/{domain}/mods/{mi}?tab=files{}",
@@ -250,8 +251,8 @@ pub fn open_mod_page(
     reference: &str,
     open: impl FnOnce(&str) -> R<()>,
 ) -> R<String> {
-    let m = mods::resolve(cx.store.conn(), &game.domain, reference)?;
-    let url = match nexus_page_url(&game.domain, &m) {
+    let m = mods::resolve(cx.store.conn(), &game.id, reference)?;
+    let url = match nexus_page_url(game, &m) {
         Some(url) => url,
         None => fail!("{} has no Nexus Mods page.", m.name),
     };
@@ -260,7 +261,7 @@ pub fn open_mod_page(
 }
 
 pub fn mod_detail(cx: &Cx<'_>, game: &GameConfig, reference: &str) -> R<ModDetail> {
-    let m = mods::resolve(cx.store.conn(), &game.domain, reference)?;
+    let m = mods::resolve(cx.store.conn(), &game.id, reference)?;
     let fomod = mods::fomod_choices(cx.store.conn(), m.id)?
         .and_then(|raw| FomodChoices::from_json(&raw))
         .map(|ch| {
@@ -280,7 +281,7 @@ pub fn mod_detail(cx: &Cx<'_>, game: &GameConfig, reference: &str) -> R<ModDetai
             }
         }
     }
-    let url = nexus_page_url(&game.domain, &m);
+    let url = nexus_page_url(game, &m);
     Ok(ModDetail {
         collections: mods::collections_of(cx.store.conn(), m.id)?,
         record: m,

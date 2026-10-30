@@ -28,7 +28,8 @@ describe("CSP compatibility", () => {
   it("images only from data: URLs (thumbnails), never remote", () => {
     for (const src of Object.values(sources)) {
       expect(src).not.toMatch(/<img[^>]*src=["']https?:/);
-      expect(src).not.toMatch(/thumbnailUrl\}/);
+      // Listing picture URLs only reach <img> through the backend (`picture` -> data: URL).
+      expect(src).not.toMatch(/src=\{[^}]*(thumbnailUrl|image_url|url)\}/);
     }
   });
 

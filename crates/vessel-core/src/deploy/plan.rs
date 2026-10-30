@@ -103,7 +103,7 @@ pub fn build_plan(conn: &Connection, game: &GameConfig) -> Result<Plan, DeployEr
          WHERE game = ?1 AND enabled = 1 ORDER BY priority, id",
     )?;
     let rows = stmt
-        .query_map([&game.domain], |r| {
+        .query_map([&game.id], |r| {
             Ok((
                 ModRef {
                     id: r.get(0)?,

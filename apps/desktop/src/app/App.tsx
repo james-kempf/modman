@@ -8,7 +8,7 @@ import {
   BooksIcon,
   CheckCircleIcon,
   CheckIcon,
-  DownloadSimpleIcon,
+  CompassIcon,
   GameControllerIcon,
   GearSixIcon,
   InfoIcon,
@@ -36,7 +36,7 @@ import { installFocusRecovery } from "../nav/spatial";
 import { Activity } from "../views/Activity";
 import { Collections } from "../views/Collections";
 import { Games } from "../views/Games";
-import { Install } from "../views/Install";
+import { Browse } from "../views/Browse";
 import { Mods } from "../views/Mods";
 import { HeroBackdrop, Overview } from "../views/Overview";
 import { Requirements } from "../views/Requirements";
@@ -50,7 +50,7 @@ const VIEW: Record<ViewId, () => JSX.Element> = {
   games: Games,
   overview: Overview,
   mods: Mods,
-  install: Install,
+  browse: Browse,
   collections: Collections,
   requirements: Requirements,
   activity: Activity,
@@ -61,7 +61,7 @@ const ICON: Record<ViewId, ReactNode> = {
   games: <GameControllerIcon aria-hidden size={20} weight="duotone" />,
   overview: <SquaresFourIcon aria-hidden size={20} weight="duotone" />,
   mods: <StackIcon aria-hidden size={20} weight="duotone" />,
-  install: <DownloadSimpleIcon aria-hidden size={20} weight="duotone" />,
+  browse: <CompassIcon aria-hidden size={20} weight="duotone" />,
   collections: <BooksIcon aria-hidden size={20} weight="duotone" />,
   requirements: <PuzzlePieceIcon aria-hidden size={20} weight="duotone" />,
   activity: <TerminalWindowIcon aria-hidden size={20} weight="duotone" />,

@@ -26,7 +26,9 @@ use vessel_core::app::mods::{
 use vessel_core::app::nexus::{self as appnx, AccountInfo, LoginResult};
 use vessel_core::app::shortcut::{self, ShortcutStatus};
 use vessel_core::app::updates::{self as appup, UpdateReport};
-use vessel_core::app::views::{self, ConfigChange, ConfigEntry, FilesView, SearchView};
+use vessel_core::app::views::{
+    self, BrowseRequest, BrowseView, ConfigChange, ConfigEntry, FilesView,
+};
 use vessel_core::app::{actions, art, games_hint, plugins as appplug, thumbs, Cx, R};
 use vessel_core::autoupdate::{self, LiveHost, RunLogEntry, StartupCheck, Status};
 use vessel_core::collections::{self, CollectionSummary};
@@ -468,6 +470,13 @@ pub async fn thumbnail(
     .await
 }
 
+/// A Nexus picture by URL as a `data:` URL (cached; `None` when the URL is
+/// not an https Nexus one or the fetch fails).
+#[tauri::command(rename_all = "snake_case")]
+pub async fn picture(app: AppHandle, state: St<'_>, url: String) -> CmdResult<Option<String>> {
+    query(app, &state, None, move |cx| thumbs::picture(cx, &url)).await
+}
+
 // ── install & downloads ─────────────────────────────────────
 
 #[tauri::command(rename_all = "snake_case")]
@@ -891,16 +900,18 @@ pub async fn updates_install(
     .await
 }
 
+/// A page of the game's mods or collections on Nexus (top, newest or
+/// matching words).
 #[tauri::command(rename_all = "snake_case")]
-pub async fn search(
+pub async fn browse(
     app: AppHandle,
     state: St<'_>,
     game: Option<String>,
-    query: String,
-) -> CmdResult<SearchView> {
-    self::query(app, &state, game, move |cx| {
+    request: BrowseRequest,
+) -> CmdResult<BrowseView> {
+    query(app, &state, game, move |cx| {
         let g = cx.need_game()?;
-        views::search(cx, &g, &query)
+        views::browse(cx, &g, &request)
     })
     .await
 }

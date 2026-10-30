@@ -32,7 +32,7 @@ pub const KNOWN_PROFILES: &[&str] = &[
     "generic",
 ];
 
-/// Settings key that stores the active game domain.
+/// Settings key that stores the active game id.
 pub const ACTIVE_GAME_KEY: &str = "active_game";
 
 /// Errors from game handling.
@@ -43,6 +43,10 @@ pub enum GamesError {
     InvalidDomain(String),
     #[error("game '{0}' is not set up")]
     NotConfigured(String),
+    #[error("game '{0}' is not linked to a Nexus game; set its Nexus domain first")]
+    NoNexusDomain(String),
+    #[error("several games are linked to Nexus domain '{0}'; select one first")]
+    AmbiguousNexusDomain(String),
     #[error("no game selected")]
     NoActiveGame,
     #[error("unknown game setting '{0}' (keys: {keys})", keys = GameSetting::NAMES.join(" "))]
@@ -94,7 +98,11 @@ pub fn normalize_domain(s: &str) -> Result<String, GamesError> {
 /// A configured game (one row of `games`).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct GameConfig {
-    pub domain: String,
+    /// Stable key: dependent rows, data folders and the active game point at
+    /// it. Never changes once the game is added.
+    pub id: String,
+    /// Nexus game domain (nexusmods.com/<domain>); `None` = not linked.
+    pub nexus_domain: Option<String>,
     pub name: String,
     pub folder: Option<PathBuf>,
     pub subdir: String,
@@ -116,9 +124,11 @@ pub struct GameConfig {
 
 impl GameConfig {
     /// Defaults for a domain with no definition (legacy `game_defaults`).
+    /// The domain is also the new game's id.
     pub fn custom(domain: &str) -> Self {
         Self {
-            domain: domain.to_string(),
+            id: domain.to_string(),
+            nexus_domain: Some(domain.to_string()),
             name: domain.to_string(),
             folder: None,
             subdir: ".".into(),
@@ -154,6 +164,14 @@ impl GameConfig {
         }
     }
 
+    /// The Nexus domain, or [`GamesError::NoNexusDomain`] when the game is
+    /// not linked to Nexus.
+    pub fn nexus_domain(&self) -> Result<&str, GamesError> {
+        self.nexus_domain
+            .as_deref()
+            .ok_or_else(|| GamesError::NoNexusDomain(self.id.clone()))
+    }
+
     /// Default plugins.txt location (legacy `detect_plugins_file`, L434-439):
     /// only for bethesda games with a plugins format and AppData folder.
     pub fn default_plugins_file(&self) -> Option<PathBuf> {
@@ -183,7 +201,7 @@ impl GameConfig {
     }
 }
 
-const GAME_COLUMNS: &str = "domain, name, folder, subdir, profile, target, appid, method, prefix, \
+const GAME_COLUMNS: &str = "id, nexus_domain, name, folder, subdir, profile, target, appid, method, prefix, \
      library, plugins_file, plugins_format, appdata_folder, paks_dir, nexus_game_id, definition, added_at";
 
 fn path_col(v: Option<String>) -> Option<PathBuf> {
@@ -192,25 +210,26 @@ fn path_col(v: Option<String>) -> Option<PathBuf> {
 
 fn row_to_game(r: &Row<'_>) -> rusqlite::Result<GameConfig> {
     Ok(GameConfig {
-        domain: r.get(0)?,
-        name: r.get(1)?,
-        folder: path_col(r.get(2)?),
-        subdir: r.get(3)?,
-        profile: r.get(4)?,
-        target: Target::parse(&r.get::<_, String>(5)?).unwrap_or_default(),
-        appid: r.get(6)?,
-        method: r.get(7)?,
-        prefix: path_col(r.get(8)?),
-        library: path_col(r.get(9)?),
-        plugins_file: path_col(r.get(10)?),
+        id: r.get(0)?,
+        nexus_domain: r.get(1)?,
+        name: r.get(2)?,
+        folder: path_col(r.get(3)?),
+        subdir: r.get(4)?,
+        profile: r.get(5)?,
+        target: Target::parse(&r.get::<_, String>(6)?).unwrap_or_default(),
+        appid: r.get(7)?,
+        method: r.get(8)?,
+        prefix: path_col(r.get(9)?),
+        library: path_col(r.get(10)?),
+        plugins_file: path_col(r.get(11)?),
         plugins_format: r
-            .get::<_, Option<String>>(11)?
+            .get::<_, Option<String>>(12)?
             .and_then(|s| PluginsFormat::parse(&s)),
-        appdata_folder: r.get(12)?,
-        paks_dir: r.get(13)?,
-        nexus_game_id: r.get(14)?,
-        definition: r.get(15)?,
-        added_at: r.get(16)?,
+        appdata_folder: r.get(13)?,
+        paks_dir: r.get(14)?,
+        nexus_game_id: r.get(15)?,
+        definition: r.get(16)?,
+        added_at: r.get(17)?,
     })
 }
 
@@ -218,24 +237,36 @@ fn path_str(p: &Option<PathBuf>) -> Option<String> {
     p.as_ref().map(|p| p.to_string_lossy().into_owned())
 }
 
-pub fn get_game(conn: &Connection, domain: &str) -> Result<Option<GameConfig>, GamesError> {
+pub fn get_game(conn: &Connection, id: &str) -> Result<Option<GameConfig>, GamesError> {
     Ok(conn
         .query_row(
-            &format!("SELECT {GAME_COLUMNS} FROM games WHERE domain = ?1"),
-            [domain],
+            &format!("SELECT {GAME_COLUMNS} FROM games WHERE id = ?1"),
+            [id],
             row_to_game,
         )
         .optional()?)
 }
 
-pub fn require_game(conn: &Connection, domain: &str) -> Result<GameConfig, GamesError> {
-    get_game(conn, domain)?.ok_or_else(|| GamesError::NotConfigured(domain.to_string()))
+pub fn require_game(conn: &Connection, id: &str) -> Result<GameConfig, GamesError> {
+    get_game(conn, id)?.ok_or_else(|| GamesError::NotConfigured(id.to_string()))
 }
 
-/// All configured games, ordered by domain.
+/// All configured games, ordered by id.
 pub fn list_games(conn: &Connection) -> Result<Vec<GameConfig>, GamesError> {
-    let mut stmt = conn.prepare(&format!("SELECT {GAME_COLUMNS} FROM games ORDER BY domain"))?;
+    let mut stmt = conn.prepare(&format!("SELECT {GAME_COLUMNS} FROM games ORDER BY id"))?;
     let rows = stmt.query_map([], row_to_game)?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// Configured games linked to Nexus `domain`, ordered by id.
+pub fn games_for_nexus_domain(
+    conn: &Connection,
+    domain: &str,
+) -> Result<Vec<GameConfig>, GamesError> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {GAME_COLUMNS} FROM games WHERE nexus_domain = ?1 ORDER BY id"
+    ))?;
+    let rows = stmt.query_map([domain], row_to_game)?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
@@ -265,8 +296,9 @@ pub fn save_game(conn: &Connection, g: &GameConfig) -> Result<(), GamesError> {
     check_game_dirs(g)?;
     conn.execute(
         &format!(
-            "INSERT INTO games ({GAME_COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
-             ON CONFLICT(domain) DO UPDATE SET name=excluded.name, folder=excluded.folder,
+            "INSERT INTO games ({GAME_COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)
+             ON CONFLICT(id) DO UPDATE SET nexus_domain=excluded.nexus_domain,
+               name=excluded.name, folder=excluded.folder,
                subdir=excluded.subdir, profile=excluded.profile, target=excluded.target,
                appid=excluded.appid, method=excluded.method, prefix=excluded.prefix,
                library=excluded.library, plugins_file=excluded.plugins_file,
@@ -275,7 +307,8 @@ pub fn save_game(conn: &Connection, g: &GameConfig) -> Result<(), GamesError> {
                definition=excluded.definition"
         ),
         params![
-            g.domain,
+            g.id,
+            g.nexus_domain,
             g.name,
             path_str(&g.folder),
             g.subdir,
@@ -299,20 +332,20 @@ pub fn save_game(conn: &Connection, g: &GameConfig) -> Result<(), GamesError> {
 
 /// True while files are deployed, original backups are held, or a deploy or
 /// purge journal is unfinished (legacy `deployment_active`, L1663).
-pub fn deployment_active(conn: &Connection, domain: &str) -> Result<bool, GamesError> {
+pub fn deployment_active(conn: &Connection, id: &str) -> Result<bool, GamesError> {
     Ok(conn.query_row(
         "SELECT EXISTS (SELECT 1 FROM deployments WHERE game = ?1)
              OR EXISTS (SELECT 1 FROM backups WHERE game = ?1 AND restored_at IS NULL)
              OR EXISTS (SELECT 1 FROM deploy_journal WHERE game = ?1 AND state = 'started')",
-        [domain],
+        [id],
         |r| r.get(0),
     )?)
 }
 
 /// Number of installed mods for a game.
-pub fn mod_count(conn: &Connection, domain: &str) -> Result<i64, GamesError> {
+pub fn mod_count(conn: &Connection, id: &str) -> Result<i64, GamesError> {
     Ok(
-        conn.query_row("SELECT COUNT(*) FROM mods WHERE game = ?1", [domain], |r| {
+        conn.query_row("SELECT COUNT(*) FROM mods WHERE game = ?1", [id], |r| {
             r.get(0)
         })?,
     )
@@ -320,16 +353,16 @@ pub fn mod_count(conn: &Connection, domain: &str) -> Result<i64, GamesError> {
 
 /// Forgets a game and all its rows. Refuses while a deployment is active.
 /// Clears the active game if it was this one.
-pub fn remove_game(store: &mut Store, domain: &str) -> Result<(), GamesError> {
+pub fn remove_game(store: &mut Store, id: &str) -> Result<(), GamesError> {
     let tx = store.conn_mut().transaction().map_err(StoreError::from)?;
-    require_game(&tx, domain)?;
-    if deployment_active(&tx, domain)? {
-        return Err(GamesError::DeploymentActive(domain.to_string()));
+    require_game(&tx, id)?;
+    if deployment_active(&tx, id)? {
+        return Err(GamesError::DeploymentActive(id.to_string()));
     }
-    tx.execute("DELETE FROM games WHERE domain = ?1", [domain])?;
+    tx.execute("DELETE FROM games WHERE id = ?1", [id])?;
     tx.execute(
         "DELETE FROM settings WHERE key = ?1 AND value = ?2",
-        params![ACTIVE_GAME_KEY, domain],
+        params![ACTIVE_GAME_KEY, id],
     )?;
     tx.commit().map_err(StoreError::from)?;
     Ok(())
@@ -339,28 +372,46 @@ pub fn active_game(store: &Store) -> Result<Option<String>, GamesError> {
     Ok(store.setting(ACTIVE_GAME_KEY)?)
 }
 
-pub fn set_active_game(store: &Store, domain: &str) -> Result<(), GamesError> {
-    require_game(store.conn(), domain)?;
-    Ok(store.set_setting(ACTIVE_GAME_KEY, domain)?)
+pub fn set_active_game(store: &Store, id: &str) -> Result<(), GamesError> {
+    require_game(store.conn(), id)?;
+    Ok(store.set_setting(ACTIVE_GAME_KEY, id)?)
 }
 
 /// Game to act on (legacy `need_game`, L365-373): explicit override, then the
 /// active game, then the only configured game.
 pub fn resolve_game(store: &Store, explicit: Option<&str>) -> Result<GameConfig, GamesError> {
-    let domain = match explicit {
+    let id = match explicit {
         Some(d) => d.to_ascii_lowercase(),
         None => match active_game(store)? {
             Some(d) => d,
             None => {
                 let games = list_games(store.conn())?;
                 match games.as_slice() {
-                    [only] => only.domain.clone(),
+                    [only] => only.id.clone(),
                     _ => return Err(GamesError::NoActiveGame),
                 }
             }
         },
     };
-    require_game(store.conn(), &domain)
+    require_game(store.conn(), &id)
+}
+
+/// Game a Nexus link names by `domain` (nxm links, collection URLs): the
+/// one game linked to it, or the active game when several are.
+pub fn resolve_nexus_game(store: &Store, domain: &str) -> Result<GameConfig, GamesError> {
+    let domain = domain.to_ascii_lowercase();
+    let mut linked = games_for_nexus_domain(store.conn(), &domain)?;
+    match linked.len() {
+        0 => Err(GamesError::NotConfigured(domain)),
+        1 => Ok(linked.remove(0)),
+        _ => {
+            let active = active_game(store)?;
+            linked
+                .into_iter()
+                .find(|g| active.as_deref() == Some(g.id.as_str()))
+                .ok_or(GamesError::AmbiguousNexusDomain(domain))
+        }
+    }
 }
 
 /// Keys accepted by `game set` (legacy L4134-4154, exactly these 9).
@@ -434,14 +485,14 @@ fn opt(value: &str) -> Option<String> {
 /// folder (ambiguity A1): they are separate fields.
 pub fn apply_setting(
     conn: &Connection,
-    domain: &str,
+    id: &str,
     key: GameSetting,
     value: &str,
     home: &Path,
 ) -> Result<GameConfig, GamesError> {
-    let mut g = require_game(conn, domain)?;
-    if key.needs_purge() && deployment_active(conn, domain)? {
-        return Err(GamesError::DeploymentActive(domain.to_string()));
+    let mut g = require_game(conn, id)?;
+    if key.needs_purge() && deployment_active(conn, id)? {
+        return Err(GamesError::DeploymentActive(id.to_string()));
     }
     let invalid = |expected: String| GamesError::InvalidValue {
         key: key.name(),
@@ -748,7 +799,7 @@ mod tests {
     fn resolve_game_order_is_override_active_then_single() {
         let store = store_with("skyrimspecialedition");
         assert_eq!(
-            resolve_game(&store, None).unwrap().domain,
+            resolve_game(&store, None).unwrap().id,
             "skyrimspecialedition"
         );
         save_game(store.conn(), &GameConfig::custom("othergame")).unwrap();
@@ -757,17 +808,73 @@ mod tests {
             Err(GamesError::NoActiveGame)
         ));
         set_active_game(&store, "othergame").unwrap();
-        assert_eq!(resolve_game(&store, None).unwrap().domain, "othergame");
+        assert_eq!(resolve_game(&store, None).unwrap().id, "othergame");
         assert_eq!(
             resolve_game(&store, Some("SkyrimSpecialEdition"))
                 .unwrap()
-                .domain,
+                .id,
             "skyrimspecialedition"
         );
         assert!(matches!(
             resolve_game(&store, Some("nosuch")),
             Err(GamesError::NotConfigured(_))
         ));
+    }
+
+    // Fails when changing the Nexus domain re-keys the game (its mods must stay attached)
+    // or when Nexus links stop finding the game through its linked domain.
+    #[test]
+    fn nexus_domain_is_separate_from_the_id() {
+        let store = store_with("skyrimspecialedition");
+        store
+            .conn()
+            .execute(
+                "INSERT INTO mods (game, uid, name, priority, installed_at)
+                 VALUES ('skyrimspecialedition', 'm1', 'Mod', 0, 0)",
+                [],
+            )
+            .unwrap();
+        let mut g = require_game(store.conn(), "skyrimspecialedition").unwrap();
+        g.nexus_domain = Some("skyrimse".into());
+        save_game(store.conn(), &g).unwrap();
+        assert_eq!(mod_count(store.conn(), "skyrimspecialedition").unwrap(), 1);
+        assert_eq!(
+            resolve_nexus_game(&store, "SkyrimSE").unwrap().id,
+            "skyrimspecialedition"
+        );
+        assert!(matches!(
+            resolve_nexus_game(&store, "skyrimspecialedition"),
+            Err(GamesError::NotConfigured(_))
+        ));
+
+        g.nexus_domain = None;
+        save_game(store.conn(), &g).unwrap();
+        let g = require_game(store.conn(), "skyrimspecialedition").unwrap();
+        assert!(matches!(
+            g.nexus_domain(),
+            Err(GamesError::NoNexusDomain(id)) if id == "skyrimspecialedition"
+        ));
+    }
+
+    // Fails when two games linked to one Nexus domain pick one arbitrarily instead of
+    // the active game (or erroring when neither is active).
+    #[test]
+    fn shared_nexus_domain_resolves_to_the_active_game() {
+        let store = store_with("skyrimspecialedition");
+        let mut second = GameConfig::custom("skyrimse2");
+        second.nexus_domain = Some("skyrimspecialedition".into());
+        save_game(store.conn(), &second).unwrap();
+        assert!(matches!(
+            resolve_nexus_game(&store, "skyrimspecialedition"),
+            Err(GamesError::AmbiguousNexusDomain(_))
+        ));
+        set_active_game(&store, "skyrimse2").unwrap();
+        assert_eq!(
+            resolve_nexus_game(&store, "skyrimspecialedition")
+                .unwrap()
+                .id,
+            "skyrimse2"
+        );
     }
 
     #[test]

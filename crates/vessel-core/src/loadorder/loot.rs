@@ -26,11 +26,19 @@ const MASTERLIST_BRANCH: &str = "v0.26";
 const MAX_MASTERLIST_BYTES: usize = 32 << 20;
 const FETCH_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// libloot game type of a configured game, by definition (or domain).
+/// Domain-style name LOOT support is chosen by: the definition, else the
+/// Nexus domain, else the game id.
+fn game_key(game: &GameConfig) -> &str {
+    game.definition
+        .as_deref()
+        .or(game.nexus_domain.as_deref())
+        .unwrap_or(&game.id)
+}
+
+/// libloot game type of a configured game, by [`game_key`].
 /// `None` for games LOOT does not handle.
 pub fn loot_game_type(game: &GameConfig) -> Option<GameType> {
-    let key = game.definition.as_deref().unwrap_or(&game.domain);
-    Some(match key {
+    Some(match game_key(game) {
         "skyrimspecialedition" | "enderalspecialedition" => GameType::SkyrimSE,
         "skyrim" | "enderal" => GameType::Skyrim,
         "skyrimvr" => GameType::SkyrimVR,
@@ -47,11 +55,7 @@ pub fn loot_game_type(game: &GameConfig) -> Option<GameType> {
 
 /// LOOT metadata repository of a game.
 fn masterlist_repo(game: &GameConfig, gt: GameType) -> &'static str {
-    let enderal = game
-        .definition
-        .as_deref()
-        .unwrap_or(&game.domain)
-        .starts_with("enderal");
+    let enderal = game_key(game).starts_with("enderal");
     match gt {
         GameType::SkyrimSE if enderal => "enderalse",
         GameType::Skyrim if enderal => "enderal",
@@ -80,8 +84,8 @@ impl MasterlistSource {
     /// `<base>/<repo>/v0.26/masterlist.yaml` and the shared prelude.
     /// `base` is usually [`DEFAULT_LOOT_BASE_URL`] or `$VESSEL_LOOT_URL`.
     pub fn for_game(game: &GameConfig, base: &str) -> Result<Self, LoadOrderError> {
-        let gt = loot_game_type(game)
-            .ok_or_else(|| LoadOrderError::UnsupportedGame(game.domain.clone()))?;
+        let gt =
+            loot_game_type(game).ok_or_else(|| LoadOrderError::UnsupportedGame(game.id.clone()))?;
         let base = base.trim_end_matches('/');
         Ok(Self {
             masterlist_url: format!(

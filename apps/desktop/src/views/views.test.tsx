@@ -122,9 +122,119 @@ describe("Mods", () => {
   });
 });
 
+const hit = (modId: number, o: Record<string, unknown> = {}) => ({
+  modId,
+  name: `Mod ${modId}`,
+  author: "a",
+  version: "1",
+  summary: null,
+  downloads: 1,
+  endorsements: 1,
+  thumbnailUrl: null,
+  category: null,
+  updatedAt: null,
+  installed: false,
+  ...o,
+});
+const coll = (slug: string, o: Record<string, unknown> = {}) => ({
+  slug,
+  name: `Coll ${slug}`,
+  summary: null,
+  author: "c",
+  category: null,
+  endorsements: 1,
+  downloads: 1,
+  revision: 3,
+  mod_count: 10,
+  total_size: 1,
+  image_url: null,
+  installed_revision: null,
+  ...o,
+});
+
+describe("Browse", () => {
+  // Fails when Browse does not open on the top mods of all time, or a control (kind, period, sort, words)
+  // does not reach the request.
+  it("lists top mods of all time, and each control changes the request", async () => {
+    const { t, user } = await open("browse", {
+      browse: (a) => {
+        const r = (a as { request: { kind: string } }).request;
+        return r.kind === "mods" ? { kind: "mods", total: 1, mods: [hit(7)] } : { kind: "collections", total: 1, collections: [coll("abc")] };
+      },
+    });
+    expect(await screen.findByText("Mod 7")).toBeInTheDocument();
+    const req = () => (t.callsOf("browse").at(-1) as { request: Record<string, unknown> }).request;
+    expect(req()).toEqual({ kind: "mods", period: "all", sort: "endorsements", text: "", offset: 0 });
+    await user.click(screen.getByRole("button", { name: "Month" }));
+    await waitFor(() => expect(req()).toMatchObject({ period: "month" }));
+    await user.click(screen.getByRole("button", { name: /Sort/ }));
+    await user.click(await screen.findByRole("option", { name: "Newest" }));
+    await waitFor(() => expect(req()).toMatchObject({ sort: "newest" }));
+    await user.type(screen.getByLabelText("Search"), "sky ui");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await waitFor(() => expect(req()).toMatchObject({ text: "sky ui" }));
+    await user.click(within(screen.getByRole("group", { name: "Show" })).getByRole("button", { name: "Collections" }));
+    expect(await screen.findByText("Coll abc")).toBeInTheDocument();
+    expect(req()).toEqual({ kind: "collections", period: "month", sort: "newest", text: "sky ui", offset: 0 });
+  });
+
+  // Fails when Load more asks for the wrong page, or stays offered when everything is shown.
+  it("Load more fetches the next page by offset until every match is shown", async () => {
+    const { t, user } = await open("browse", {
+      browse: (a) => {
+        const offset = (a as { request: { offset: number } }).request.offset;
+        const ids = offset === 0 ? Array.from({ length: 24 }, (_, i) => i + 1) : [25];
+        return { kind: "mods", total: 25, mods: ids.map((i) => hit(i)) };
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Load more" }));
+    expect(await screen.findByText("Mod 25")).toBeInTheDocument();
+    expect((t.callsOf("browse").at(-1) as { request: { offset: number } }).request.offset).toBe(24);
+    expect(screen.getByText("25 of 25")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+  });
+
+  // Fails when a tile installs the wrong thing: a mod by its Nexus id with the wizard, a new collection by
+  // slug (optional mods asked), an installed one behind the latest revision by update; current ones say Installed.
+  it("tiles install mods and collections, update stale collections, and mark installed ones", async () => {
+    const { t, user } = await open("browse", {
+      browse: (a) =>
+        (a as { request: { kind: string } }).request.kind === "mods"
+          ? { kind: "mods", total: 2, mods: [hit(7), hit(8, { installed: true })] }
+          : {
+              kind: "collections",
+              total: 3,
+              collections: [coll("new"), coll("old", { installed_revision: 2 }), coll("cur", { installed_revision: 3 })],
+            },
+      install: () => ({ game: "skyrimspecialedition", installed: { mod_id: 1, uid: "u", name: "Mod 7", files: 2, size: 1, fomod_found: false, replaced: null, warnings: [] }, collection: null, after: { deployed: null, needs_deploy: true } }),
+      collection_install: () => ({ game: "skyrimspecialedition", slug: "new", revision: 3, cancelled: false, up_to_date: false, download_only: false, installed: 10, present: 0, failed: [], removed: 0, deployed: null }),
+      collection_update: () => ({ game: "skyrimspecialedition", slug: "old", revision: 3, cancelled: false, up_to_date: false, download_only: false, installed: 1, present: 9, failed: [], removed: 0, deployed: null }),
+    });
+    await user.click(await screen.findByRole("button", { name: "Install Mod 7" }));
+    await waitFor(() => expect(t.callsOf("install")).toEqual([expect.objectContaining({ target: "7", fomod: "ask" })]));
+    const mods = screen.getByRole("list", { name: "Mods" });
+    expect(within(mods).getAllByText("Installed")).toHaveLength(1);
+
+    await user.click(within(screen.getByRole("group", { name: "Show" })).getByRole("button", { name: "Collections" }));
+    await user.click(await screen.findByRole("button", { name: "Install Coll new" }));
+    await waitFor(() => expect(t.callsOf("collection_install")).toEqual([expect.objectContaining({ reference: "new", optional: "ask" })]));
+    await user.click(screen.getByRole("button", { name: "Update Coll old" }));
+    await waitFor(() => expect(t.callsOf("collection_update")).toEqual([expect.objectContaining({ reference: "old" })]));
+    const cols = screen.getByRole("list", { name: "Collections" });
+    expect(within(cols).getAllByText("Installed")).toHaveLength(1);
+  });
+
+  // Fails when a game without a Nexus domain asks Nexus anyway (the backend would refuse).
+  it("does not query Nexus for a game that is not linked to it", async () => {
+    const { t } = await open("browse", {}, [game({ nexus_domain: null })]);
+    expect(await screen.findByText(/not linked to a Nexus Mods game/)).toBeInTheDocument();
+    expect(t.callsOf("browse")).toEqual([]);
+  });
+});
+
 describe("Install", () => {
   it("installs a target with the FOMOD wizard mode and shows the result", async () => {
-    const { t, user } = await open("install", {
+    const { t, user } = await open("browse", {
       install: () => ({
         game: "skyrimspecialedition",
         installed: { mod_id: 1, uid: "u", name: "SkyUI", files: 5, size: 1, fomod_found: true, replaced: null, warnings: [] },
@@ -142,7 +252,7 @@ describe("Install", () => {
 
   // T16 F2b: fails when the on-screen keyboard can only fill the field and the gamepad user must find Install.
   it("on-screen keyboard Install button fills the target and submits it", async () => {
-    const { t } = await open("install", {
+    const { t } = await open("browse", {
       install: () => ({ game: null, installed: null, collection: null, after: { deployed: null, needs_deploy: false } }),
     });
     const target = (await screen.findByLabelText(/Mod id, Nexus URL/)) as HTMLInputElement;
@@ -155,7 +265,7 @@ describe("Install", () => {
   });
 
   it("nxm paste box submits the link", async () => {
-    const { t, user } = await open("install", {
+    const { t, user } = await open("browse", {
       nxm_submit: () => ({ row: 3, link: "nxm://skyrimspecialedition/mods/1/files/2", kind: "mod" }),
     });
     await user.type(await screen.findByLabelText("nxm link"), "nxm://skyrimspecialedition/mods/1/files/2?key=k&expires=1");

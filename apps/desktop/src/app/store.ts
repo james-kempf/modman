@@ -18,7 +18,7 @@ export const VIEWS = [
   { id: "games", label: "Games" },
   { id: "overview", label: "Overview" },
   { id: "mods", label: "Mods" },
-  { id: "install", label: "Install" },
+  { id: "browse", label: "Browse" },
   { id: "collections", label: "Collections" },
   { id: "requirements", label: "Requirements" },
   { id: "activity", label: "Activity" },

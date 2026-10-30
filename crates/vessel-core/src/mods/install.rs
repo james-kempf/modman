@@ -208,7 +208,7 @@ pub fn install_archive(
         Some(id) => tx
             .query_row(
                 "SELECT id, uid, staging_dir FROM mods WHERE game = ?1 AND id = ?2",
-                params![game.domain, id],
+                params![game.id, id],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .optional()?,
@@ -225,7 +225,7 @@ pub fn install_archive(
             let base = sanitize_name(&name);
             let mut uid = base.clone();
             let mut i = 2;
-            while uid_taken(&tx, &game.domain, &uid)?
+            while uid_taken(&tx, &game.id, &uid)?
                 && replaced.as_ref().is_none_or(|(_, u, _)| u != &uid)
             {
                 uid = format!("{base}-{i}");
@@ -250,7 +250,7 @@ pub fn install_archive(
     let same: Option<i64> = tx
         .query_row(
             "SELECT id FROM mods WHERE game = ?1 AND uid = ?2",
-            params![game.domain, uid],
+            params![game.id, uid],
             |r| r.get(0),
         )
         .optional()?;
@@ -304,7 +304,7 @@ pub fn install_archive(
         None => {
             let prio: i64 = tx.query_row(
                 "SELECT COALESCE(MAX(priority) + 1, 0) FROM mods WHERE game = ?1",
-                [&game.domain],
+                [&game.id],
                 |r| r.get(0),
             )?;
             tx.execute(
@@ -313,7 +313,7 @@ pub fn install_archive(
                     enabled, priority, file_count, size, installed_at)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,1,?16,?17,?18,?19)",
                 params![
-                    game.domain,
+                    game.id,
                     uid,
                     name,
                     meta.version,
@@ -340,7 +340,7 @@ pub fn install_archive(
     write_files(&tx, mod_id, &files)?;
     write_choices(&tx, mod_id, fomod_run.as_ref())?;
     tx.commit().map_err(StoreError::from)?;
-    mark_changed(store, &game.domain)?;
+    mark_changed(store, &game.id)?;
     Ok(InstallOutcome {
         mod_id,
         uid,

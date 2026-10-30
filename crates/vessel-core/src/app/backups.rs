@@ -16,7 +16,7 @@ const MAX_LISTED: usize = 40;
 
 fn env_for(cx: &Cx<'_>, game: &GameConfig) -> R<DeployEnv> {
     let cfg = cx.config()?;
-    Ok(DeployEnv::new(cx.paths, &cfg.data_dir, &game.domain))
+    Ok(DeployEnv::new(cx.paths, &cfg.data_dir, &game.id))
 }
 
 /// The listing `clean-backups` shows.

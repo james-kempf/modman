@@ -24,7 +24,7 @@ pub fn methods_summary(by: &BTreeMap<Method, usize>) -> String {
 
 fn env_for(cx: &Cx<'_>, game: &GameConfig) -> R<(DeployEnv, crate::config::Config)> {
     let cfg = cx.config()?;
-    Ok((DeployEnv::new(cx.paths, &cfg.data_dir, &game.domain), cfg))
+    Ok((DeployEnv::new(cx.paths, &cfg.data_dir, &game.id), cfg))
 }
 
 fn recovery_msg(rec: Option<&RecoveryReport>) -> Option<Msg> {
@@ -192,7 +192,7 @@ pub fn purge_msgs(r: &PurgeReport, overwrite_dir: &Path) -> Vec<Msg> {
 /// nothing is deployed or the user declined.
 pub fn run_purge(cx: &mut Cx<'_>, game: &GameConfig) -> R<Option<PurgeReport>> {
     let (env, _) = env_for(cx, game)?;
-    if !games::deployment_active(cx.store.conn(), &game.domain).map_err(games_hint)? {
+    if !games::deployment_active(cx.store.conn(), &game.id).map_err(games_hint)? {
         cx.ui
             .info(&format!("Nothing is deployed for {}.", game.name));
         return Ok(None);
@@ -235,7 +235,7 @@ pub fn after_change(cx: &mut Cx<'_>, game: &GameConfig) -> R<AfterChange> {
             needs_deploy: false,
         });
     }
-    let active = games::deployment_active(cx.store.conn(), &game.domain)?;
+    let active = games::deployment_active(cx.store.conn(), &game.id)?;
     if active {
         cx.ui
             .info("Run 'vessel deploy' to apply the changes to the game folder.");

@@ -68,6 +68,7 @@ pub fn parse(url: &str) -> R<NxmLink> {
 /// What processing a link did.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct Processed {
+    /// Game id (the link's Nexus domain when no game was resolved).
     pub game: String,
     /// `mod` or `collection`.
     pub kind: String,
@@ -90,7 +91,7 @@ pub fn process(cx: &mut Cx<'_>, accepted: &Accepted) -> R<Processed> {
         } => {
             let r = super::collection::install_link(cx, game, slug, *revision, row)?;
             Ok(Processed {
-                game: game.clone(),
+                game: r.game.clone().unwrap_or_else(|| game.clone()),
                 kind: "collection".into(),
                 what: slug.clone(),
                 installed: !r.cancelled && !r.download_only,
@@ -100,7 +101,7 @@ pub fn process(cx: &mut Cx<'_>, accepted: &Accepted) -> R<Processed> {
         }
         NxmLink::Mod(m) => {
             let res = (|| -> R<Processed> {
-                let game = games::require_game(cx.store.conn(), &m.game).map_err(games_hint)?;
+                let game = games::resolve_nexus_game(cx.store, &m.game).map_err(games_hint)?;
                 let nexus = nx::require(cx.paths, cx.store)?;
                 let done = install_nexus(
                     cx,
@@ -118,7 +119,7 @@ pub fn process(cx: &mut Cx<'_>, accepted: &Accepted) -> R<Processed> {
                     super::deploy::after_change(cx, &game)?;
                 }
                 Ok(Processed {
-                    game: m.game.clone(),
+                    game: game.id.clone(),
                     kind: "mod".into(),
                     what: m.mod_id.to_string(),
                     installed: done.is_some(),

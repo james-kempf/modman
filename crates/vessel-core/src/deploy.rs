@@ -219,16 +219,16 @@ pub(crate) fn library_of(folder: &Path) -> Option<PathBuf> {
 /// Per-library staging dir, relative to a Steam library root.
 pub const STAGING_DIR: &str = ".vessel/staging";
 
-/// Where staged mod trees of `game` live: `<library>/.vessel/staging/<domain>`
+/// Where staged mod trees of `game` live: `<library>/.vessel/staging/<id>`
 /// for a Steam game (so hardlinks work on SD-card libraries), else
-/// `<data_dir>/<domain>/staging`.
+/// `<data_dir>/<id>/staging`.
 pub fn staging_root(game: &GameConfig, data_dir: &Path) -> PathBuf {
     game.library
         .clone()
         .or_else(|| game.folder.as_deref().and_then(library_of))
         .map_or_else(
-            || data_dir.join(&game.domain).join("staging"),
-            |lib| lib.join(STAGING_DIR).join(&game.domain),
+            || data_dir.join(&game.id).join("staging"),
+            |lib| lib.join(STAGING_DIR).join(&game.id),
         )
 }
 
@@ -239,7 +239,7 @@ pub fn target_root(game: &GameConfig, target: Target) -> Result<PathBuf, DeployE
         Target::PrefixDir => (game.prefix.clone(), "Proton prefix"),
     };
     let root = root.ok_or_else(|| DeployError::NoTargetRoot {
-        game: game.domain.clone(),
+        game: game.id.clone(),
         what,
     })?;
     if !root.is_dir() {

@@ -390,7 +390,7 @@ fn scan(
 /// (call `nexus::refresh_requirements` first to update it).
 pub fn analyze(store: &Store, game: &GameConfig, scope: &Scope) -> Result<Vec<ReqRow>, ModsError> {
     let conn = store.conn();
-    let mods = list_mods(conn, &game.domain)?;
+    let mods = list_mods(conn, &game.id)?;
     let in_scope: Vec<&ModRecord> = mods
         .iter()
         .filter(|m| match &scope.mods {
@@ -414,7 +414,10 @@ pub fn analyze(store: &Store, game: &GameConfig, scope: &Scope) -> Result<Vec<Re
         .nexus_game_id
         .map(|g| g.to_string())
         .unwrap_or_default();
-    let domain = game.domain.as_str();
+    let id = game.id.as_str();
+    // Cached requirements and Nexus links are keyed by the Nexus domain; an
+    // unlinked game matches none of them.
+    let domain = game.nexus_domain.as_deref().unwrap_or_default();
     let mut order: Vec<String> = Vec::new();
     let mut groups: HashMap<String, Group> = HashMap::new();
     let mut group = |key: String, name: &str, tool: Option<&'static Tool>| -> String {
@@ -485,7 +488,7 @@ pub fn analyze(store: &Store, game: &GameConfig, scope: &Scope) -> Result<Vec<Re
         }
     }
     let scope_ids: Vec<i64> = in_scope.iter().map(|m| m.id).collect();
-    for e in collection_extras(conn, domain, &scope_ids)? {
+    for e in collection_extras(conn, id, &scope_ids)? {
         let key = if let Some(t) = tool_for(&format!("{} {}", e.name, e.url)) {
             group(format!("tool:{}", t.key), t.name, Some(t))
         } else {
@@ -540,7 +543,7 @@ pub fn analyze(store: &Store, game: &GameConfig, scope: &Scope) -> Result<Vec<Re
                 "SELECT rel_path FROM deployments WHERE game = ?1 AND target = 'game_dir'",
             )?;
             let v = stmt
-                .query_map([domain], |r| r.get::<_, String>(0))?
+                .query_map([id], |r| r.get::<_, String>(0))?
                 .collect::<Result<Vec<_>, _>>()?;
             v.into_iter().map(|s| s.to_lowercase()).collect()
         };
@@ -560,7 +563,7 @@ pub fn analyze(store: &Store, game: &GameConfig, scope: &Scope) -> Result<Vec<Re
         }
     }
 
-    let acked = acks(conn, domain)?;
+    let acked = acks(conn, id)?;
     let mut available = |id: &str| -> bool {
         *avail_cache.entry(id.to_string()).or_insert_with(|| {
             id.parse::<u64>()

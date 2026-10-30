@@ -72,6 +72,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "autoupdate",
         sql: include_str!("../migrations/0005_autoupdate.sql"),
     },
+    Migration {
+        version: 6,
+        name: "game_identity",
+        sql: include_str!("../migrations/0006_game_identity.sql"),
+    },
 ];
 
 /// Highest schema version this binary knows.
@@ -351,6 +356,64 @@ mod tests {
             }
             other => panic!("expected SchemaTooNew, got {:?}", other.err()),
         }
+    }
+
+    // Fails when upgrading a version-5 database loses a game, leaves its Nexus domain
+    // unset, or breaks the foreign keys of rows that pointed at games(domain).
+    #[test]
+    fn game_identity_migration_keeps_games_and_their_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vessel.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE schema_migrations (
+                     version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL);",
+            )
+            .unwrap();
+            for m in MIGRATIONS.iter().filter(|m| m.version <= 5) {
+                conn.execute_batch(m.sql).unwrap();
+                conn.execute(
+                    "INSERT INTO schema_migrations VALUES (?1, ?2, 0)",
+                    params![m.version, m.name],
+                )
+                .unwrap();
+            }
+            conn.execute_batch(
+                "INSERT INTO games (domain, name, added_at) VALUES ('skyrimspecialedition', 'Skyrim SE', 0);
+                 INSERT INTO mods (game, uid, name, priority, installed_at)
+                   VALUES ('skyrimspecialedition', 'm1', 'Mod', 0, 0);
+                 INSERT INTO deployments (game, target, rel_path, method, source, deployed_at)
+                   VALUES ('skyrimspecialedition', 'game_dir', 'a.esp', 'copy', '/s/a.esp', 0);",
+            )
+            .unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        let c = store.conn();
+        let (id, nexus): (String, Option<String>) = c
+            .query_row("SELECT id, nexus_domain FROM games", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(id, "skyrimspecialedition");
+        assert_eq!(nexus.as_deref(), Some("skyrimspecialedition"));
+        let broken: i64 = c
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(broken, 0);
+        // The references follow the renamed column: deleting the game cascades.
+        c.execute("DELETE FROM games WHERE id = 'skyrimspecialedition'", [])
+            .unwrap();
+        let left: i64 = c
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM mods) + (SELECT COUNT(*) FROM deployments)",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(left, 0);
     }
 
     #[test]

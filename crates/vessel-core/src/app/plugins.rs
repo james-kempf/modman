@@ -30,7 +30,7 @@ pub fn files_for(cx: &Cx<'_>, game: &GameConfig) -> R<(PluginsFiles, DeployEnv)>
         );
     }
     let cfg = cx.config()?;
-    let env = DeployEnv::new(cx.paths, &cfg.data_dir, &game.domain);
+    let env = DeployEnv::new(cx.paths, &cfg.data_dir, &game.id);
     Ok((PluginsFiles::new(env.game_data_dir()), env))
 }
 

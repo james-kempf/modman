@@ -172,7 +172,7 @@ pub fn poisoned_backups(
         "SELECT m.id, m.uid, m.root, f.path, f.sha256 FROM mods m
          JOIN mod_files f ON f.mod_id = m.id WHERE m.game = ?1 ORDER BY m.priority, m.id",
     )?;
-    let rows = stmt.query_map([&game.domain], |r| {
+    let rows = stmt.query_map([&game.id], |r| {
         Ok((
             r.get::<_, i64>(0)?,
             r.get::<_, String>(1)?,
@@ -214,7 +214,7 @@ pub fn poisoned_backups(
             "SELECT id FROM deploy_journal WHERE game = ?1
              AND ((op = 'purge' AND state = 'committed') OR state = 'rolled_back')",
         )?
-        .query_map([&game.domain], |r| r.get(0))?
+        .query_map([&game.id], |r| r.get(0))?
         .collect::<Result<_, _>>()?;
 
     // Deploy journal: where each backup was taken, and every placement.
@@ -226,7 +226,7 @@ pub fn poisoned_backups(
          FROM deploy_journal_steps s JOIN deploy_journal j ON j.id = s.journal_id
          WHERE j.game = ?1 AND s.action = 'place' AND s.target = ?2",
     )?;
-    let rows = stmt.query_map([&game.domain, target], |r| {
+    let rows = stmt.query_map([&game.id, target], |r| {
         Ok((
             r.get::<_, i64>(0)?,
             r.get::<_, String>(1)?,
@@ -251,7 +251,7 @@ pub fn poisoned_backups(
          LEFT JOIN mods m ON m.id = d.mod_id WHERE d.game = ?1 AND d.target = ?2",
     )?;
     let deployed: HashMap<String, bool> = stmt
-        .query_map([&game.domain, target], |r| {
+        .query_map([&game.id, target], |r| {
             Ok((r.get::<_, String>(0)?.to_lowercase(), r.get(1)?))
         })?
         .collect::<Result<_, _>>()?;
@@ -261,7 +261,7 @@ pub fn poisoned_backups(
          WHERE game = ?1 AND target = ?2 AND restored_at IS NULL ORDER BY rel_path, id",
     )?;
     let held = stmt
-        .query_map([&game.domain, target], |r| {
+        .query_map([&game.id, target], |r| {
             Ok((
                 r.get::<_, i64>(0)?,
                 r.get::<_, String>(1)?,
@@ -339,10 +339,10 @@ pub fn poisoned_backups(
 }
 
 fn refuse_interrupted(conn: &Connection, game: &GameConfig) -> Result<(), DeployError> {
-    if interrupted(conn, &game.domain)? {
+    if interrupted(conn, &game.id)? {
         return Err(DeployError::Quarantine(format!(
             "a deploy or purge of {} was interrupted; run 'vessel deploy' or 'vessel purge' to recover first",
-            game.domain
+            game.id
         )));
     }
     Ok(())
@@ -544,7 +544,7 @@ pub fn quarantine_poisoned(
     }
     let manifest = QuarantineManifest {
         id: id.clone(),
-        game: game.domain.clone(),
+        game: game.id.clone(),
         created_at: now(),
         restored_at: None,
         items,
@@ -645,14 +645,14 @@ pub fn restore_quarantine(
     if !qdir.join(MANIFEST).is_file() {
         return Err(DeployError::Quarantine(format!(
             "no quarantine '{id}' for {}",
-            game.domain
+            game.id
         )));
     }
     let mut manifest = read_manifest(&qdir)?;
-    if manifest.game != game.domain {
+    if manifest.game != game.id {
         return Err(DeployError::Quarantine(format!(
             "quarantine '{id}' belongs to {}, not {}",
-            manifest.game, game.domain
+            manifest.game, game.id
         )));
     }
     if manifest.restored_at.is_some() {
@@ -680,8 +680,7 @@ pub fn restore_quarantine(
                 if it.backup.is_none() {
                     return Err(conflict(it, "has no backup record in the manifest"));
                 }
-                if held_backup(store.conn(), &game.domain, it)?.is_some_and(|(_, s)| s != it.sha256)
-                {
+                if held_backup(store.conn(), &game.id, it)?.is_some_and(|(_, s)| s != it.sha256) {
                     return Err(conflict(it, "has a different backup held now"));
                 }
                 if !qdir.join("blobs").join(&it.sha256).is_file()
@@ -755,7 +754,7 @@ pub fn restore_quarantine(
         else {
             continue;
         };
-        let backup_id = match held_backup(&tx, &game.domain, it)? {
+        let backup_id = match held_backup(&tx, &game.id, it)? {
             Some((existing, _)) => existing,
             None => {
                 // Keep the old id unless a newer row took it.
@@ -769,7 +768,7 @@ pub fn restore_quarantine(
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                     params![
                         free.then_some(rec.id),
-                        game.domain,
+                        game.id,
                         it.target.as_str(),
                         it.path,
                         it.sha256,
@@ -786,7 +785,7 @@ pub fn restore_quarantine(
         for d in &it.deployment_ids {
             tx.execute(
                 "UPDATE deployments SET backup_id = ?2 WHERE id = ?1 AND game = ?3 AND backup_id IS NULL",
-                params![d, backup_id, game.domain],
+                params![d, backup_id, game.id],
             )?;
         }
         report.backups += 1;

@@ -147,7 +147,7 @@ fn list(ctx: &mut Ctx) -> Result<()> {
     let game = ctx.need_game()?;
     let out = ctx.out;
     out.heading(&format!("Collections — {}", game.name));
-    let cols = collections::list(ctx.store.conn(), &game.domain)?;
+    let cols = collections::list(ctx.store.conn(), &game.id)?;
     if cols.is_empty() {
         out.info("No collections installed. Install one with: vessel collection install <url>");
         return Ok(());

@@ -186,15 +186,13 @@ pub fn add_game(cx: &Cx<'_>, req: AddGame) -> R<GameConfig> {
 /// Forgets a game after a confirmation (refused while deployed);
 /// `delete_data` also deletes its downloads and staging. `false` when the
 /// user declined.
-pub fn remove(cx: &mut Cx<'_>, domain: &str, delete_data: bool) -> R<bool> {
-    let domain = domain.to_ascii_lowercase();
-    let g = games::require_game(cx.store.conn(), &domain).map_err(super::games_hint)?;
-    if games::deployment_active(cx.store.conn(), &domain)? {
-        return Err(super::games_hint(games::GamesError::DeploymentActive(
-            domain,
-        )));
+pub fn remove(cx: &mut Cx<'_>, id: &str, delete_data: bool) -> R<bool> {
+    let id = id.to_ascii_lowercase();
+    let g = games::require_game(cx.store.conn(), &id).map_err(super::games_hint)?;
+    if games::deployment_active(cx.store.conn(), &id)? {
+        return Err(super::games_hint(games::GamesError::DeploymentActive(id)));
     }
-    let data = cx.config()?.data_dir.join(&domain);
+    let data = cx.config()?.data_dir.join(&id);
     let question = if delete_data {
         format!("Forget {}? This also DELETES {}", g.name, data.display())
     } else {
@@ -203,18 +201,18 @@ pub fn remove(cx: &mut Cx<'_>, domain: &str, delete_data: bool) -> R<bool> {
     if !cx.ui.confirm(&question, false) {
         return Ok(false);
     }
-    games::remove_game(cx.store, &domain).map_err(super::games_hint)?;
+    games::remove_game(cx.store, &id).map_err(super::games_hint)?;
     if delete_data && data.exists() {
         std::fs::remove_dir_all(&data)?;
     }
-    cx.ui.success(&format!("Removed {domain}."));
+    cx.ui.success(&format!("Removed {id}."));
     Ok(true)
 }
 
-/// `game set <key> <value>` for `domain`.
-pub fn set_setting(cx: &Cx<'_>, domain: &str, key: &str, value: &str) -> R<GameConfig> {
+/// `game set <key> <value>` for game `id`.
+pub fn set_setting(cx: &Cx<'_>, id: &str, key: &str, value: &str) -> R<GameConfig> {
     let setting: games::GameSetting = key.parse()?;
-    let g = games::apply_setting(cx.store.conn(), domain, setting, value, &cx.paths.home)
+    let g = games::apply_setting(cx.store.conn(), id, setting, value, &cx.paths.home)
         .map_err(super::games_hint)?;
     if setting == games::GameSetting::Folder {
         if let Some(f) = g.folder.as_ref().filter(|f| !f.is_dir()) {
@@ -223,7 +221,7 @@ pub fn set_setting(cx: &Cx<'_>, domain: &str, key: &str, value: &str) -> R<GameC
         }
     }
     cx.ui
-        .success(&format!("{}: {} = {value}", g.domain, setting.name()));
+        .success(&format!("{}: {} = {value}", g.id, setting.name()));
     Ok(g)
 }
 
@@ -253,11 +251,11 @@ pub fn overview(cx: &Cx<'_>) -> R<Vec<GameView>> {
     let mut v = Vec::new();
     for g in games::list_games(cx.store.conn())? {
         v.push(GameView {
-            active: active.as_deref() == Some(g.domain.as_str()),
+            active: active.as_deref() == Some(g.id.as_str()),
             support: g.support(&defs),
-            mod_count: games::mod_count(cx.store.conn(), &g.domain)?,
-            deploy: deploy::status(cx.store.conn(), &g.domain)?,
-            data_dir: data.join(&g.domain),
+            mod_count: games::mod_count(cx.store.conn(), &g.id)?,
+            deploy: deploy::status(cx.store.conn(), &g.id)?,
+            data_dir: data.join(&g.id),
             plugins_txt: g.plugins_txt(),
             config: g,
         });
@@ -280,8 +278,12 @@ pub fn detect(cx: &Cx<'_>) -> R<Vec<Detected>> {
     let defs = games::load_definitions(Some(&cx.paths.definitions_dir()))?;
     let mut v = Vec::new();
     for d in games::detect_installed(&cx.paths.home, &defs) {
+        let domain = &d.definition.domain;
+        // Set up under that id, or another game already links its Nexus domain.
+        let configured = games::get_game(cx.store.conn(), domain)?.is_some()
+            || !games::games_for_nexus_domain(cx.store.conn(), domain)?.is_empty();
         v.push(Detected {
-            configured: games::get_game(cx.store.conn(), &d.definition.domain)?.is_some(),
+            configured,
             domain: d.definition.domain.clone(),
             name: d.definition.name.clone(),
             install_dir: d.app.install_dir.clone(),
@@ -309,12 +311,12 @@ pub fn launch(cx: &mut Cx<'_>, game: &GameConfig) -> R<Launched> {
             game.name
         );
     };
-    let enabled = crate::mods::list_mods(cx.store.conn(), &game.domain)?
+    let enabled = crate::mods::list_mods(cx.store.conn(), &game.id)?
         .iter()
         .any(|m| m.enabled);
-    let st = deploy::status(cx.store.conn(), &game.domain)?;
+    let st = deploy::status(cx.store.conn(), &game.id)?;
     let mut deployed = false;
-    if enabled && crate::mods::changed_since(cx.store, &game.domain, st.last_deployed_at)? {
+    if enabled && crate::mods::changed_since(cx.store, &game.id, st.last_deployed_at)? {
         cx.ui.warn("Mods changed since the last deploy.");
         if cx.ui.confirm("Deploy before launching?", true) {
             super::deploy::run_deploy(cx, game, None, false)?;

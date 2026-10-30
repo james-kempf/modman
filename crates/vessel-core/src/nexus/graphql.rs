@@ -17,6 +17,104 @@ const SEARCH_QUERY: &str = "query($d: String!, $q: String!) {
        sort: [{relevance: {direction: DESC}}], count: 25) {
     totalCount nodes { modId name author version summary downloads endorsements thumbnailUrl category updatedAt } } }";
 
+const BROWSE_MODS_QUERY: &str = "query($f: ModsFilter, $s: [ModsSort!], $o: Int, $c: Int) {
+  mods(filter: $f, sort: $s, offset: $o, count: $c) {
+    totalCount nodes { modId name author version summary downloads endorsements thumbnailUrl category updatedAt } } }";
+
+const BROWSE_COLLECTIONS_QUERY: &str =
+    "query($f: CollectionsSearchFilter, $s: [CollectionsSearchSort!], $o: Int, $c: Int) {
+  collectionsV2(filter: $f, sort: $s, offset: $o, count: $c) {
+    totalCount nodes { slug name summary endorsements totalDownloads
+      tileImage { thumbnailUrl(size: med) } user { name } category { name }
+      latestPublishedRevision { revisionNumber modCount totalSize } } } }";
+
+/// Order of a browse listing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowseSort {
+    #[default]
+    Endorsements,
+    Downloads,
+    Newest,
+}
+
+impl BrowseSort {
+    /// The GraphQL sort field (the same name for mods and collections).
+    fn field(self) -> &'static str {
+        match self {
+            BrowseSort::Endorsements => "endorsements",
+            BrowseSort::Downloads => "downloads",
+            BrowseSort::Newest => "createdAt",
+        }
+    }
+}
+
+/// One page of a browse listing: mods or collections of a game.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BrowseQuery<'a> {
+    /// Name words; empty = everything.
+    pub text: &'a str,
+    /// Only what was created at or after this Unix time.
+    pub since: Option<i64>,
+    pub sort: BrowseSort,
+    pub offset: u64,
+    pub count: u64,
+    /// Include adult content (the `adult` setting).
+    pub adult: bool,
+}
+
+/// `text` reduced to lower-case words: the filters reach a Lucene query
+/// unescaped, so its operator characters (and AND/OR/NOT) would change or
+/// break the search. Matching ignores case.
+fn search_words(text: &str) -> String {
+    text.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric() && c != '\'' && c != '.')
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// `YYYY-MM-DD` (UTC) of a Unix time: collections filter dates by day
+/// (a time with colons breaks their query), mods by Unix seconds.
+pub fn utc_date(unix: i64) -> String {
+    // Civil-from-days (Howard Hinnant), valid for any day after 0000-03-01.
+    let z = unix.div_euclid(86_400) + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// A collection in a browse listing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BrowseCollection {
+    pub slug: String,
+    pub name: String,
+    pub summary: Option<String>,
+    pub author: Option<String>,
+    pub category: Option<String>,
+    pub endorsements: Option<u64>,
+    pub downloads: Option<u64>,
+    /// Latest published revision.
+    pub revision: Option<u64>,
+    pub mod_count: Option<u64>,
+    /// Bytes of the latest revision.
+    pub total_size: Option<u64>,
+    /// Tile picture (medium thumbnail).
+    pub image_url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BrowseCollections {
+    pub total: u64,
+    pub collections: Vec<BrowseCollection>,
+}
+
 /// Accepts ids sent as numbers or strings.
 pub(crate) fn lenient_u64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error> {
     Ok(match Option::<Value>::deserialize(d)? {
@@ -133,6 +231,68 @@ impl NexusClient {
         Ok(SearchResults { total, mods })
     }
 
+    /// A page of `game`'s mods (see [`BrowseQuery`]). Never sends the adult
+    /// flag; adult mods are filtered out unless `q.adult`.
+    pub async fn browse_mods(
+        &self,
+        game: &str,
+        q: &BrowseQuery<'_>,
+    ) -> Result<SearchResults, NexusError> {
+        let g = check_domain(game)?;
+        let mut f = json!({ "gameDomainName": [{ "value": g, "op": "EQUALS" }] });
+        let words = search_words(q.text);
+        if !words.is_empty() {
+            f["nameStemmed"] = json!([{ "value": words, "op": "MATCHES" }]);
+        }
+        if let Some(t) = q.since {
+            f["createdAt"] = json!([{ "value": t.to_string(), "op": "GTE" }]);
+        }
+        if !q.adult {
+            f["adultContent"] = json!([{ "value": false }]);
+        }
+        let data = self.graphql(BROWSE_MODS_QUERY, browse_vars(f, q)).await?;
+        let mods = data.get("mods").cloned().unwrap_or(Value::Null);
+        let total = mods.get("totalCount").and_then(Value::as_u64).unwrap_or(0);
+        let nodes = mods.get("nodes").cloned().unwrap_or_else(|| json!([]));
+        let mods: Vec<SearchMod> = serde_json::from_value(nodes)
+            .map_err(|e| NexusError::Decode(format!("mod listing: {e}")))?;
+        Ok(SearchResults { total, mods })
+    }
+
+    /// A page of `game`'s collections (see [`BrowseQuery`]).
+    pub async fn browse_collections(
+        &self,
+        game: &str,
+        q: &BrowseQuery<'_>,
+    ) -> Result<BrowseCollections, NexusError> {
+        let g = check_domain(game)?;
+        let mut f = json!({ "gameDomain": [{ "value": g, "op": "EQUALS" }] });
+        let words = search_words(q.text);
+        if !words.is_empty() {
+            f["generalSearch"] = json!([{ "value": words, "op": "WILDCARD" }]);
+        }
+        if let Some(t) = q.since {
+            f["createdAt"] = json!([{ "value": utc_date(t), "op": "GTE" }]);
+        }
+        if !q.adult {
+            f["adultContent"] = json!([{ "value": false }]);
+        }
+        let data = self
+            .graphql(BROWSE_COLLECTIONS_QUERY, browse_vars(f, q))
+            .await?;
+        let page = data.get("collectionsV2").cloned().unwrap_or(Value::Null);
+        let total = page.get("totalCount").and_then(Value::as_u64).unwrap_or(0);
+        let nodes = page
+            .get("nodes")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        Ok(BrowseCollections {
+            total,
+            collections: nodes.iter().filter_map(browse_collection).collect(),
+        })
+    }
+
     /// Looks up `fields` for several mods in one query (aliases `m<id>`).
     /// Nexus nulls the whole result when one mod is hidden or deleted, so
     /// the failing aliases are recorded as `None` and the rest asked again,
@@ -183,5 +343,60 @@ impl NexusClient {
             }
         }
         Ok(out)
+    }
+}
+
+/// Variables of a browse query: filter, sort, page.
+fn browse_vars(filter: Value, q: &BrowseQuery<'_>) -> Value {
+    json!({
+        "f": filter,
+        "s": [{ q.sort.field(): { "direction": "DESC" } }],
+        "o": q.offset,
+        "c": q.count,
+    })
+}
+
+/// One `collectionsV2` node; `None` without a slug or name.
+fn browse_collection(n: &Value) -> Option<BrowseCollection> {
+    let text = |p: &str| n.pointer(p).and_then(Value::as_str).map(str::to_owned);
+    let num = |p: &str| {
+        n.pointer(p).and_then(|v| match v {
+            Value::Number(x) => x.as_u64(),
+            Value::String(s) => s.parse().ok(),
+            _ => None,
+        })
+    };
+    Some(BrowseCollection {
+        slug: text("/slug")?,
+        name: text("/name")?,
+        summary: text("/summary"),
+        author: text("/user/name"),
+        category: text("/category/name"),
+        endorsements: num("/endorsements"),
+        downloads: num("/totalDownloads"),
+        revision: num("/latestPublishedRevision/revisionNumber"),
+        mod_count: num("/latestPublishedRevision/modCount"),
+        total_size: num("/latestPublishedRevision/totalSize"),
+        image_url: text("/tileImage/thumbnailUrl"),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn utc_date_formats_days() {
+        assert_eq!(utc_date(0), "1970-01-01");
+        assert_eq!(utc_date(1_790_640_000), "2026-09-29");
+        assert_eq!(utc_date(951_782_400), "2000-02-29");
+        assert_eq!(utc_date(1_790_726_399), "2026-09-29");
+    }
+
+    #[test]
+    fn search_words_drop_query_operators() {
+        assert_eq!(search_words("  SkyUI: (v5) AND \"x\" "), "skyui v5 and x");
+        assert_eq!(search_words("Lin's 1.0"), "lin's 1.0");
+        assert_eq!(search_words("*:*"), "");
     }
 }

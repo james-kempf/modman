@@ -94,20 +94,20 @@ fn list(ctx: &Ctx) -> Result<()> {
         None => games::active_game(&ctx.store)?,
     };
     for g in all {
-        let mark = if active.as_deref() == Some(g.domain.as_str()) {
+        let mark = if active.as_deref() == Some(g.id.as_str()) {
             out.green("* ")
         } else {
             "  ".to_string()
         };
-        let count = games::mod_count(ctx.store.conn(), &g.domain)?;
-        let deployed = if games::deployment_active(ctx.store.conn(), &g.domain)? {
+        let count = games::mod_count(ctx.store.conn(), &g.id)?;
+        let deployed = if games::deployment_active(ctx.store.conn(), &g.id)? {
             out.green("deployed")
         } else {
             "not deployed".to_string()
         };
         println!(
             "  {mark}{}  {}  {}{deployed}",
-            out.bold(&g.domain),
+            out.bold(&g.id),
             g.name,
             out.dim(&format!("— {count} mods, "))
         );
@@ -160,8 +160,12 @@ fn info(ctx: &Ctx, domain: Option<&str>) -> Result<()> {
     let cfg = Config::load(&ctx.store, &ctx.paths)?;
     let defs = ctx.definitions()?;
     let dash = |p: &Option<PathBuf>| p.as_ref().map_or("—".into(), |p| p.display().to_string());
-    out.heading(&format!("{} ({})", g.name, g.domain));
+    out.heading(&format!("{} ({})", g.name, g.id));
     let rows = [
+        (
+            "nexus",
+            g.nexus_domain.clone().unwrap_or_else(|| "—".into()),
+        ),
         ("folder", dash(&g.folder)),
         ("subdir", g.subdir.clone()),
         ("profile", g.profile.clone()),
@@ -176,7 +180,7 @@ fn info(ctx: &Ctx, domain: Option<&str>) -> Result<()> {
         ("plugins-file", dash(&g.plugins_txt())),
         ("paks-dir", g.paks_dir.clone().unwrap_or_else(|| "—".into())),
         ("support", g.support(&defs).as_str().to_string()),
-        ("data", cfg.data_dir.join(&g.domain).display().to_string()),
+        ("data", cfg.data_dir.join(&g.id).display().to_string()),
     ];
     for (k, v) in rows {
         println!("  {k:<14} {v}");
@@ -194,7 +198,7 @@ fn set(ctx: &mut Ctx, key: &str, value: &str) -> Result<()> {
     let _: vessel_core::games::GameSetting = key.parse()?;
     let g = ctx.need_game()?;
     let ui = ctx.ui();
-    vessel_core::app::games::set_setting(&ctx.cx(&ui), &g.domain, key, value)?;
+    vessel_core::app::games::set_setting(&ctx.cx(&ui), &g.id, key, value)?;
     Ok(())
 }
 

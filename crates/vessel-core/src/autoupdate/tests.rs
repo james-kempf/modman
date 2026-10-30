@@ -74,11 +74,11 @@ impl Actions for FakeActions {
         self.account
     }
     fn update_collection(&mut self, g: &GameConfig, slug: &str) -> Result<(), String> {
-        self.calls.push(format!("collection {} {slug}", g.domain));
+        self.calls.push(format!("collection {} {slug}", g.id));
         Ok(())
     }
     fn install_mod_updates(&mut self, g: &GameConfig) -> Result<(), String> {
-        self.calls.push(format!("updates --install {}", g.domain));
+        self.calls.push(format!("updates --install {}", g.id));
         if self.bump_files {
             self.store
                 .conn()
@@ -88,11 +88,11 @@ impl Actions for FakeActions {
         Ok(())
     }
     fn check_mod_updates(&mut self, g: &GameConfig) -> Result<(), String> {
-        self.calls.push(format!("updates {}", g.domain));
+        self.calls.push(format!("updates {}", g.id));
         Ok(())
     }
     fn redeploy(&mut self, g: &GameConfig) -> Result<(), String> {
-        self.calls.push(format!("deploy {}", g.domain));
+        self.calls.push(format!("deploy {}", g.id));
         if self.fail_deploy {
             Err("boom".into())
         } else {
@@ -124,7 +124,7 @@ fn fx() -> Fx {
         .execute(
             "INSERT INTO deployments (game, target, rel_path, method, source, deployed_at)
              VALUES (?1, 'game_dir', 'Data/a.esp', 'copy', '/s/a.esp', 1)",
-            [&game.domain],
+            [&game.id],
         )
         .unwrap();
     let opts = RunOptions {
@@ -154,10 +154,10 @@ impl Fx {
         run(&mut self.act, &self.host, &self.opts).unwrap()
     }
     fn state(&self) -> GameState {
-        load_state(self.act.store.conn(), &self.game.domain).unwrap()
+        load_state(self.act.store.conn(), &self.game.id).unwrap()
     }
     fn set_state(&self, s: &GameState) {
-        state::save_state(self.act.store.conn(), &self.game.domain, s).unwrap();
+        state::save_state(self.act.store.conn(), &self.game.id, s).unwrap();
     }
     /// A recorded baseline with the current fingerprint and build.
     fn baseline(&self) {
@@ -555,7 +555,7 @@ fn startup_check_reports_pending_without_side_effects() {
     assert_eq!(
         c.pending,
         [Pending {
-            domain: "skyrimspecialedition".into(),
+            game: "skyrimspecialedition".into(),
             name: "Skyrim SE".into(),
             reasons: vec!["system updated".into()],
             blocked: Some(Skip::GameRunning),

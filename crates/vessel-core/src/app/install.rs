@@ -208,7 +208,7 @@ pub fn install_nexus(
     req: NexusInstall,
 ) -> R<Option<InstallOutcome>> {
     let ui = cx.ui;
-    let d = &game.domain;
+    let d = game.nexus_domain()?;
     let mod_id = req.mod_id;
     let info = nexus.run(nexus.client.mod_info(d, mod_id))??;
     let mname = info.name.clone().unwrap_or_else(|| format!("mod {mod_id}"));
@@ -241,7 +241,7 @@ pub fn install_nexus(
         file.version.as_deref().unwrap_or("?"),
         human_size(file.size_in_bytes.unwrap_or(0))
     )));
-    let installed = mods::list_mods(cx.store.conn(), d)?;
+    let installed = mods::list_mods(cx.store.conn(), &game.id)?;
     let mut replaces: Option<&ModRecord> = None;
     if let Some(same) = installed
         .iter()
@@ -270,7 +270,7 @@ pub fn install_nexus(
         cx,
         nexus,
         FileRequest {
-            game: d,
+            game,
             mod_id,
             file_id,
             info: Some(&file),
@@ -336,7 +336,11 @@ fn identify(cx: &Cx<'_>, game: &GameConfig, meta: &mut InstallMeta) {
     if !nexus.client.is_authenticated() {
         return;
     }
-    let hit = match nexus.run(nexus.client.md5_search(&game.domain, &md5)) {
+    // Unlinked games have nothing to look up.
+    let Some(domain) = game.nexus_domain.as_deref() else {
+        return;
+    };
+    let hit = match nexus.run(nexus.client.md5_search(domain, &md5)) {
         Ok(Ok(hits)) => hits.into_iter().next(),
         Ok(Err(e)) => {
             tracing::debug!("md5 lookup failed: {e}");
@@ -376,7 +380,7 @@ pub fn install_local(
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     let cfg = cx.config()?;
-    let dl = mods::downloads_dir(&cfg.data_dir, &game.domain);
+    let dl = mods::downloads_dir(&cfg.data_dir, &game.id);
     std::fs::create_dir_all(&dl)?;
     let dest = dl.join(&base);
     // Keep a copy next to Nexus downloads, like legacy.
@@ -571,7 +575,7 @@ pub fn install(cx: &mut Cx<'_>, req: InstallRequest) -> R<InstallResult> {
             )?
             else {
                 return Ok(InstallResult {
-                    game: Some(game.domain),
+                    game: Some(game.id),
                     ..Default::default()
                 });
             };
@@ -588,7 +592,7 @@ pub fn install(cx: &mut Cx<'_>, req: InstallRequest) -> R<InstallResult> {
         dep::after_change(cx, &game)?
     };
     Ok(InstallResult {
-        game: Some(game.domain),
+        game: Some(game.id),
         installed,
         collection: None,
         after: after.into(),
@@ -606,7 +610,7 @@ pub fn download_target(
 ) -> R<PathBuf> {
     let nexus = nx::require(cx.paths, cx.store)?;
     let game = cx.game_for(game)?;
-    let files = nexus.run(nexus.client.mod_files(&game.domain, mod_id))??;
+    let files = nexus.run(nexus.client.mod_files(game.nexus_domain()?, mod_id))??;
     let file_id = match file_id {
         Some(f) => f,
         None => choose_file(cx, &files.files)?,
@@ -616,7 +620,7 @@ pub fn download_target(
         cx,
         &nexus,
         FileRequest {
-            game: &game.domain,
+            game: &game,
             mod_id,
             file_id,
             info,
@@ -642,7 +646,7 @@ pub fn reinstall(
         (None, true) => FomodMode::Ask,
         (None, false) => FomodMode::Reuse,
     };
-    let rec = mods::resolve(cx.store.conn(), &game.domain, reference)?;
+    let rec = mods::resolve(cx.store.conn(), &game.id, reference)?;
     let archive = match &rec.archive {
         Some(a) if a.exists() => a.clone(),
         other => {
@@ -659,7 +663,7 @@ pub fn reinstall(
                 cx,
                 &nexus,
                 FileRequest {
-                    game: &game.domain,
+                    game,
                     mod_id: m,
                     file_id: f,
                     info: None,

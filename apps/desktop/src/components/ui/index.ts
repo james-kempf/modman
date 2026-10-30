@@ -14,6 +14,7 @@ export { Fact } from "./display/Fact";
 export { IconButton } from "./controls/IconButton";
 export { ListToggle } from "./controls/ListToggle";
 export { MsgLine } from "./display/MsgLine";
+export { Picture } from "./display/Picture";
 export { Row } from "./layout/Row";
 export { Segmented } from "./controls/Segmented";
 export { Select } from "./controls/Select";

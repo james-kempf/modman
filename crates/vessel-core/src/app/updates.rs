@@ -26,7 +26,7 @@ pub fn refresh_deps(cx: &Cx<'_>, game: &GameConfig, ids: &[u64], refresh: bool, 
         nexus.run(refresh_requirements(
             &nexus.client,
             &nexus.shared,
-            &g.domain,
+            g.nexus_domain()?,
             gid,
             ids,
             refresh,
@@ -147,7 +147,7 @@ fn say_all(ui: &dyn Ui, msgs: Vec<Msg>) {
 
 /// After an install: refresh and show the mod's requirements.
 pub fn requirements_after_install(cx: &Cx<'_>, game: &GameConfig, mod_row: i64) {
-    let Ok(Some(m)) = mods::get_mod(cx.store.conn(), &game.domain, mod_row) else {
+    let Ok(Some(m)) = mods::get_mod(cx.store.conn(), &game.id, mod_row) else {
         return;
     };
     let Some(mid) = m.nexus_mod_id else { return };
@@ -170,7 +170,7 @@ pub fn requirements_after_collection(cx: &Cx<'_>, game: &GameConfig, ids: &[i64]
     if ids.is_empty() {
         return;
     }
-    let nexus_ids: Vec<u64> = mods::list_mods(cx.store.conn(), &game.domain)
+    let nexus_ids: Vec<u64> = mods::list_mods(cx.store.conn(), &game.id)
         .unwrap_or_default()
         .iter()
         .filter(|m| ids.contains(&m.id))
@@ -201,7 +201,7 @@ pub fn deps_rows(
     mod_ref: Option<&str>,
     refresh: bool,
 ) -> R<Vec<ReqRow>> {
-    let all = mods::list_mods(cx.store.conn(), &game.domain)?;
+    let all = mods::list_mods(cx.store.conn(), &game.id)?;
     if let Some(r) = mod_ref {
         let m = mods::resolve_in(&all, r)?;
         let Some(mid) = m.nexus_mod_id else {
@@ -243,7 +243,7 @@ pub fn set_ack(
     if reference.trim().is_empty() {
         fail!("Usage: vessel deps {sub} <requirement name>");
     }
-    let all = mods::list_mods(cx.store.conn(), &game.domain)?;
+    let all = mods::list_mods(cx.store.conn(), &game.id)?;
     let ids: Vec<u64> = all.iter().filter_map(|m| m.nexus_mod_id).collect();
     if !ids.is_empty() {
         refresh_deps(cx, game, &ids, refresh, true);
@@ -257,9 +257,9 @@ pub fn set_ack(
         }
     };
     if ack {
-        requirements::ack(cx.store.conn(), &game.domain, &row.key)?;
+        requirements::ack(cx.store.conn(), &game.id, &row.key)?;
     } else {
-        requirements::unack(cx.store.conn(), &game.domain, &row.key)?;
+        requirements::unack(cx.store.conn(), &game.id, &row.key)?;
     }
     Ok(row)
 }
@@ -294,7 +294,7 @@ pub struct UpdateReport {
 pub fn check(cx: &Cx<'_>, nexus: &nx::Nexus, game: &GameConfig, refresh: bool) -> R<UpdateReport> {
     let ui = cx.ui;
     ui.heading(&format!("Update check — {}", game.name));
-    let all = mods::list_mods(cx.store.conn(), &game.domain)?;
+    let all = mods::list_mods(cx.store.conn(), &game.id)?;
     let mut ids: Vec<u64> = all.iter().filter_map(|m| m.nexus_mod_id).collect();
     ids.sort_unstable();
     ids.dedup();
@@ -305,7 +305,7 @@ pub fn check(cx: &Cx<'_>, nexus: &nx::Nexus, game: &GameConfig, refresh: bool) -
     let check = nexus.run(crate::nexus::check_updates(
         &nexus.client,
         &nexus.shared,
-        &game.domain,
+        game.nexus_domain()?,
         &ids,
         refresh,
     ))??;
@@ -399,7 +399,7 @@ pub fn install(
             cx,
             nexus,
             FileRequest {
-                game: &game.domain,
+                game,
                 mod_id: mid,
                 file_id: f.file_id,
                 info: Some(f),

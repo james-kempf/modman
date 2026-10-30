@@ -15,6 +15,8 @@ import type {
   ShortcutStatus,
   ArtKind,
   AutoupdateStatus,
+  BrowseRequest,
+  BrowseView,
   CollectionInfo,
   CollectionRemoved,
   CollectionResult,
@@ -51,7 +53,6 @@ import type {
   RestageReport,
   RestoreReport,
   RunLogEntry,
-  SearchView,
   StartupCheck,
   UninstallResult,
   UpdateReport,
@@ -95,6 +96,7 @@ export const COMMANDS = [
   "mods_uninstall",
   "mod_reinstall",
   "thumbnail",
+  "picture",
   "install",
   "mod_files",
   "nxm_submit",
@@ -122,7 +124,7 @@ export const COMMANDS = [
   "plugins_masterlist",
   "updates_check",
   "updates_install",
-  "search",
+  "browse",
   "autoupdate_status",
   "autoupdate_enable",
   "autoupdate_disable",
@@ -228,6 +230,8 @@ export const modReinstall = (
     ask: opts.ask ?? false,
   });
 /** data: URL of the mod picture (cached), null when it has none. */
+/** A Nexus picture by URL as a `data:` URL (cached); null = not a Nexus URL or no picture. */
+export const picture = (url: string) => call<string | null>("picture", { url });
 export const thumbnail = (game: string, modId: number) =>
   call<string | null>("thumbnail", { game, mod_id: modId });
 
@@ -380,8 +384,9 @@ export const updatesInstall = (opts: { all?: boolean; refresh?: boolean } = {}, 
     all: opts.all ?? false,
     refresh: opts.refresh ?? false,
   });
-export const search = (query: string, game?: Game) =>
-  call<SearchView>("search", { game: game ?? null, query });
+/** A page of the game's mods or collections on Nexus (24 per page). */
+export const browse = (request: BrowseRequest, game?: Game) =>
+  call<BrowseView>("browse", { game: game ?? null, request });
 
 // ── auto-update ─────────────────────────────────────────────
 

@@ -158,7 +158,7 @@ fn restage_with(
     let data_dir = cx.config()?.data_dir;
     let _lock = staging_lock(cx.paths)?;
     let backup_root = data_dir
-        .join(&game.domain)
+        .join(&game.id)
         .join("restage-backup")
         .join(stamp().to_string());
     for rec in &selected {
@@ -242,7 +242,7 @@ fn is_ue4ss_marker(lower: &str) -> bool {
 }
 
 fn select(conn: &Connection, game: &GameConfig, req: &RestageRequest) -> R<Vec<ModRecord>> {
-    let all = mods::list_mods(conn, &game.domain)?;
+    let all = mods::list_mods(conn, &game.id)?;
     if !req.ids.is_empty() {
         return req
             .ids
@@ -393,7 +393,7 @@ fn restage_one(
         let note = rollback(&mut work, true);
         fail!("{}{note}", super::chain(&e));
     }
-    mods::mark_changed(store, &game.domain)?;
+    mods::mark_changed(store, &game.id)?;
     Ok(RestagedMod {
         id: rec.id,
         uid: rec.uid.clone(),
@@ -620,7 +620,7 @@ mod tests {
         }
 
         fn rec(&self, id: i64) -> ModRecord {
-            mods::get_mod(self.store.conn(), &self.game.domain, id)
+            mods::get_mod(self.store.conn(), &self.game.id, id)
                 .unwrap()
                 .unwrap()
         }
@@ -644,7 +644,7 @@ mod tests {
             DeployEnv {
                 lock_path: data.join("deploy.lock"),
                 backup_dir: data.join("backups"),
-                overwrite_dir: data.join(&self.game.domain).join("overwrite"),
+                overwrite_dir: data.join(&self.game.id).join("overwrite"),
                 probe: Arc::new(NeverRunning),
                 faults: Faults::default(),
             }
@@ -780,7 +780,7 @@ mod tests {
         );
         let a = fx.install_as(&old_game, "Mod A", &a_src, None);
         let b = fx.install_as(&old_game, "Mod B", &b_src, None);
-        mods::set_enabled(&mut fx.store, &fx.game.domain, &[b.id], false).unwrap();
+        mods::set_enabled(&mut fx.store, &fx.game.id, &[b.id], false).unwrap();
         let old_a = fx.staged(a.id);
         assert!(
             old_a.keys().all(|p| !p.starts_with(UE4SS_MODS)),

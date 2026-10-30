@@ -239,16 +239,16 @@ pub fn status(ctx: &mut Ctx, _args: StatusArgs) -> Result<()> {
         None => games::active_game(&ctx.store)?,
     };
     for g in all {
-        let mark = if active.as_deref() == Some(g.domain.as_str()) {
+        let mark = if active.as_deref() == Some(g.id.as_str()) {
             out.green("* ")
         } else {
             "  ".to_string()
         };
-        let s = deploy::status(ctx.store.conn(), &g.domain)?;
-        let mods = games::mod_count(ctx.store.conn(), &g.domain)?;
+        let s = deploy::status(ctx.store.conn(), &g.id)?;
+        let mods = games::mod_count(ctx.store.conn(), &g.id)?;
         println!(
             "  {mark}{}  {}  {}",
-            out.bold(&g.domain),
+            out.bold(&g.id),
             g.name,
             out.dim(&format!("— {mods} mods"))
         );

@@ -452,7 +452,7 @@ export interface UpdateReport {
   installed: number;
 }
 
-/** Nexus GraphQL search hit (camelCase as Nexus sends it). */
+/** Nexus GraphQL mod in a browse page (camelCase as Nexus sends it). */
 export interface SearchHit {
   modId: number | null;
   name: string | null;
@@ -466,10 +466,39 @@ export interface SearchHit {
   updatedAt: string | null;
   installed: boolean;
 }
-export interface SearchView {
-  total: number;
-  mods: SearchHit[];
+/** Nexus collection in a browse page. */
+export interface CollectionHit {
+  slug: string;
+  name: string;
+  summary: string | null;
+  author: string | null;
+  category: string | null;
+  endorsements: number | null;
+  downloads: number | null;
+  /** Latest published revision. */
+  revision: number | null;
+  mod_count: number | null;
+  total_size: number | null;
+  /** Tile thumbnail (load it through `picture`). */
+  image_url: string | null;
+  /** null = not installed. */
+  installed_revision: number | null;
 }
+export type BrowseKind = "mods" | "collections";
+export type BrowsePeriod = "all" | "year" | "month" | "week" | "day";
+export type BrowseSort = "endorsements" | "downloads" | "newest";
+export interface BrowseRequest {
+  kind: BrowseKind;
+  period: BrowsePeriod;
+  sort: BrowseSort;
+  /** Name words; empty = everything. */
+  text: string;
+  offset: number;
+}
+/** One page; `total` counts every match. */
+export type BrowseView =
+  | { kind: "mods"; total: number; mods: SearchHit[] }
+  | { kind: "collections"; total: number; collections: CollectionHit[] };
 
 // ── account & settings ──────────────────────────────────────
 

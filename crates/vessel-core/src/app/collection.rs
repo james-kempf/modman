@@ -133,7 +133,7 @@ fn manual(cx: &Cx<'_>, mm: &ManifestMod, dl: &Path) -> R<PathBuf> {
 fn acquire(
     cx: &Cx<'_>,
     nexus: &Nexus,
-    game: &str,
+    game: &GameConfig,
     dir: &Path,
     dl: &Path,
     mm: &ManifestMod,
@@ -240,20 +240,21 @@ pub fn install_collection(
     let fomod_mode: FomodMode = opts.fomod.as_deref().unwrap_or("collection").parse()?;
     let nexus = nx::require(cx.paths, cx.store)?;
     let game = cx.game_for(r.game.as_deref())?;
-    out.game = Some(game.domain.clone());
-    let d = game.domain.clone();
+    out.game = Some(game.id.clone());
+    let d = game.id.clone();
+    let nd = game.nexus_domain()?.to_string();
     let cfg = cx.config()?;
     let premium = nx::is_premium(cx.store, &nexus).unwrap_or(false);
     ui.heading(&format!("Collection — {}", r.slug));
     ui.say(Msg::info("Querying collection ").b(&r.slug).p(format!(
-            " ({d}, revision {})...",
+            " ({nd}, revision {})...",
             opts.revision
                 .or(r.revision)
                 .map_or("latest".into(), |n| n.to_string())
         )));
     let rev = nexus.run(collections::fetch_revision(
         &nexus.client,
-        &d,
+        &nd,
         &r.slug,
         opts.revision.or(r.revision),
         cfg.adult,
@@ -362,7 +363,7 @@ pub fn install_collection(
             Msg::line(format!("  [{}/{}] {}  ", k + 1, plan.todo.len(), mm.name))
                 .d(human_size(mm.file_size)),
         );
-        match acquire(cx, &nexus, &d, &dir, &dl, mm) {
+        match acquire(cx, &nexus, &game, &dir, &dl, mm) {
             Ok(p) => {
                 archives.insert(i, p);
             }
@@ -376,10 +377,10 @@ pub fn install_collection(
             archives.len(),
             dl.display()
         ));
-        out.failed = failures(&d, &m, &failed);
+        out.failed = failures(&nd, &m, &failed);
         print_failures(cx, &out.failed);
         ui.info(&format!(
-            "Install with: vessel collection install nxm://{d}/collections/{}/revisions/{}",
+            "Install with: vessel collection install nxm://{nd}/collections/{}/revisions/{}",
             r.slug, rev.number
         ));
         out.download_only = true;
@@ -456,7 +457,7 @@ pub fn install_collection(
     let ok = ids.len() - plan.have.len();
     out.installed = ok;
     out.present = plan.have.len();
-    out.failed = failures(&d, &m, &failed);
+    out.failed = failures(&nd, &m, &failed);
     ui.blank();
     ui.heading("Collection Summary");
     ui.line(&format!(
@@ -577,20 +578,21 @@ pub fn info(cx: &Cx<'_>, reference: &str) -> R<CollectionInfo> {
     let nexus = nx::require(cx.paths, cx.store)?;
     let game = cx.game_for(r.game.as_deref())?;
     let cfg = cx.config()?;
+    let nd = game.nexus_domain()?;
     let rev = nexus.run(collections::fetch_revision(
         &nexus.client,
-        &game.domain,
+        nd,
         &r.slug,
         r.revision,
         cfg.adult,
     ))??;
-    let installed = collections::get(cx.store.conn(), &game.domain, &r.slug)?;
+    let installed = collections::get(cx.store.conn(), &game.id, &r.slug)?;
     let update_available = installed
         .as_ref()
         .and_then(|rec| rev.latest.filter(|l| *l != rec.revision));
     Ok(CollectionInfo {
-        revision: revision_info(&rev, &game.domain, &r.slug),
-        game: game.domain,
+        revision: revision_info(&rev, nd, &r.slug),
+        game: game.id,
         slug: r.slug,
         installed,
         update_available,
@@ -602,7 +604,7 @@ pub fn info(cx: &Cx<'_>, reference: &str) -> R<CollectionInfo> {
 pub fn update(cx: &mut Cx<'_>, opts: &InstallOpts) -> R<CollectionResult> {
     let r = parse(&opts.reference)?;
     let game = cx.game_for(r.game.as_deref())?;
-    let d = game.domain.clone();
+    let d = game.id.clone();
     let rec = collections::get(cx.store.conn(), &d, &r.slug)?.ok_or_else(|| {
         AppError::Msg(format!(
             "Collection '{}' is not installed for {}.",
@@ -615,7 +617,7 @@ pub fn update(cx: &mut Cx<'_>, opts: &InstallOpts) -> R<CollectionResult> {
     let latest = nexus
         .run(collections::fetch_revision(
             &nexus.client,
-            &d,
+            game.nexus_domain()?,
             &r.slug,
             None,
             cfg.adult,
@@ -638,7 +640,7 @@ pub fn update(cx: &mut Cx<'_>, opts: &InstallOpts) -> R<CollectionResult> {
         r.slug, rec.revision
     ));
     let o = InstallOpts {
-        reference: format!("nxm://{d}/collections/{}", r.slug),
+        reference: format!("nxm://{}/collections/{}", game.nexus_domain()?, r.slug),
         revision: Some(latest),
         ..opts.clone()
     };
@@ -695,7 +697,7 @@ pub struct RemoveResult {
 pub fn remove(cx: &mut Cx<'_>, reference: &str, keep_mods: bool) -> R<RemoveResult> {
     let r = parse(reference)?;
     let game = cx.game_for(r.game.as_deref())?;
-    let d = game.domain.clone();
+    let d = game.id.clone();
     if collections::get(cx.store.conn(), &d, &r.slug)?.is_none() {
         fail!("Collection '{}' is not installed.", r.slug);
     }

@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use vessel_core::nexus::{
     cached_requirements, check_updates, refresh_requirements, ApiKey, ApiKeyAuth, AuthProvider,
-    Backend, KeyStorage, KeyringOpener, NexusClient, NexusConfig, NexusError, NxmKey, ProbeOutcome,
-    RateLimit, RetryPolicy, SharedStore, CREDENTIALS_FILE,
+    Backend, BrowseQuery, BrowseSort, KeyStorage, KeyringOpener, NexusClient, NexusConfig,
+    NexusError, NxmKey, ProbeOutcome, RateLimit, RetryPolicy, SharedStore, CREDENTIALS_FILE,
 };
 use vessel_core::paths::Paths;
 use vessel_core::store::{self, Store};
@@ -402,6 +402,92 @@ async fn update_check_uses_cache_and_updated_list() {
 }
 
 // --- GraphQL ------------------------------------------------------------------
+
+// Fails when a browse page drops a filter (game, period, words, adult content), sends the
+// period in the wrong form for its index (mods: Unix seconds; collections: a day, since a
+// time with colons breaks their search), or mis-reads a collection's size sent as a string.
+#[tokio::test]
+async fn browse_sends_each_index_its_filters() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v2/graphql"))
+        .and(body_string_contains("ModsFilter"))
+        .respond_with(move |req: &Request| {
+            let v: Value = serde_json::from_slice(&req.body).unwrap();
+            let v = &v["variables"];
+            assert_eq!(v["f"]["gameDomainName"][0]["value"], "sse");
+            assert_eq!(v["f"]["createdAt"][0], json!({"value": "1790640000", "op": "GTE"}));
+            assert_eq!(v["f"]["nameStemmed"][0]["value"], "sky ui");
+            assert!(v["f"].get("adultContent").is_none(), "adult allowed: no filter");
+            assert_eq!(v["s"], json!([{"downloads": {"direction": "DESC"}}]));
+            assert_eq!((v["o"].as_u64(), v["c"].as_u64()), (Some(24), Some(24)));
+            ResponseTemplate::new(200).set_body_json(json!({"data": {"mods": {
+                "totalCount": 30, "nodes": [{"modId": "12", "name": "SkyUI", "thumbnailUrl": "https://x.nexusmods.com/t.png"}]}}}))
+        })
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v2/graphql"))
+        .and(body_string_contains("collectionsV2"))
+        .respond_with(move |req: &Request| {
+            let v: Value = serde_json::from_slice(&req.body).unwrap();
+            let v = &v["variables"];
+            assert_eq!(v["f"]["gameDomain"][0]["value"], "sse");
+            assert_eq!(v["f"]["createdAt"][0], json!({"value": "2026-09-29", "op": "GTE"}));
+            assert_eq!(v["f"]["adultContent"][0]["value"], false);
+            assert!(v["f"].get("generalSearch").is_none(), "no words: no text filter");
+            assert_eq!(v["s"], json!([{"createdAt": {"direction": "DESC"}}]));
+            ResponseTemplate::new(200).set_body_json(json!({"data": {"collectionsV2": {
+                "totalCount": 1, "nodes": [
+                    {"slug": "abc", "name": "Essentials", "totalDownloads": 9, "user": {"name": "me"},
+                     "tileImage": {"thumbnailUrl": "https://media.nexusmods.com/t/med/x.webp"},
+                     "latestPublishedRevision": {"revisionNumber": 4, "modCount": 120, "totalSize": "29230468566"}},
+                    {"name": "no slug"}]}}}))
+        })
+        .expect(1)
+        .mount(&server)
+        .await;
+    let c = client(&server);
+    let mods = c
+        .browse_mods(
+            "sse",
+            &BrowseQuery {
+                text: "Sky:UI",
+                since: Some(1_790_640_000),
+                sort: BrowseSort::Downloads,
+                offset: 24,
+                count: 24,
+                adult: true,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!((mods.total, mods.mods[0].mod_id), (30, Some(12)));
+    let cols = c
+        .browse_collections(
+            "sse",
+            &BrowseQuery {
+                since: Some(1_790_640_000),
+                sort: BrowseSort::Newest,
+                count: 24,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        cols.collections.len(),
+        1,
+        "a node without a slug is skipped"
+    );
+    let e = &cols.collections[0];
+    assert_eq!((e.slug.as_str(), e.author.as_deref()), ("abc", Some("me")));
+    assert_eq!(
+        (e.revision, e.mod_count, e.total_size),
+        (Some(4), Some(120), Some(29_230_468_566))
+    );
+}
 
 #[tokio::test]
 async fn search_sends_no_adult_flag_and_collection_query_does() {

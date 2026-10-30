@@ -327,7 +327,7 @@ fn collect_ours(conn: &Connection, game: &GameConfig) -> Result<Vec<String>, Loa
          ORDER BY priority, id",
     )?;
     let rows = stmt
-        .query_map([&game.domain], |r| {
+        .query_map([&game.id], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -476,7 +476,7 @@ pub fn update_plugins(
             .cloned(),
     );
     if !added.is_empty() {
-        let rules = plugin_rules(conn, &game.domain).unwrap_or_else(|e| {
+        let rules = plugin_rules(conn, &game.id).unwrap_or_else(|e| {
             report
                 .warnings
                 .push(format!("collection plugin rules not read: {e}"));
