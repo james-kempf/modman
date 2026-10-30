@@ -28,7 +28,7 @@ export function Games() {
   const all = games.data ?? [];
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
-  const list = q ? all.filter((g) => g.name.toLowerCase().includes(q) || g.domain.toLowerCase().includes(q)) : all;
+  const list = q ? all.filter((g) => g.name.toLowerCase().includes(q) || g.id.includes(q) || !!g.nexus_domain?.includes(q)) : all;
   return (
     <ViewFrame>
       <ViewHeader title="Games">
@@ -61,7 +61,7 @@ export function Games() {
           {/* auto-fill: 2 columns at 900px wide up to 6 at 1920px; tiles stay large gamepad targets. */}
           <ul aria-label="Game library" className="grid grid-cols-[repeat(auto-fill,minmax(176px,1fr))] gap-5">
             {list.map((g) => (
-              <li key={g.domain} className="min-w-0">
+              <li key={g.id} className="min-w-0">
                 <GameTile game={g} />
               </li>
             ))}
@@ -78,15 +78,15 @@ export function Games() {
 function GameTile({ game }: { game: GameView }) {
   const run = useRun();
   const qc = useQueryClient();
-  const due = useDeployDue(game.domain);
+  const due = useDeployDue(game.id);
   const statusId = useId();
   const select = async () => {
     if (!game.active) {
-      const r = await run(SWITCH, () => ipc.gameUse(game.domain), { key: SWITCH });
+      const r = await run(SWITCH, () => ipc.gameUse(game.id), { key: SWITCH });
       // undefined: the switch failed (its notice says why); stay here.
       if (r === undefined) return;
       // The Overview opens on the new game at once, not after the refetch.
-      qc.setQueryData<GameView[]>(["games"], (old) => old?.map((g) => ({ ...g, active: g.domain === game.domain })));
+      qc.setQueryData<GameView[]>(["games"], (old) => old?.map((g) => ({ ...g, active: g.id === game.id })));
     }
     openView("overview");
   };
@@ -96,7 +96,7 @@ function GameTile({ game }: { game: GameView }) {
       aria-label={game.name}
       aria-describedby={statusId}
       aria-current={game.active ? "true" : undefined}
-      data-game={game.domain}
+      data-game={game.id}
       onClick={() => void select()}
       className={cx(
         TILE,
@@ -143,8 +143,8 @@ function GameTile({ game }: { game: GameView }) {
 function Art({ game }: { game: GameView }) {
   const q = useQuery({
     // The app id is in the key: setting another one looks the art up again.
-    queryKey: ["art", game.domain, game.appid],
-    queryFn: () => ipc.gameArt(game.domain),
+    queryKey: ["art", game.id, game.appid],
+    queryFn: () => ipc.gameArt(game.id),
     enabled: game.appid !== null,
     staleTime: Infinity,
   });

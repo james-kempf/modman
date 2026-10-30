@@ -266,9 +266,9 @@ pub async fn game_add(
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub async fn game_use(app: AppHandle, state: St<'_>, domain: String) -> CmdResult<()> {
+pub async fn game_use(app: AppHandle, state: St<'_>, game: String) -> CmdResult<()> {
     query(app, &state, None, move |cx| {
-        let d = domain.to_ascii_lowercase();
+        let d = game.to_ascii_lowercase();
         games::require_game(cx.store.conn(), &d).map_err(games_hint)?;
         Ok(games::set_active_game(cx.store, &d)?)
     })
@@ -295,11 +295,11 @@ pub async fn game_launch(
 pub async fn game_remove(
     app: AppHandle,
     state: St<'_>,
-    domain: String,
+    game: String,
     delete_data: bool,
 ) -> CmdResult<bool> {
     job(app, &state, "game_remove", None, move |cx| {
-        appgames::remove(cx, &domain, delete_data)
+        appgames::remove(cx, &game, delete_data)
     })
     .await
 }
@@ -314,7 +314,7 @@ pub async fn game_set(
 ) -> CmdResult<GameConfig> {
     query(app, &state, game, move |cx| {
         let g = cx.need_game()?;
-        appgames::set_setting(cx, &g.domain, &key, &value)
+        appgames::set_setting(cx, &g.id, &key, &value)
     })
     .await
 }
@@ -429,11 +429,11 @@ pub async fn mod_reinstall(
 pub async fn game_art(
     app: AppHandle,
     state: St<'_>,
-    domain: String,
+    game: String,
     kind: Option<art::ArtKind>,
 ) -> CmdResult<Option<String>> {
     query(app, &state, None, move |cx| {
-        art::game_art(cx, &domain, kind.unwrap_or_default())
+        art::game_art(cx, &game, kind.unwrap_or_default())
     })
     .await
 }
@@ -585,7 +585,7 @@ pub async fn deploy_status(
 ) -> CmdResult<DeployStatus> {
     query(app, &state, game, |cx| {
         let g = cx.need_game()?;
-        Ok(deploy::status(cx.store.conn(), &g.domain)?)
+        Ok(deploy::status(cx.store.conn(), &g.id)?)
     })
     .await
 }
@@ -659,7 +659,7 @@ pub async fn profiles_list(
 ) -> CmdResult<Vec<ProfileSummary>> {
     query(app, &state, game, |cx| {
         let g = cx.need_game()?;
-        Ok(mods::list_profiles(cx.store, &g.domain)?)
+        Ok(mods::list_profiles(cx.store, &g.id)?)
     })
     .await
 }
@@ -702,7 +702,7 @@ pub async fn profile_delete(
 ) -> CmdResult<()> {
     query(app, &state, game, move |cx| {
         let g = cx.need_game()?;
-        Ok(mods::delete_profile(cx.store, &g.domain, &name)?)
+        Ok(mods::delete_profile(cx.store, &g.id, &name)?)
     })
     .await
 }
@@ -732,7 +732,7 @@ pub async fn collections_list(
 ) -> CmdResult<Vec<CollectionSummary>> {
     query(app, &state, game, |cx| {
         let g = cx.need_game()?;
-        Ok(collections::list(cx.store.conn(), &g.domain)?)
+        Ok(collections::list(cx.store.conn(), &g.id)?)
     })
     .await
 }

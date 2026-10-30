@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Typed wrappers of every Tauri command (apps/desktop/src-tauri/src/commands.rs).
-// Arguments are snake_case. `game` is a Nexus domain; omitted/null = the
+// Arguments are snake_case. `game` is a game id; omitted/null = the
 // active game. Every command rejects with a `CmdError` ({ message }).
 // Long commands ("job") emit `vessel:job` start/finish events, stream
 // `vessel:activity` messages and may raise `vessel:prompt` questions that
@@ -178,18 +178,18 @@ export const gameAdd = (a: {
     subdir: a.subdir ?? null,
     profile: a.profile ?? null,
   });
-export const gameUse = (domain: string) => call<null>("game_use", { domain });
+export const gameUse = (game: string) => call<null>("game_use", { game });
 /** Job (confirm prompt). false = declined. */
-export const gameRemove = (domain: string, deleteData: boolean) =>
-  call<boolean>("game_remove", { domain, delete_data: deleteData });
+export const gameRemove = (game: string, deleteData: boolean) =>
+  call<boolean>("game_remove", { game, delete_data: deleteData });
 /** Keys: folder, subdir, profile, appid, method, prefix, plugins-file, paks-dir, name. */
 export const gameSet = (key: string, value: string, game?: Game) =>
   call<GameConfig>("game_set", { game: game ?? null, key, value });
 /** Job: start the game through Steam (asks to deploy pending changes first). */
 export const gameLaunch = (game?: Game) => call<Launched>("game_launch", { game: game ?? null });
 /** Steam library art as a `data:` URL; null = none. kind: portrait (default, a monogram stands in) or wide hero. */
-export const gameArt = (domain: string, kind: ArtKind = "library_600x900") =>
-  call<string | null>("game_art", { domain, kind });
+export const gameArt = (game: string, kind: ArtKind = "library_600x900") =>
+  call<string | null>("game_art", { game, kind });
 /** Open the game folder or the Proton prefix in the file manager (the backend resolves the path). Resolves to the path. */
 export const openFolder = (game: string, which: GameFolder) => call<string>("open_folder", { game, which });
 

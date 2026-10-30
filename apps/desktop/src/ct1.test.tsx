@@ -245,7 +245,7 @@ describe("CT1 D06 per-game results", () => {
     return {
       games,
       list: () => games.map((g) => ({ ...g })),
-      switchTo: (domain: string) => games.forEach((g) => (g.active = g.domain === domain)),
+      switchTo: (id: string) => games.forEach((g) => (g.active = g.id === id)),
     };
   };
 

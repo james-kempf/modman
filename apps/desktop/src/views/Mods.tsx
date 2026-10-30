@@ -75,14 +75,14 @@ export function Mods() {
       {!game ? (
         <NoGame icon={<StackIcon size={28} weight="duotone" />} />
       ) : tab === "list" ? (
-        <ModList game={game.domain} />
+        <ModList game={game.id} />
       ) : tab === "conflicts" ? (
-        <Conflicts game={game.domain} />
+        <Conflicts game={game.id} />
       ) : tab === "updates" ? (
         // key: a report for one game is not shown for another.
-        <Updates key={game.domain} game={game.domain} />
+        <Updates key={game.id} game={game.id} />
       ) : (
-        <Profiles game={game.domain} />
+        <Profiles game={game.id} />
       )}
     </ViewFrame>
   );

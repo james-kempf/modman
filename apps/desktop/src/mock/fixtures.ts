@@ -23,8 +23,10 @@ export const deployStatus = (o: Partial<DeployStatus> = {}): DeployStatus => ({
   ...o,
 });
 
+// The Nexus domain follows the id unless given (as for a newly added game).
 export const game = (o: Partial<GameView> = {}): GameView => ({
-  domain: "skyrimspecialedition",
+  id: "skyrimspecialedition",
+  nexus_domain: o.id ?? "skyrimspecialedition",
   name: "Skyrim Special Edition",
   folder: "/home/deck/.local/share/Steam/steamapps/common/Skyrim Special Edition",
   subdir: "Data",
@@ -52,7 +54,7 @@ export const game = (o: Partial<GameView> = {}): GameView => ({
 
 export const experimentalGame = (o: Partial<GameView> = {}): GameView =>
   game({
-    domain: "cyberpunk2077",
+    id: "cyberpunk2077",
     name: "Cyberpunk 2077",
     profile: "redengine",
     appid: 1091500,

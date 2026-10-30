@@ -21,7 +21,7 @@ async function library(handlers: Record<string, Handler> = {}, games = twoGames(
     {
       games_list: () => current,
       game_use: (a) => {
-        current = current.map((g) => ({ ...g, active: g.domain === (a as { domain: string }).domain }));
+        current = current.map((g) => ({ ...g, active: g.id === (a as { game: string }).game }));
         return null;
       },
       game_art: () => null,
@@ -57,7 +57,7 @@ describe("game library", () => {
   it("clicking a game makes it active and opens its Overview", async () => {
     const { t, user } = await library();
     await user.click(tile("Cyberpunk 2077"));
-    await waitFor(() => expect(t.callsOf("game_use")).toEqual([{ domain: "cyberpunk2077" }]));
+    await waitFor(() => expect(t.callsOf("game_use")).toEqual([{ game: "cyberpunk2077" }]));
     await overview();
     expect(await within(screen.getByRole("main")).findByRole("heading", { level: 2, name: "Cyberpunk 2077" })).toBeInTheDocument();
     expect(document.activeElement).toHaveAttribute("data-tab", "overview");
@@ -89,8 +89,8 @@ describe("game library", () => {
     const { t, list } = await library({}, [
       game(),
       experimentalGame({ active: false }),
-      experimentalGame({ domain: "fallout4", name: "Fallout 4", active: false }),
-      experimentalGame({ domain: "starfield", name: "Starfield", active: false }),
+      experimentalGame({ id: "fallout4", name: "Fallout 4", active: false }),
+      experimentalGame({ id: "starfield", name: "Starfield", active: false }),
     ]);
     // Three columns of 200x340 tiles (jsdom has no layout).
     within(list)
@@ -111,7 +111,7 @@ describe("game library", () => {
     expect(document.activeElement).toBe(tile("Skyrim Special Edition"));
     act(() => performNav({ type: "move", dir: "down" }));
     act(() => performNav({ type: "select" }));
-    await waitFor(() => expect(t.callsOf("game_use")).toEqual([{ domain: "starfield" }]));
+    await waitFor(() => expect(t.callsOf("game_use")).toEqual([{ game: "starfield" }]));
     await overview();
   });
 
@@ -137,8 +137,8 @@ describe("game library", () => {
   // Fails when art is not shown as a data: image, or a game without art / app id has no monogram.
   it("shows the library art, else a monogram", async () => {
     const { t } = await library(
-      { game_art: (a) => ((a as { domain: string }).domain === "skyrimspecialedition" ? JPEG : null) },
-      [...twoGames(), game({ domain: "manual", name: "Manual Game", appid: null, active: false })],
+      { game_art: (a) => ((a as { game: string }).game === "skyrimspecialedition" ? JPEG : null) },
+      [...twoGames(), game({ id: "manual", name: "Manual Game", appid: null, active: false })],
     );
     const art = await within(tile("Skyrim Special Edition")).findByTestId("game-art");
     expect(art).toHaveAttribute("src", JPEG);
@@ -147,8 +147,8 @@ describe("game library", () => {
     expect(within(tile("Manual Game")).getByTestId("game-monogram")).toHaveTextContent("MG");
     // No app id: nothing to look up.
     expect(t.callsOf("game_art")).toEqual([
-      { domain: "skyrimspecialedition", kind: "library_600x900" },
-      { domain: "cyberpunk2077", kind: "library_600x900" },
+      { game: "skyrimspecialedition", kind: "library_600x900" },
+      { game: "cyberpunk2077", kind: "library_600x900" },
     ]);
   });
 
@@ -195,7 +195,7 @@ describe("add-game dialog", () => {
 
   // Fails when detected games are not offered, or Add does not pass the Steam folder / close the dialog.
   it("adds a game found in Steam from the Add game tile and returns focus to it", async () => {
-    const { t, user, list } = await library({ games_detect: () => detected, game_add: () => game({ domain: "fallout4" }) });
+    const { t, user, list } = await library({ games_detect: () => detected, game_add: () => game({ id: "fallout4" }) });
     const open = within(list).getByRole("button", { name: "Add game" });
     open.focus();
     await user.keyboard("{Enter}");

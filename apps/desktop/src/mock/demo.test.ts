@@ -36,15 +36,15 @@ describe("demo backend", () => {
   // Fails when the demo shows only one art path (both art tiles and monogram tiles must be reachable in the browser suites).
   it("game_art: generated art for one game, none for another, rejects unknown games", async () => {
     const d = demo();
-    expect(await d.call<string | null>("game_art", { domain: "skyrimspecialedition" })).toMatch(/^data:image\/svg\+xml;/);
-    expect(await d.call("game_art", { domain: "cyberpunk2077" })).toBeNull();
-    await expect(d.call("game_art", { domain: "nope" })).rejects.toEqual({ message: "no game 'nope'" });
+    expect(await d.call<string | null>("game_art", { game: "skyrimspecialedition" })).toMatch(/^data:image\/svg\+xml;/);
+    expect(await d.call("game_art", { game: "cyberpunk2077" })).toBeNull();
+    await expect(d.call("game_art", { game: "nope" })).rejects.toEqual({ message: "no game 'nope'" });
   });
 
   // Fails when the browser suites lose a U02 path: hero art, folder links, collection art/monogram, config kinds, tracker counts.
   it("U02 commands: hero art, open_folder, collection_art, config kinds, deploy counts", async () => {
     const d = demo();
-    expect(await d.call<string>("game_art", { domain: "skyrimspecialedition", kind: "library_hero" })).toMatch(/width%3D%221920%22/);
+    expect(await d.call<string>("game_art", { game: "skyrimspecialedition", kind: "library_hero" })).toMatch(/width%3D%221920%22/);
     expect(await d.call("open_folder", { game: "skyrimspecialedition", which: "prefix" })).toMatch(/pfx$/);
     await expect(d.call("open_folder", { game: "cyberpunk2077", which: "prefix" })).rejects.toHaveProperty("message");
     await expect(d.call("open_folder", { game: "skyrimspecialedition", which: "/etc" })).rejects.toHaveProperty("message");
@@ -54,7 +54,7 @@ describe("demo backend", () => {
     expect(cfg).toHaveLength(9);
     expect(cfg.find((c) => c.key === "fomod")).toMatchObject({ kind: "enum", options: ["auto", "ask", "default"] });
     await expect(d.call("config_set", { key: "fomod", value: "none" })).rejects.toHaveProperty("message");
-    const sky = async () => (await d.call<GameView[]>("games_list")).find((g) => g.domain === "skyrimspecialedition")!.deploy;
+    const sky = async () => (await d.call<GameView[]>("games_list")).find((g) => g.id === "skyrimspecialedition")!.deploy;
     expect(await sky()).toMatchObject({ enabled_mods: 2, deployed_mods: 2 });
     const mods = (await d.call<ModsView>("mods_list")).mods;
     await d.call("mods_set_enabled", { ids: [mods[2].id], enabled: true });

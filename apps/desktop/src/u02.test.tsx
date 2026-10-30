@@ -148,7 +148,7 @@ describe("Overview hero backdrop", () => {
     // Behind the scrolling view, not inside it.
     expect(main().contains(img)).toBe(false);
     expect(img.className).toMatch(/opacity-\[0\.\d+\]/);
-    expect(t.callsOf("game_art")).toContainEqual({ domain: "skyrimspecialedition", kind: "library_hero" });
+    expect(t.callsOf("game_art")).toContainEqual({ game: "skyrimspecialedition", kind: "library_hero" });
     act(() => useUi.getState().setView("mods"));
     await waitFor(() => expect(screen.queryByTestId("hero-art")).toBeNull());
   });

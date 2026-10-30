@@ -65,8 +65,8 @@ export function Requirements() {
   const run = useRun();
   const refreshing = useBusy("Refresh requirements");
   const q = useQuery({
-    queryKey: ["deps", game?.domain],
-    queryFn: () => ipc.deps({}, game?.domain),
+    queryKey: ["deps", game?.id],
+    queryFn: () => ipc.deps({}, game?.id),
     enabled: !!game,
   });
   const rows = q.data ?? [];
@@ -88,7 +88,7 @@ export function Requirements() {
               () => ipc.deps({ refresh: true }),
               { key: "Refresh requirements" },
             );
-            if (fresh) qc.setQueryData(["deps", game?.domain], fresh);
+            if (fresh) qc.setQueryData(["deps", game?.id], fresh);
           }}
         >
           Refresh from Nexus

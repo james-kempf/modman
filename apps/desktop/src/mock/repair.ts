@@ -12,7 +12,7 @@ export interface RepairHost {
   job: <T>(kind: string, body: (id: number) => Promise<T>) => Promise<T>;
   say: (job: number, text: string) => void;
   /** The game a command names, else the active one. */
-  domain: (a: Args) => string;
+  game: (a: Args) => string;
   mods: (a: Args) => ModView[];
   /** The game's staged files changed: its deploy is due. */
   changed: (a: Args) => void;
@@ -53,12 +53,12 @@ export function repairHandlers(h: RepairHost, seed: Record<string, PoisonedBacku
   const restaged = new Map<string, Set<number>>();
   let seq = 0;
   const list = (a: Args) => {
-    const d = h.domain(a);
+    const d = h.game(a);
     if (!poisoned.has(d)) poisoned.set(d, []);
     return poisoned.get(d)!;
   };
   const qs = (a: Args) => {
-    const d = h.domain(a);
+    const d = h.game(a);
     if (!quarantines.has(d)) quarantines.set(d, []);
     return quarantines.get(d)!;
   };
@@ -81,7 +81,7 @@ export function repairHandlers(h: RepairHost, seed: Record<string, PoisonedBacku
         held.set(qid, take);
         qs(a).push({
           id: qid,
-          game: h.domain(a),
+          game: h.game(a),
           created_at: now(),
           restored_at: null,
           items: take.map((e) => ({
@@ -96,7 +96,7 @@ export function repairHandlers(h: RepairHost, seed: Record<string, PoisonedBacku
           })),
         });
         h.say(id, `Quarantined ${take.length} backup(s) as ${qid}.`);
-        return { id: qid, dir: `~/.local/share/vessel/${h.domain(a)}/quarantine/${qid}`, backups: take.length, game_files: 0, skipped_ambiguous: skipped };
+        return { id: qid, dir: `~/.local/share/vessel/${h.game(a)}/quarantine/${qid}`, backups: take.length, game_files: 0, skipped_ambiguous: skipped };
       }),
     quarantines_list: (a: Args) => qs(a).map((q) => ({ ...q, items: q.items.map((i) => ({ ...i })) })),
     quarantine_restore: (a: Args) =>
@@ -123,7 +123,7 @@ export function repairHandlers(h: RepairHost, seed: Record<string, PoisonedBacku
               "so a purge would put mod files back. Review and quarantine them first: " +
               "vessel deploy clean-backups (then --apply), or pass --ignore-poisoned.",
           };
-        const d = h.domain(a);
+        const d = h.game(a);
         const done = restaged.get(d) ?? new Set<number>();
         restaged.set(d, done);
         const ids = Array.isArray(a?.ids) ? (a.ids as number[]) : [];

@@ -27,12 +27,12 @@ const RESTAGE = "Restage mods";
 export function GameRepairCard() {
   const { game } = useActiveGame();
   if (!game) return null;
-  return <GameRepair key={game.domain} domain={game.domain} name={game.name} />;
+  return <GameRepair key={game.id} game={game.id} name={game.name} />;
 }
 
-function GameRepair({ domain, name }: { domain: string; name: string }) {
-  const poisoned = useQuery({ queryKey: ["poisoned", domain], queryFn: () => ipc.backupsPoisoned(domain) });
-  const quarantines = useQuery({ queryKey: ["quarantines", domain], queryFn: () => ipc.quarantinesList(domain) });
+function GameRepair({ game, name }: { game: string; name: string }) {
+  const poisoned = useQuery({ queryKey: ["poisoned", game], queryFn: () => ipc.backupsPoisoned(game) });
+  const quarantines = useQuery({ queryKey: ["quarantines", game], queryFn: () => ipc.quarantinesList(game) });
   const run = useRun();
   const notify = useUi((s) => s.notify);
   const markDeployDue = useUi((s) => s.markDeployDue);
@@ -52,7 +52,7 @@ function GameRepair({ domain, name }: { domain: string; name: string }) {
 
   const clean = async () => {
     setAsking(null);
-    const r = await run(CLEAN, () => ipc.backupsClean({ includeAmbiguous, confirmed: true }, domain), { key: CLEAN });
+    const r = await run(CLEAN, () => ipc.backupsClean({ includeAmbiguous, confirmed: true }, game), { key: CLEAN });
     if (!r) return;
     if (r.id) {
       setBlocked(null);
@@ -62,7 +62,7 @@ function GameRepair({ domain, name }: { domain: string; name: string }) {
 
   const restore = async (q: QuarantineManifest) => {
     setAsking(null);
-    const r = await run(RESTORE, () => ipc.quarantineRestore(q.id, true, domain), { key: RESTORE });
+    const r = await run(RESTORE, () => ipc.quarantineRestore(q.id, true, game), { key: RESTORE });
     if (r) notify("success", `Restored quarantine ${r.id}: ${r.backups} backup(s), ${r.game_files} game file(s).`);
   };
 
@@ -72,7 +72,7 @@ function GameRepair({ domain, name }: { domain: string; name: string }) {
       RESTAGE,
       async () => {
         try {
-          return await ipc.restage({}, domain);
+          return await ipc.restage({}, game);
         } catch (e) {
           setBlocked(errMsg(e));
           throw e;
@@ -83,7 +83,7 @@ function GameRepair({ domain, name }: { domain: string; name: string }) {
     if (!r) return;
     // Restage only rewrites the staged copies; the game folder changes on the next deploy.
     if (r.restaged.length) {
-      markDeployDue(domain);
+      markDeployDue(game);
       notify("success", `Restaged ${r.restaged.length} mod(s) of ${name}. Deploy to apply.`);
     } else notify("info", "Nothing to restage: no mod is staged in an outdated layout.");
     if (r.no_archive.length) notify("warn", `No archive kept for ${r.no_archive.join(", ")}; reinstall these mods.`);
@@ -115,7 +115,7 @@ function GameRepair({ domain, name }: { domain: string; name: string }) {
               count={list.length}
               open={showPoisoned}
               onToggle={() => setShowPoisoned((o) => !o)}
-              controls={`poisoned-${domain}`}
+              controls={`poisoned-${game}`}
             />
           )}
           <Toggle
@@ -141,7 +141,7 @@ function GameRepair({ domain, name }: { domain: string; name: string }) {
           </CardSection>
         )}
         {showPoisoned && list.length > 0 && (
-          <CardSection id={`poisoned-${domain}`} className="grid gap-3">
+          <CardSection id={`poisoned-${game}`} className="grid gap-3">
             <EntryGroup label="Confirmed" entries={confirmed} />
             <EntryGroup label="Ambiguous" entries={ambiguous} note={includeAmbiguous ? null : "Left alone unless you include them."} />
           </CardSection>
@@ -165,7 +165,7 @@ function GameRepair({ domain, name }: { domain: string; name: string }) {
               count={history.length}
               open={showQuarantines}
               onToggle={() => setShowQuarantines((o) => !o)}
-              controls={`quarantines-${domain}`}
+              controls={`quarantines-${game}`}
             />
           )}
         </Row>
@@ -175,7 +175,7 @@ function GameRepair({ domain, name }: { domain: string; name: string }) {
           </CardSection>
         )}
         {showQuarantines && history.length > 0 && (
-          <CardSection id={`quarantines-${domain}`}>
+          <CardSection id={`quarantines-${game}`}>
             <ul aria-label="Quarantines" className="grid gap-1.5">
               {history.map((q) => (
                 <li

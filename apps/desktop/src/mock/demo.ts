@@ -28,7 +28,7 @@ export function createDemoBackend(): FakeTransport {
     collections: CollectionRecord[];
   }
   const state = new Map<string, GameState>();
-  state.set(games[0].domain, {
+  state.set(games[0].id, {
     mods: [
       mod({ name: "SkyUI", nexus_mod_id: 12604 }),
       mod({ name: "Unofficial Patch", nexus_mod_id: 266 }),
@@ -40,7 +40,7 @@ export function createDemoBackend(): FakeTransport {
   });
   /** The state of the named game (a command's `game` argument), else the active one. */
   const st = (a?: Args): GameState => {
-    const d = typeof a?.game === "string" && a.game ? a.game : active().domain;
+    const d = typeof a?.game === "string" && a.game ? a.game : active().id;
     let g = state.get(d);
     if (!g) state.set(d, (g = { mods: [], dirty: false, profiles: [], collections: [] }));
     return g;
@@ -121,7 +121,7 @@ export function createDemoBackend(): FakeTransport {
   state.forEach(renumber);
   // The first game starts deployed and in sync: its deployment holds its enabled mods.
   for (const g of games) {
-    const s = state.get(g.domain);
+    const s = state.get(g.id);
     if (s && g.deploy.active) s.deployed = new Set(s.mods.filter((m) => m.enabled).map((m) => m.id));
   }
   /** A mod-set change: deploy is due, or done when the command asked for it. */
@@ -210,7 +210,7 @@ export function createDemoBackend(): FakeTransport {
     },
     games_list: () =>
       games.map((g) => {
-        const s = state.get(g.domain);
+        const s = state.get(g.id);
         const on = s ? s.mods.filter((m) => m.enabled) : [];
         const placed = s?.deployed ?? new Set<number>();
         return {
@@ -224,27 +224,27 @@ export function createDemoBackend(): FakeTransport {
         name: "Fallout 4",
         install_dir: "/steam/common/Fallout 4",
         support: "experimental",
-        configured: games.some((g) => g.domain === "fallout4"),
+        configured: games.some((g) => g.id === "fallout4" || g.nexus_domain === "fallout4"),
       },
     ],
     game_use: (a: Args) => {
-      games.forEach((g) => (g.active = g.domain === a!.domain));
+      games.forEach((g) => (g.active = g.id === a!.game));
       return null;
     },
     game_add: (a: Args) =>
       job("game_add", async (id) => {
         const domain = String(a!.domain);
-        if (games.some((g) => g.domain === domain)) throw { message: `${domain} is already added` };
+        if (games.some((g) => g.id === domain)) throw { message: `${domain} is already added` };
         const name = domain === "fallout4" ? "Fallout 4" : domain;
         games.forEach((g) => (g.active = false));
-        const g = experimentalGame({ domain, name, profile: "bethesda", folder: (a!.path as string) ?? null, mod_count: 0, active: true });
+        const g = experimentalGame({ id: domain, name, profile: "bethesda", folder: (a!.path as string) ?? null, mod_count: 0, active: true });
         games.push(g);
         say(id, `Added ${name}.`, "success");
         return g;
       }),
     game_remove: (a: Args) =>
       job("game_remove", async (id) => {
-        const g = games.find((x) => x.domain === a!.domain)!;
+        const g = games.find((x) => x.id === a!.game)!;
         const r = await ask(id, { type: "confirm", question: `Forget ${g.name}?`, default_yes: false });
         if (r.type !== "confirm" || !r.yes) return false;
         games.splice(games.indexOf(g), 1);
@@ -253,17 +253,17 @@ export function createDemoBackend(): FakeTransport {
       }),
     // Generated portrait art for the first game; the others have none (monogram tiles), so both paths show.
     game_art: (a: Args) => {
-      const g = games.find((x) => x.domain === a!.domain);
-      if (!g) throw { message: `no game '${String(a!.domain)}'` };
-      if (g.domain !== "skyrimspecialedition") return null;
+      const g = games.find((x) => x.id === a!.game);
+      if (!g) throw { message: `no game '${String(a!.game)}'` };
+      if (g.id !== "skyrimspecialedition") return null;
       return a!.kind === "library_hero" ? placeholderHero(g.name) : placeholderArt(g.name);
     },
     open_folder: (a: Args) => {
-      const g = games.find((x) => x.domain === a!.game);
+      const g = games.find((x) => x.id === a!.game);
       if (!g) throw { message: `no game '${String(a!.game)}'` };
-      const p = a!.which === "prefix" ? g.prefix : a!.which === "game" ? g.folder : a!.which === "mods" ? `~/.local/share/vessel/${g.domain}/staging` : undefined;
+      const p = a!.which === "prefix" ? g.prefix : a!.which === "game" ? g.folder : a!.which === "mods" ? `~/.local/share/vessel/${g.id}/staging` : undefined;
       if (p === undefined) throw { message: `unknown folder '${String(a!.which)}'` };
-      if (!p) throw { message: `${g.domain}: no ${a!.which === "prefix" ? "Proton prefix" : "game folder"} is set` };
+      if (!p) throw { message: `${g.id}: no ${a!.which === "prefix" ? "Proton prefix" : "game folder"} is set` };
       return p;
     },
     // Generated tile art for collections, except slugs containing "noart" (monogram), so both paths show.
@@ -309,14 +309,14 @@ export function createDemoBackend(): FakeTransport {
         if (answer.type === "cancel") throw cancelled();
         if (!(await confirm(id, "Install the patch for SkyUI too?"))) {
           say(id, "Cancelled.");
-          return { game: active().domain, installed: null, collection: null, after: afterChange({ needs_deploy: false }) };
+          return { game: active().id, installed: null, collection: null, after: afterChange({ needs_deploy: false }) };
         }
-        const m = mod({ name: `Demo Mod ${a!.target}`, game: active().domain, installed_at: now(), position: g.mods.length + 1 });
+        const m = mod({ name: `Demo Mod ${a!.target}`, game: active().id, installed_at: now(), position: g.mods.length + 1 });
         g.mods.push(m);
         renumber(g);
         say(id, `Installed ${m.name}`, "success");
         return {
-          game: active().domain,
+          game: active().id,
           installed: { mod_id: m.id, uid: m.uid, name: m.name, files: 3, size: 1000, fomod_found: true, replaced: null, warnings: [] },
           collection: null,
           after: changed(g, a!.deploy === true),
@@ -435,7 +435,7 @@ export function createDemoBackend(): FakeTransport {
       const slug = collectionSlug(String(a!.reference));
       const installed = st(a).collections.find((c) => c.slug === slug) ?? null;
       return {
-        game: active().domain,
+        game: active().id,
         slug,
         revision: {
           name: `Demo collection ${slug}`,
@@ -448,7 +448,7 @@ export function createDemoBackend(): FakeTransport {
           optional_count: 1,
           total_size: 50 * 1024 * 1024,
           summary: "Two demo mods with the curator's choices.",
-          url: `https://next.nexusmods.com/${active().domain}/collections/${slug}`,
+          url: `https://next.nexusmods.com/${active().nexus_domain}/collections/${slug}`,
         },
         installed,
         update_available: installed && installed.revision < 3 ? 3 : null,
@@ -471,7 +471,7 @@ export function createDemoBackend(): FakeTransport {
           const have = g.mods.find((m) => m.name === name);
           if (have) members.push(have);
           else {
-            const m = mod({ name, game: active().domain, installed_at: now(), position: g.mods.length + 1, collections: [slug] });
+            const m = mod({ name, game: active().id, installed_at: now(), position: g.mods.length + 1, collections: [slug] });
             g.mods.push(m);
             added.push(m);
             members.push(m);
@@ -480,7 +480,7 @@ export function createDemoBackend(): FakeTransport {
         renumber(g);
         const rec: CollectionRecord = {
           id: ++collSeq,
-          game: active().domain,
+          game: active().id,
           slug,
           name: `Demo collection ${slug}`,
           author: "curator",
@@ -576,11 +576,11 @@ export function createDemoBackend(): FakeTransport {
       {
         job,
         say: (id, text) => say(id, text),
-        domain: (a) => (typeof a?.game === "string" && a.game ? a.game : active().domain),
+        game: (a) => (typeof a?.game === "string" && a.game ? a.game : active().id),
         mods: (a) => st(a).mods,
         changed: (a) => void (st(a).dirty = true),
       },
-      { [games[0].domain]: demoPoisoned() },
+      { [games[0].id]: demoPoisoned() },
     ),
   );
   function setAck(key: string, acked: boolean): ReqRow {
@@ -591,7 +591,7 @@ export function createDemoBackend(): FakeTransport {
   }
   function collectionResult(slug: string) {
     return {
-      game: active().domain,
+      game: active().id,
       slug,
       revision: 3,
       cancelled: false,

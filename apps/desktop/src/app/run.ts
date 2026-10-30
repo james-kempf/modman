@@ -28,12 +28,12 @@ export function collectionResultOf(r: unknown): CollectionResult | null {
   return null;
 }
 
-/** The game (domain) a result names, if any. */
+/** The game (id) a result names, if any. */
 function gameOf(r: unknown): string | null {
   return r && typeof r === "object" && "game" in r && typeof r.game === "string" ? r.game : null;
 }
 
-/** The active game (domain) per the games query cache. */
+/** The active game (id) per the games query cache. */
 export function activeGame(qc: QueryClient): GameView | null {
   return qc.getQueryData<GameView[]>(["games"])?.find((g) => g.active) ?? null;
 }
@@ -87,7 +87,7 @@ export function useRun(): Run {
       if (opts.key && (ui.busy[opts.key] ?? 0) > 0) return undefined;
       const key = opts.key && opts.key !== label ? opts.key : null;
       // Commands act on the active game when they start.
-      const started = activeGame(qc)?.domain ?? null;
+      const started = activeGame(qc)?.id ?? null;
       ui.setBusy(label, true);
       if (key) ui.setBusy(key, true);
       try {
@@ -145,17 +145,17 @@ export function useDeploy(): (game?: string) => Promise<DeployReport | undefined
   const qc = useQueryClient();
   return useCallback(
     (target?: string) => {
-      const g = target ? (qc.getQueryData<GameView[]>(["games"])?.find((x) => x.domain === target) ?? null) : activeGame(qc);
-      const domain = target ?? g?.domain;
+      const g = target ? (qc.getQueryData<GameView[]>(["games"])?.find((x) => x.id === target) ?? null) : activeGame(qc);
+      const id = target ?? g?.id;
       return run(
         "Deploy",
         async () => {
           const since = useUi.getState().stamp();
-          useUi.getState().setDeployGame(domain ?? null);
+          useUi.getState().setDeployGame(id ?? null);
           // The game is named: switching games mid-deploy does not retarget it.
-          const r = await ipc.deploy({}, domain).finally(() => useUi.getState().setDeployGame(null));
+          const r = await ipc.deploy({}, id).finally(() => useUi.getState().setDeployGame(null));
           const ui = useUi.getState();
-          if (domain) ui.clearDeployDue(domain, since);
+          if (id) ui.clearDeployDue(id, since);
           const text = deployedText(r);
           ui.notify(r.plugins?.state === "failed" ? "warn" : "success", g ? `${g.name}: ${text}` : text);
           return r;

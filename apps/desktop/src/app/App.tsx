@@ -184,7 +184,7 @@ function Sidebar() {
 function GameHeader() {
   const { game, isLoading } = useActiveGame();
   // Progress of a deploy of another game is not shown under this one (the job island shows it).
-  const progress = useUi((s) => (s.deployGame && s.deployGame !== game?.domain ? null : s.deployProgress));
+  const progress = useUi((s) => (s.deployGame && s.deployGame !== game?.id ? null : s.deployProgress));
   return (
     <header className="sticky top-0 z-10 grid grid-cols-[minmax(0,1fr)] gap-5 bg-ink px-6 pt-6 pb-4">
       <Brand />
@@ -303,7 +303,7 @@ const NOTICE_TONE: Record<NoticeTone, { border: string; icon: ReactNode }> = {
 function useVisibleNotices() {
   const all = useUi((s) => s.notices);
   const { game } = useActiveGame();
-  return all.filter((n) => !n.game || n.game === game?.domain);
+  return all.filter((n) => !n.game || n.game === game?.id);
 }
 
 /** Fixed bottom stack centred under the content (legacy JobIsland position): notices, then the job island. */

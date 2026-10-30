@@ -59,7 +59,7 @@ export function Overview() {
         <ErrorNote>Could not load games: {errMsg(error)}</ErrorNote>
       ) : game ? (
         // key: per-game results (Verify) do not carry over to another game.
-        <GameCards key={game.domain} game={game} />
+        <GameCards key={game.id} game={game} />
       ) : (
         <NoGame title={games?.length ? "No game selected" : "No game yet"}>
           {games?.length
@@ -72,8 +72,8 @@ export function Overview() {
 }
 
 function GameCards({ game }: { game: GameView }) {
-  const mods = useMods(game.domain);
-  const outOfSync = useDeployDue(game.domain);
+  const mods = useMods(game.id);
+  const outOfSync = useDeployDue(game.id);
   const bethesda = game.profile === "bethesda";
   return (
     <>
@@ -98,9 +98,9 @@ function GameCards({ game }: { game: GameView }) {
           deploy={game.deploy}
           outOfSync={outOfSync}
         />
-        <CollectionsCard game={game.domain} />
-        <RequirementsCard game={game.domain} />
-        {bethesda && <PluginsCard game={game.domain} />}
+        <CollectionsCard game={game.id} />
+        <RequirementsCard game={game.id} />
+        {bethesda && <PluginsCard game={game.id} />}
       </div>
     </>
   );
@@ -122,7 +122,7 @@ function PlayCard({ game, outOfSync }: { game: GameView; outOfSync: boolean }) {
     const r = await run("Play", () => ipc.gameLaunch(), { key: "Play" });
     if (!r) return;
     const ui = useUi.getState();
-    if (r.deployed) ui.clearDeployDue(game.domain);
+    if (r.deployed) ui.clearDeployDue(game.id);
     ui.notify("success", `Starting ${game.name} through Steam.`);
   };
   return (
@@ -211,7 +211,7 @@ function FolderButton({
       }
       icon={<FolderOpenIcon aria-hidden size={16} />}
       onClick={() =>
-        void run(key, () => ipc.openFolder(game.domain, which), { key })
+        void run(key, () => ipc.openFolder(game.id, which), { key })
       }
     >
       {label}
@@ -228,7 +228,7 @@ function RemoveGame({ game }: { game: GameView }) {
       size="lg"
       icon={<TrashIcon aria-hidden size={17} />}
       onClick={() =>
-        run("Remove game", () => ipc.gameRemove(game.domain, false), {
+        run("Remove game", () => ipc.gameRemove(game.id, false), {
           key: "Remove game",
         })
       }
@@ -673,8 +673,8 @@ function PluginsCard({ game }: { game: string }) {
 export function HeroBackdrop() {
   const { game } = useActiveGame();
   const q = useQuery({
-    queryKey: ["art", game?.domain, game?.appid, "hero"],
-    queryFn: () => ipc.gameArt(game!.domain, "library_hero"),
+    queryKey: ["art", game?.id, game?.appid, "hero"],
+    queryFn: () => ipc.gameArt(game!.id, "library_hero"),
     enabled: !!game && game.appid !== null,
     staleTime: Infinity,
   });
@@ -734,7 +734,7 @@ function StartupCheckCard() {
         )}
         <ul className="rows">
           {check.pending.map((p) => (
-            <li key={p.domain} className="py-3 text-[14px] text-zinc-400">
+            <li key={p.game} className="py-3 text-[14px] text-zinc-400">
               <span className="text-zinc-100">{p.name}</span>:{" "}
               {p.reasons.join(", ")}
               {p.blocked

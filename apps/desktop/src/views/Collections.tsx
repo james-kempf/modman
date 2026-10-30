@@ -64,8 +64,8 @@ export function Collections() {
       ) : (
         <>
           {/* key: a looked-up collection belongs to one game. */}
-          <Lookup key={game.domain} />
-          <Installed game={game.domain} />
+          <Lookup key={game.id} />
+          <Installed game={game.id} />
         </>
       )}
     </ViewFrame>

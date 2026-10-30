@@ -81,7 +81,7 @@ export function Install() {
             <NxmCard />
           </section>
           {/* key: search results belong to one game. */}
-          <SearchCard key={game.domain} />
+          <SearchCard key={game.id} />
           <DownloadsCard />
         </>
       )}
@@ -278,7 +278,7 @@ function SearchCard() {
               >
                 {game && (
                   <Thumb
-                    game={game.domain}
+                    game={game.id}
                     modId={m.modId}
                     name={m.name ?? ""}
                     className={cx("rounded-card", i % 5 === 0 ? "h-28 w-44" : "size-24")}

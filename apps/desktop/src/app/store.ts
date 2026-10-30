@@ -55,7 +55,7 @@ export interface Notice {
   text: string;
   /** Offer a "Deploy now" button. */
   deploy?: boolean;
-  /** The game (domain) a "Deploy now" notice is about: shown and acted on only for it. */
+  /** The game (id) a "Deploy now" notice is about: shown and acted on only for it. */
   game?: string;
 }
 
@@ -104,12 +104,12 @@ export interface UiState {
   setStartupCheck(c: StartupCheck | null): void;
 
   notices: Notice[];
-  /** `game`: a "Deploy now" notice for that game (domain). */
+  /** `game`: a "Deploy now" notice for that game (id). */
   notify(tone: NoticeTone, text: string, game?: string): void;
   dismiss(id: number): void;
 
   /**
-   * Per game (domain): a mod-set change left it out of sync with staging,
+   * Per game (id): a mod-set change left it out of sync with staging,
    * with the stamp of that change. Absent = nothing pending from this session
    * (the backend's changed_since_deploy still counts, see useDeployDue).
    */

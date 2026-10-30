@@ -24,7 +24,10 @@ export type Target = "game_dir" | "prefix_dir";
 export type PluginsFormat = "star" | "plain";
 
 export interface GameConfig {
-  domain: string;
+  /** Stable key; every `game` argument and field names a game by it. */
+  id: string;
+  /** Nexus game domain (nexusmods.com/<domain>); null = not linked. */
+  nexus_domain: string | null;
   name: string;
   folder: string | null;
   subdir: string;
@@ -529,7 +532,7 @@ export type Skip =
   | { kind: "game_running" };
 export type Busy = { kind: "already_running" } | { kind: "system_updating"; by: string | null };
 export interface Pending {
-  domain: string;
+  game: string;
   name: string;
   reasons: string[];
   /** null = a run now would update and redeploy it. */
@@ -550,7 +553,7 @@ export interface TimerStatus {
   every_hours: number | null;
 }
 export interface AutoupdateGameStatus {
-  domain: string;
+  game: string;
   name: string;
   last_ok: number | null;
   last_failed: boolean;

@@ -301,7 +301,7 @@ function AutoUpdate() {
               "Games",
               s.games.length
                 ? s.games.map((g) => (
-                    <span key={g.domain} className="block">
+                    <span key={g.game} className="block">
                       {g.name}: {g.last_failed ? "last run failed" : `ok ${when(g.last_ok)}`}
                     </span>
                   ))
