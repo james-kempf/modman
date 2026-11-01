@@ -10,6 +10,10 @@ use super::client::check_domain;
 use super::{NexusClient, NexusError};
 
 /// Requirement fields for [`NexusClient::mod_batch`] (legacy L2886).
+/// A mod's browse-card fields (the same as a browse listing's), for [`NexusClient::mod_batch`].
+pub const MOD_CARD_FIELDS: &str =
+    "modId name author version summary downloads endorsements thumbnailUrl category updatedAt";
+
 pub const REQUIREMENT_FIELDS: &str = "modRequirements { nexusRequirements { nodes { modId modName gameId externalRequirement url notes } } }";
 
 const SEARCH_QUERY: &str = "query($d: String!, $q: String!) {

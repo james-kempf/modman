@@ -447,6 +447,12 @@ export interface RevisionMod {
   /** Bytes; 0 = unknown. */
   size: number;
   optional: boolean;
+  /** The mod's Nexus browse card (picture, summary, counts); absent when Nexus has none. */
+  card?: Omit<SearchHit, "installed" | "loader"> | null;
+  /** Installed for this game (managed, or as a loader; see `loader`). */
+  installed: boolean;
+  /** Key of the loader it is installed as (its Remove goes through the loader flow). */
+  loader?: string | null;
 }
 export interface CollectionInfo {
   game: string;

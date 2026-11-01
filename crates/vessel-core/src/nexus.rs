@@ -32,7 +32,7 @@ pub use deps::{
 };
 pub use graphql::{
     utc_date, BrowseCollection, BrowseCollections, BrowseQuery, BrowseSort, SearchMod,
-    SearchResults, REQUIREMENT_FIELDS,
+    SearchResults, MOD_CARD_FIELDS, REQUIREMENT_FIELDS,
 };
 pub use keystore::{
     keyring_opener, probe_keyring, Backend, KeyStorage, KeyringOpener, ProbeOutcome, API_KEY_ENV,

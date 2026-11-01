@@ -34,12 +34,12 @@ export function openView(view: ViewId, doc: Document = document): void {
 }
 
 /**
- * What the right stick scrolls: the open dialog itself (it scrolls inside), else the
- * view's scroll pane (<main>), else the page.
+ * What the right stick scrolls: the open dialog's scroll pane (its tab contents, when it
+ * has one), else the open dialog itself, else the view's scroll pane (<main>), else the page.
  */
 export function scrollTarget(doc: Document = document): HTMLElement | null {
   const scope = navScope(doc);
-  if (scope !== doc.body) return scope;
+  if (scope !== doc.body) return scope.querySelector<HTMLElement>("[data-scroll-pane]") ?? scope;
   return doc.querySelector<HTMLElement>("main") ?? (doc.scrollingElement as HTMLElement | null);
 }
 

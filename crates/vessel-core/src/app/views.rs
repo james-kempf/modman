@@ -198,7 +198,7 @@ pub enum BrowseView {
 
 /// Nexus mod ids installed for `game`: managed mods (no loader key) plus
 /// mods installed as a loader (e.g. SMAPI), which have no mods row.
-fn installed_nexus_ids(cx: &Cx<'_>, game: &GameConfig) -> R<Vec<(u64, Option<String>)>> {
+pub(super) fn installed_nexus_ids(cx: &Cx<'_>, game: &GameConfig) -> R<Vec<(u64, Option<String>)>> {
     let mut ids: Vec<(u64, Option<String>)> = mods::list_mods(cx.store.conn(), &game.id)?
         .iter()
         .filter_map(|m| m.nexus_mod_id.map(|i| (i, None)))

@@ -16,6 +16,9 @@ import { DownloadSimpleIcon, HardDrivesIcon, ThumbsUpIcon } from "@phosphor-icon
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { TAB_EVENT, type TabEventDetail } from "../../nav/actions";
 import { focusables } from "../../nav/spatial";
+import { useBusy } from "../../app/run";
+import { installKey } from "../../views/Requirements";
+import { ModActions } from "../browse/ModActions";
 import { InstalledBadge, MOD_GRID, MOD_PICTURE, Stat, Tile, WorkingBadge, compact, useDetails } from "../browse/Tile";
 import { About } from "../rich/About";
 import { Badge, Button, ErrorNote, Fact, Picture, bytes } from "../ui";
@@ -33,7 +36,7 @@ function day(iso: string | null): string {
 /** The item's actions, then Close (focused on open: activating a card never lands on Install or Remove). */
 function ActionRow({ actions, onClose }: { actions?: ReactNode; onClose: () => void }) {
   return (
-    <div className="mt-6 flex flex-wrap justify-end gap-3">
+    <div className="flex flex-wrap justify-end gap-3">
       {actions}
       <Button tone={actions ? "ghost" : "primary"} data-autofocus onClick={onClose}>
         Close
@@ -43,33 +46,33 @@ function ActionRow({ actions, onClose }: { actions?: ReactNode; onClose: () => v
 }
 
 /** A collection mod as a browse hit, for the mod details dialog (no summary, stats or picture in a revision). */
-const revisionHit = (m: RevisionMod): SearchHit => ({
-  modId: m.mod_id,
-  name: m.name,
-  author: m.author,
-  version: m.version,
-  summary: null,
-  downloads: null,
-  endorsements: null,
-  thumbnailUrl: null,
-  category: null,
-  updatedAt: null,
-  installed: false,
-});
+const revisionHit = (m: RevisionMod): SearchHit => {
+  const c = m.card;
+  return {
+    modId: m.mod_id,
+    name: c?.name ?? m.name,
+    author: c?.author ?? m.author,
+    version: c?.version ?? m.version,
+    summary: c?.summary ?? null,
+    downloads: c?.downloads ?? null,
+    endorsements: c?.endorsements ?? null,
+    thumbnailUrl: c?.thumbnailUrl ?? null,
+    category: c?.category ?? null,
+    updatedAt: c?.updatedAt ?? null,
+    installed: m.installed,
+    loader: m.loader ?? undefined,
+  };
+};
 
 /**
- * A mod card, the same one the Browse list shows: its details dialog, with the
- * item's actions passed in (Browse's Install / Remove). A collection's mod has no
- * installed state or actions (`statusUnknown`), and one without a Nexus id is a
- * dimmed card (`inert`). `extraStats` and `extraBadges` add what only a collection lists.
+ * A mod card, the same one the Browse list and a collection's Mods tab show: its installed tag, its
+ * details dialog (with Install / Remove). One without a Nexus id is a dimmed card (`inert`);
+ * `extraStats` and `extraBadges` add what only a collection lists.
  */
 export function ModTile({
   game,
   m,
   focusKey,
-  busy,
-  actions,
-  statusUnknown,
   inert,
   extraStats,
   extraBadges,
@@ -78,18 +81,15 @@ export function ModTile({
   m: SearchHit;
   /** The card's session focus key (Browse remembers it). */
   focusKey?: string;
-  /** An install or remove is running for this mod. */
-  busy?: boolean;
-  /** Install / Remove, before the dialog's Close. */
-  actions?: ReactNode;
-  statusUnknown?: boolean;
+  /** A mod with no Nexus id: a dimmed card that does not open. */
   inert?: boolean;
   extraStats?: ReactNode;
   extraBadges?: ReactNode;
 }) {
   const details = useDetails();
   const name = m.name ?? `Mod ${m.modId ?? "?"}`;
-  const installed = !statusUnknown && m.installed && m.modId !== null;
+  const busy = useBusy(installKey(String(m.modId)));
+  const installed = m.installed && m.modId !== null;
   return (
     <Tile
       picture={<Picture url={m.thumbnailUrl} name={name} className={MOD_PICTURE} />}
@@ -114,16 +114,7 @@ export function ModTile({
       onOpen={inert ? undefined : details.show}
       cardRef={details.card}
       dialog={
-        details.open && (
-          <ModDetailsDialog
-            game={game}
-            m={m}
-            statusUnknown={statusUnknown}
-            onClose={details.hide}
-            returnFocus={details.card.current}
-            actions={actions}
-          />
-        )
+        details.open && <ModDetailsDialog game={game} m={m} onClose={details.hide} returnFocus={details.card.current} />
       }
     />
   );
@@ -191,8 +182,8 @@ function DialogTabs<T extends string>({
   }, [value]);
 
   return (
-    <>
-      <div ref={list} role="tablist" aria-label={label} className="flex w-full border-b border-hairline">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div ref={list} role="tablist" aria-label={label} className="flex w-full shrink-0 border-b border-hairline">
         {tabs.map((t) => (
           <button
             key={t.value}
@@ -211,10 +202,18 @@ function DialogTabs<T extends string>({
           </button>
         ))}
       </div>
-      <div ref={panel} role="tabpanel" id={`${id}-panel-${value}`} aria-labelledby={`${id}-tab-${value}`} className="mt-5">
+      {/* The tab's contents are the only part that scrolls (the tabs, title and actions stay in place). */}
+      <div
+        ref={panel}
+        data-scroll-pane
+        role="tabpanel"
+        id={`${id}-panel-${value}`}
+        aria-labelledby={`${id}-tab-${value}`}
+        className="mt-5 min-h-0 flex-1 overflow-y-auto overscroll-contain"
+      >
         {children}
       </div>
-    </>
+    </div>
   );
 }
 
@@ -236,18 +235,26 @@ export function ModDetailsDialog({
   game,
   m,
   onClose,
-  actions,
   returnFocus,
-  statusUnknown,
-}: DialogProps & {
+}: {
   game: string;
   m: SearchHit;
-  /** Opened from a collection's list: installed state not known. */ statusUnknown?: boolean;
+  onClose: () => void;
+  /** Where focus goes on close (the card). */
+  returnFocus?: HTMLElement | null;
 }) {
   const name = m.name ?? `Mod ${m.modId ?? "?"}`;
   const [tab, setTab] = useState<ModTab>("details");
   return (
-    <Dialog title={name} subtitle={m.author ? `by ${m.author}` : undefined} onBack={onClose} returnFocus={returnFocus} wide fixedHeight>
+    <Dialog
+      title={name}
+      subtitle={m.author ? `by ${m.author}` : undefined}
+      onBack={onClose}
+      returnFocus={returnFocus}
+      wide
+      fixedHeight
+      footer={<ActionRow actions={<ModActions game={game} m={m} />} onClose={onClose} />}
+    >
       <DialogTabs label="Mod" tabs={MOD_TABS} value={tab} onChange={setTab}>
         {tab === "details" ? (
           <>
@@ -260,7 +267,7 @@ export function ModDetailsDialog({
               <Fact k="Downloads" v={num(m.downloads)} />
               <Fact k="Updated" v={day(m.updatedAt)} />
               <Fact k="Nexus id" v={m.modId ?? "?"} />
-              <Fact k="Status" v={statusUnknown ? "?" : m.installed ? "Installed" : "Not installed"} />
+              <Fact k="Status" v={m.installed ? "Installed" : "Not installed"} />
             </dl>
             <Summary text={m.summary} />
           </>
@@ -268,7 +275,6 @@ export function ModDetailsDialog({
           <About game={game} target={m.modId !== null ? { kind: "mod", mod_id: m.modId } : null} summary={m.summary} />
         )}
       </DialogTabs>
-      <ActionRow actions={actions} onClose={onClose} />
     </Dialog>
   );
 }
@@ -289,7 +295,15 @@ export function CollectionDetailsDialog({ game, c, onClose, actions, returnFocus
     { value: "mods", label: r ? `Mods (${r.mod_count})` : c.mod_count !== null ? `Mods (${c.mod_count})` : "Mods" },
   ] as const;
   return (
-    <Dialog title={c.name} subtitle={c.author ? `by ${c.author}` : undefined} onBack={onClose} returnFocus={returnFocus} wide fixedHeight>
+    <Dialog
+      title={c.name}
+      subtitle={c.author ? `by ${c.author}` : undefined}
+      onBack={onClose}
+      returnFocus={returnFocus}
+      wide
+      fixedHeight
+      footer={<ActionRow actions={actions} onClose={onClose} />}
+    >
       <DialogTabs label="Collection" tabs={tabs} value={tab} onChange={setTab}>
         {tab === "details" ? (
           <>
@@ -321,7 +335,6 @@ export function CollectionDetailsDialog({ game, c, onClose, actions, returnFocus
                 key={`${m.mod_id ?? "x"}-${i}`}
                 game={game}
                 m={revisionHit(m)}
-                statusUnknown
                 inert={m.mod_id === null}
                 extraStats={m.size ? <Stat icon={<HardDrivesIcon aria-hidden size={13} />} value={bytes(m.size)} label="size" /> : null}
                 extraBadges={
@@ -343,7 +356,6 @@ export function CollectionDetailsDialog({ game, c, onClose, actions, returnFocus
           <ErrorNote>Could not load revision details: {errMsg(q.error)}</ErrorNote>
         </div>
       )}
-      <ActionRow actions={actions} onClose={onClose} />
     </Dialog>
   );
 }

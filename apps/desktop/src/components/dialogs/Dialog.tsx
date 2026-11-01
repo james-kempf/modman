@@ -59,12 +59,15 @@ export function Dialog({
   children,
   wide,
   fixedHeight,
+  footer,
   returnFocus,
 }: {
   title: ReactNode;
   subtitle?: ReactNode;
   onBack: () => void;
   children: ReactNode;
+  /** Pinned under the body (never scrolls with it): the actions, Close. */
+  footer?: ReactNode;
   wide?: boolean;
   /** Always the full available height (not only at most), so the size holds while its content changes. */
   fixedHeight?: boolean;
@@ -145,18 +148,22 @@ export function Dialog({
         data-nav-scope
         onKeyDown={onKeyDown}
         className={cx(
-          "glass w-full animate-pop overflow-y-auto overscroll-contain rounded-card p-5 sm:p-7",
+          "glass w-full animate-pop rounded-card p-5 sm:p-7",
           fixedHeight
-            ? "h-[calc(100vh-2rem)] sm:h-[calc(100vh-3rem)]"
-            : "max-h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-3rem)]",
+            ? // Title, body and footer in a column: only the body's scroll pane (data-scroll-pane) scrolls.
+              "flex h-[calc(100vh-2rem)] flex-col overflow-hidden sm:h-[calc(100vh-3rem)]"
+            : "max-h-[calc(100vh-2rem)] overflow-y-auto overscroll-contain sm:max-h-[calc(100vh-3rem)]",
           wide ? "max-w-5xl" : "max-w-2xl",
         )}
       >
-        <h2 id={titleId} className="text-xl font-medium tracking-tight wrap-anywhere text-zinc-50">
-          {title}
-        </h2>
-        {subtitle && <p className="mt-1.5 text-body leading-relaxed wrap-anywhere text-zinc-400">{subtitle}</p>}
-        <div className="mt-6">{children}</div>
+        <div className="shrink-0">
+          <h2 id={titleId} className="text-xl font-medium tracking-tight wrap-anywhere text-zinc-50">
+            {title}
+          </h2>
+          {subtitle && <p className="mt-1.5 text-body leading-relaxed wrap-anywhere text-zinc-400">{subtitle}</p>}
+        </div>
+        <div className={cx("mt-6", fixedHeight && "flex min-h-0 flex-1 flex-col")}>{children}</div>
+        {footer && <div className="shrink-0 pt-4">{footer}</div>}
       </div>
     </div>,
     document.body,

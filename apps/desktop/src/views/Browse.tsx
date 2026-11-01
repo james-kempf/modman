@@ -12,6 +12,7 @@ import { useActiveGame } from "../app/queries";
 import { useBusy, useRun } from "../app/run";
 import { browseDefaults, useUi, type BrowseSession } from "../app/store";
 import { CollectionDetailsDialog, ModTile } from "../components/dialogs/BrowseDetails";
+import { RemoveButton, installedText } from "../components/browse/ModActions";
 import { readClipboard } from "../components/shell/Osk";
 import {
   ArrowClockwiseIcon,
@@ -23,7 +24,6 @@ import {
   LinkIcon,
   PackageIcon,
   ThumbsUpIcon,
-  TrashIcon,
 } from "@phosphor-icons/react";
 import {
   Badge,
@@ -45,9 +45,8 @@ import {
   cx,
 } from "../components/ui";
 import * as ipc from "../ipc/commands";
-import type { BrowseKind, BrowsePeriod, BrowseSort, BrowseView, CollectionHit, InstallResult, SearchHit } from "../ipc/types";
-import { collectionText, collectionTone, removedText } from "./Collections";
-import { uninstalledText } from "./Mods";
+import type { BrowseKind, BrowsePeriod, BrowseSort, BrowseView, CollectionHit } from "../ipc/types";
+import { collectionText, collectionTone } from "./Collections";
 import { installKey } from "./Requirements";
 import { NoGame } from "../components/shell/NoGame";
 import { FOCUS_ATTR, InstalledBadge, MOD_GRID, RESULTS_GRID, Stat, Tile, WorkingBadge, compact, useDetails } from "../components/browse/Tile";
@@ -85,19 +84,6 @@ const PERIOD_PHRASE: Record<BrowsePeriod, string> = {
   week: "from the past week",
   day: "from the past day",
 };
-
-export function installedText(r: InstallResult): string {
-  if (r.installed) {
-    const i = r.installed;
-    return `Installed ${i.name} (${i.files} files${i.replaced ? `, replaced ${i.replaced}` : ""})`;
-  }
-  if (r.collection) {
-    const c = r.collection;
-    if (c.cancelled) return `Collection ${c.slug}: cancelled`;
-    return `Collection ${c.slug}: ${c.installed} installed, ${c.present} present, ${c.failed.length} failed`;
-  }
-  return "Nothing installed";
-}
 
 /** The non-empty lines/words of pasted text (nxm links never contain whitespace). */
 export function splitLinks(text: string): string[] {
@@ -436,7 +422,7 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
               aria-busy={q.isPlaceholderData || undefined}
             >
               {data!.kind === "mods"
-                ? data!.mods.map((m, i) => <BrowseModTile key={m.modId !== null ? `m${m.modId}` : `i${i}`} game={game} m={m} />)
+                ? data!.mods.map((m, i) => <ModTile key={m.modId !== null ? `m${m.modId}` : `i${i}`} game={game} m={m} focusKey={`m${m.modId ?? m.name}`} />)
                 : data!.collections.map((c) => <CollectionTile key={c.slug} game={game} c={c} />)}
             </ul>
             <nav className="mt-5 flex flex-wrap items-center gap-4" aria-label={`${kind === "mods" ? "Mods" : "Collections"} pages`}>
@@ -473,69 +459,6 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
   );
 }
 
-/**
- * What an installed item's Remove takes away. Routed by kind in `useRemove`
- * (a loader-installed item gets its own kind and route).
- */
-export type Removable =
-  | { kind: "mod"; nexusId: number; name: string }
-  | { kind: "loader"; loaderKey: string; nexusId: number; name: string }
-  | { kind: "collection"; slug: string; name: string };
-
-/** The run label/busy key of removing an item (shared with its install where the views share one). */
-const removeKey = (r: Removable) => (r.kind === "collection" ? `Collection ${r.slug}` : installKey(String(r.nexusId)));
-
-/** Remove an installed browse item; the backend asks for confirmation (the app's confirm prompt). */
-function useRemove(game: string) {
-  const run = useRun();
-  const qc = useQueryClient();
-  const notify = useUi((s) => s.notify);
-  const openConsent = useUi((s) => s.openLoaderConsent);
-  return async (r: Removable) => {
-    const key = removeKey(r);
-    switch (r.kind) {
-      case "loader": {
-        // A loader has no mods row: uninstall it through its consent flow (the consent refreshes every view).
-        const preview = await run("Uninstall", () => ipc.loaderPreview({ op: "uninstall", loaderKey: r.loaderKey }, game), { key });
-        if (preview) openConsent({ game, preview });
-        return;
-      }
-      case "mod": {
-        // A bare Nexus id resolves to the installed mod.
-        const res = await run("Uninstall", () => ipc.modsUninstall([String(r.nexusId)], false), { key });
-        if (!res) return;
-        notify(res.done ? "success" : "info", uninstalledText(res, r.name));
-        break;
-      }
-      case "collection": {
-        const res = await run("Remove collection", () => ipc.collectionRemove(r.slug, false), { key });
-        if (!res) return;
-        notify(res.removed ? "success" : "info", removedText(r.slug, res));
-        void qc.invalidateQueries({ queryKey: ["collections", game] });
-        break;
-      }
-    }
-    void qc.invalidateQueries({ queryKey: ["browse", game] });
-  };
-}
-
-/** The details dialog's Remove: the backend (or the loader consent) confirms. */
-function RemoveButton({ game, item }: { game: string; item: Removable }) {
-  const remove = useRemove(game);
-  const busy = useBusy(removeKey(item));
-  return (
-    <Button
-      tone="danger"
-      busy={busy}
-      aria-label={`Remove ${item.name}`}
-      icon={<TrashIcon aria-hidden size={16} />}
-      onClick={() => void remove(item)}
-    >
-      Remove
-    </Button>
-  );
-}
-
 // Mod pictures fill the tile's width at 16:9 (MOD_PICTURE). Collection pictures are 4:5 portrait, left of the
 // text, and their width is a mod picture's height. The results <ul> is the container
 // (100cqw), and the mod tile's picture width is its column (mods: 1 / sm 2 / xl 3, gap-4 = 1rem) less the tile's
@@ -549,51 +472,6 @@ const COLLECTION_PICTURE = cx(
   "sm:w-[calc(((100cqw-1rem)/2-1.25rem-2px)*9/16)]",
   "xl:w-[calc(((100cqw-2rem)/3-1.25rem-2px)*9/16)]",
 );
-
-/** A Browse result's card (the shared mod card) with this view's Install / Remove. */
-function BrowseModTile({ game, m }: { game: string; m: SearchHit }) {
-  const run = useRun();
-  const qc = useQueryClient();
-  const notify = useUi((s) => s.notify);
-  const installing = useUi((s) => s.busy);
-  const name = m.name ?? `Mod ${m.modId ?? "?"}`;
-  const key = installKey(String(m.modId));
-  const busy = (installing[key] ?? 0) > 0;
-  const installed = m.installed && m.modId !== null;
-  const install = async () => {
-    const r = await run("Install", () => ipc.install({ target: String(m.modId), fomod: "ask" }), { key });
-    if (!r) return;
-    notify("success", installedText(r));
-    void qc.invalidateQueries({ queryKey: ["browse", game] });
-  };
-  return (
-    <ModTile
-      game={game}
-      m={m}
-      focusKey={`m${m.modId ?? name}`}
-      busy={busy}
-      actions={
-        installed ? (
-          <RemoveButton
-            game={game}
-            item={m.loader ? { kind: "loader", loaderKey: m.loader, nexusId: m.modId!, name } : { kind: "mod", nexusId: m.modId!, name }}
-          />
-        ) : (
-          <Button
-            tone="primary"
-            disabled={m.modId === null}
-            busy={busy}
-            aria-label={`Install ${name}`}
-            icon={<DownloadSimpleIcon aria-hidden size={16} />}
-            onClick={() => void install()}
-          >
-            Install
-          </Button>
-        )
-      }
-    />
-  );
-}
 
 function CollectionTile({ game, c }: { game: string; c: CollectionHit }) {
   const run = useRun();

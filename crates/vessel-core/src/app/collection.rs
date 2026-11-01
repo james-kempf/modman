@@ -19,6 +19,7 @@ use crate::download::{self, DownloadStatus, FetchRequest, Fetcher};
 use crate::fomod::FomodMode;
 use crate::games::GameConfig;
 use crate::mods;
+use crate::nexus::{SearchMod, MOD_CARD_FIELDS};
 
 pub const URL_HELP: &str = "  Supported formats:
     nxm://{game}/collections/{slug}[/revisions/{rev}]
@@ -560,7 +561,7 @@ pub struct CollectionInfo {
 }
 
 /// Serializable part of a [`Revision`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RevisionInfo {
     pub name: String,
     pub author: String,
@@ -578,7 +579,7 @@ pub struct RevisionInfo {
 }
 
 /// One mod of a collection revision, as listed by the API.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RevisionMod {
     pub name: String,
     pub version: Option<String>,
@@ -587,6 +588,13 @@ pub struct RevisionMod {
     /// Bytes; 0 when the API does not say.
     pub size: u64,
     pub optional: bool,
+    /// The mod's browse card on Nexus (picture, summary, counts); `None` when
+    /// it has none or the lookup failed.
+    pub card: Option<SearchMod>,
+    /// Installed for this game (a managed mod or a loader-installed one).
+    pub installed: bool,
+    /// Key of the loader it is installed as (its Remove goes through the loader flow).
+    pub loader: Option<String>,
 }
 
 /// The mods of `rev`, read through the API-built manifest (same name/size fallbacks as installs).
@@ -606,6 +614,9 @@ fn revision_mods(rev: &Revision) -> Vec<RevisionMod> {
             mod_id: m.mod_id,
             size: m.file_size,
             optional: m.optional,
+            card: None,
+            installed: false,
+            loader: None,
         })
         .collect()
 }
@@ -627,6 +638,39 @@ fn revision_info(rev: &Revision, game: &str, slug: &str) -> RevisionInfo {
     }
 }
 
+/// Adds each listed mod's Nexus card (picture, summary, counts) with one batched
+/// lookup. A failed lookup is logged and leaves the mods as the revision lists them.
+fn attach_cards(cx: &Cx<'_>, nexus: &Nexus, game: &GameConfig, mods: &mut [RevisionMod]) {
+    let ids: Vec<u64> = mods.iter().filter_map(|m| m.mod_id).collect();
+    if ids.is_empty() {
+        return;
+    }
+    let mut g = game.clone();
+    let gid = match nx::game_id(&*cx.store, nexus, &mut g) {
+        Ok(id) => id,
+        Err(e) => {
+            tracing::warn!(error = %e, "collection mod cards: no Nexus game id");
+            return;
+        }
+    };
+    let cards = match nexus.run(nexus.client.mod_batch(gid, &ids, MOD_CARD_FIELDS)) {
+        Ok(Ok(cards)) => cards,
+        _ => {
+            tracing::warn!("collection mod cards: lookup failed");
+            return;
+        }
+    };
+    for m in mods.iter_mut() {
+        if let Some(v) = m
+            .mod_id
+            .and_then(|id| cards.get(&id))
+            .and_then(|v| v.clone())
+        {
+            m.card = serde_json::from_value(v).ok();
+        }
+    }
+}
+
 /// `collection info <ref>`.
 pub fn info(cx: &Cx<'_>, reference: &str) -> R<CollectionInfo> {
     let r = parse(reference)?;
@@ -645,8 +689,20 @@ pub fn info(cx: &Cx<'_>, reference: &str) -> R<CollectionInfo> {
     let update_available = installed
         .as_ref()
         .and_then(|rec| rev.latest.filter(|l| *l != rec.revision));
+    let mut revision = revision_info(&rev, nd, &r.slug);
+    attach_cards(cx, &nexus, &game, &mut revision.mods);
+    let installed_ids = super::views::installed_nexus_ids(cx, &game)?;
+    for m in revision.mods.iter_mut() {
+        if let Some((_, loader)) = m
+            .mod_id
+            .and_then(|id| installed_ids.iter().find(|(i, _)| *i == id))
+        {
+            m.installed = true;
+            m.loader = loader.clone();
+        }
+    }
     Ok(CollectionInfo {
-        revision: revision_info(&rev, nd, &r.slug),
+        revision,
         game: game.id,
         slug: r.slug,
         installed,
