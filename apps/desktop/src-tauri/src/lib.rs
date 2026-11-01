@@ -85,6 +85,12 @@ pub fn run() {
             std::thread::Builder::new()
                 .name("startup-check".into())
                 .spawn(move || {
+                    // Off the UI thread: recovery may wait on the deploy lock
+                    // and finish a crashed run's diff.
+                    let recovered = startup::loader_recovery(&st);
+                    if !recovered.is_empty() {
+                        events::emit(&handle, events::LOADER_RECOVERED, &recovered);
+                    }
                     let check = startup::startup_check(&st, &LiveHost::new(&st.paths.home));
                     events::emit(&handle, events::STARTUP_CHECK, &check);
                 })?;
@@ -164,6 +170,19 @@ pub fn run() {
             commands::quarantines_list,
             commands::quarantine_restore,
             commands::restage,
+            commands::loader_status,
+            commands::loader_preview,
+            commands::loader_preview_reopen,
+            commands::loader_run,
+            commands::loader_rollback,
+            commands::loader_decline_rollback,
+            commands::game_runtime_set,
+            commands::launch_options_get,
+            commands::launch_options_ack,
+            commands::launch_options_apply,
+            commands::loader_junk_scan,
+            commands::loader_junk_remove,
+            commands::loader_log_get,
         ])
         .run(tauri::generate_context!());
     if let Err(e) = result {

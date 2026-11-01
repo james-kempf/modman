@@ -81,6 +81,8 @@ pub struct CollectionResult {
     pub removed: usize,
     pub up_to_date: bool,
     pub deployed: Option<DeployReport>,
+    /// Mod loaders in the collection, waiting for consent (not failed).
+    pub loaders_pending: Vec<super::install::LoaderPending>,
 }
 
 fn optional_picks(cx: &Cx<'_>, m: &Manifest, mode: OptionalMode) -> Vec<usize> {
@@ -404,6 +406,20 @@ pub fn install_collection(
                 .d(mm.version.as_deref().unwrap_or("")),
         );
         let meta = mm.install_meta(fomod_mode);
+        // Nexus files are downloaded by Vessel through the API; bundled or
+        // direct files are not verifiable.
+        let origin = match (
+            meta.source.as_deref(),
+            meta.nexus_mod_id,
+            meta.nexus_file_id,
+        ) {
+            (Some("nexus"), Some(mod_id), Some(file_id)) => crate::loaders::DownloadOrigin::Nexus {
+                domain: game.nexus_domain.clone().unwrap_or_default(),
+                mod_id,
+                file_id,
+            },
+            _ => crate::loaders::DownloadOrigin::Local { path: path.clone() },
+        };
         let lock = staging_lock(cx.paths)?;
         let res = super::install::install_archive(
             cx,
@@ -412,12 +428,15 @@ pub fn install_collection(
             path,
             &meta,
             fomod_mode == FomodMode::Ask,
+            Some(&origin),
         );
         drop(lock);
         match res {
-            Ok(o) => {
+            Ok(super::install::Installed::Mod(o)) => {
                 ids.insert(i, o.mod_id);
             }
+            // A loader is pending consent, not failed.
+            Ok(super::install::Installed::Loader(l)) => out.loaders_pending.push(l),
             Err(e) => failed.push((i, format!("install failed: {}", chain(&e)))),
         }
     }
@@ -554,6 +573,41 @@ pub struct RevisionInfo {
     pub total_size: u64,
     pub summary: String,
     pub url: String,
+    /// The revision's mods (from the API's `modFiles`), in collection order.
+    pub mods: Vec<RevisionMod>,
+}
+
+/// One mod of a collection revision, as listed by the API.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RevisionMod {
+    pub name: String,
+    pub version: Option<String>,
+    pub author: Option<String>,
+    pub mod_id: Option<u64>,
+    /// Bytes; 0 when the API does not say.
+    pub size: u64,
+    pub optional: bool,
+}
+
+/// The mods of `rev`, read through the API-built manifest (same name/size fallbacks as installs).
+fn revision_mods(rev: &Revision) -> Vec<RevisionMod> {
+    Manifest::from_revision(rev)
+        .mods
+        .into_iter()
+        .map(|m| RevisionMod {
+            author: m
+                .raw
+                .get("author")
+                .and_then(serde_json::Value::as_str)
+                .filter(|a| !a.is_empty())
+                .map(str::to_owned),
+            name: m.name,
+            version: m.version,
+            mod_id: m.mod_id,
+            size: m.file_size,
+            optional: m.optional,
+        })
+        .collect()
 }
 
 fn revision_info(rev: &Revision, game: &str, slug: &str) -> RevisionInfo {
@@ -569,6 +623,7 @@ fn revision_info(rev: &Revision, game: &str, slug: &str) -> RevisionInfo {
         total_size: rev.total_size,
         summary: rev.summary.clone(),
         url: format!("https://www.nexusmods.com/games/{game}/collections/{slug}"),
+        mods: revision_mods(rev),
     }
 }
 
@@ -730,4 +785,49 @@ pub fn remove(cx: &mut Cx<'_>, reference: &str, keep_mods: bool) -> R<RemoveResu
         uninstalled: res.uninstalled.len(),
         after: after.into(),
     })
+}
+
+#[cfg(test)]
+mod revision_tests {
+    use super::*;
+    use serde_json::json;
+
+    // Fails when collection_info drops the revision's mod list, or loses a mod's
+    // version, author, size, Nexus id or optional flag on the way to the UI.
+    #[test]
+    fn revision_info_lists_the_revisions_mods() {
+        let rev = Revision::from_value(
+            "g",
+            "abc",
+            json!({"revisionNumber": 2, "modCount": 2,
+                   "collection": {"name": "N", "user": {"name": "U"}},
+                   "modFiles": [
+                       {"fileId": 11, "optional": true, "file": {"modId": 1, "name": "f1", "version": "1.2", "sizeInBytes": "100", "mod": {"name": "Mod One", "author": "A"}}},
+                       {"fileId": 12, "file": {"modId": 2, "name": "f2", "sizeInBytes": 5}}
+                   ]}),
+        )
+        .unwrap();
+        let info = revision_info(&rev, "g", "abc");
+        assert_eq!(
+            info.mods,
+            vec![
+                RevisionMod {
+                    name: "Mod One".into(),
+                    version: Some("1.2".into()),
+                    author: Some("A".into()),
+                    mod_id: Some(1),
+                    size: 100,
+                    optional: true
+                },
+                RevisionMod {
+                    name: "f2".into(),
+                    version: None,
+                    author: None,
+                    mod_id: Some(2),
+                    size: 5,
+                    optional: false
+                },
+            ]
+        );
+    }
 }

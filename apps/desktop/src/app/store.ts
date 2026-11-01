@@ -9,16 +9,17 @@ import type {
   DeployProgressEvent,
   DownloadProgress,
   JobEvent,
+  LoaderLogEvent,
   NxmEvent,
   PromptEvent,
 } from "../ipc/events";
-import type { StartupCheck } from "../ipc/types";
+import type { BrowseKind, BrowsePeriod, BrowseSort, LoaderPending, Preview, StartupCheck } from "../ipc/types";
 
 export const VIEWS = [
   { id: "games", label: "Games" },
   { id: "overview", label: "Overview" },
-  { id: "mods", label: "Mods" },
   { id: "browse", label: "Browse" },
+  { id: "mods", label: "Mods" },
   { id: "collections", label: "Collections" },
   { id: "requirements", label: "Requirements" },
   { id: "activity", label: "Activity" },
@@ -59,18 +60,62 @@ export interface Notice {
   game?: string;
 }
 
+/**
+ * A loader op waiting for the consent dialog: a full preview (a Requirements
+ * card op), or a pending one from install / a collection / an nxm link
+ * (fetched in full when shown). Never run without the user's confirm.
+ */
+export interface LoaderConsent {
+  id: number;
+  game: string | null;
+  preview?: Preview;
+  pending?: LoaderPending;
+}
+
 /** The input the on-screen keyboard types into. */
 export interface OskTarget {
   input: HTMLInputElement;
   label: string;
 }
 
+/**
+ * Browse's listing state for this session (in memory): restored when the view
+ * is entered again. Belongs to one game; another game starts from the defaults.
+ */
+export interface BrowseSession {
+  game: string;
+  kind: BrowseKind;
+  period: BrowsePeriod;
+  sort: BrowseSort;
+  /** The search field's text (not submitted yet). */
+  draft: string;
+  /** The submitted search words. */
+  text: string;
+  /** Zero-based page of the listing. */
+  page: number;
+  /** data-browse-focus key of the last focused Browse control. */
+  focus: string | null;
+  /** <main>'s scrollTop when Browse was left. */
+  scroll: number;
+}
+export const browseDefaults = (game: string): BrowseSession => ({
+  game,
+  kind: "mods",
+  period: "all",
+  sort: "endorsements",
+  draft: "",
+  text: "",
+  page: 0,
+  focus: null,
+  scroll: 0,
+});
+
 const MAX_ACTIVITY = 500;
 /** Jobs kept for Activity; past this the oldest finished ones are dropped. */
 export const MAX_JOBS = 200;
 const MAX_NOTICES = 3;
-/** Auto-dismiss after (ms); null = stays until dismissed. "Deploy now" notices always stay. */
-const NOTICE_TTL: Record<NoticeTone, number | null> = { info: 6000, success: 6000, warn: 10000, error: null };
+/** Auto-dismiss after (ms); every notice closes on its own, "Deploy now" ones included. */
+const NOTICE_TTL: Record<NoticeTone, number> = { info: 6000, success: 6000, warn: 10000, error: 10000 };
 
 export interface UiState {
   view: ViewId;
@@ -127,6 +172,14 @@ export interface UiState {
   busy: Record<string, number>;
   setBusy(label: string, on: boolean): void;
 
+  loaderConsents: LoaderConsent[];
+  /** Queue a consent dialog (the same preview once). */
+  openLoaderConsent(c: Omit<LoaderConsent, "id">): void;
+  dropLoaderConsent(id: number): void;
+  /** Live installer output per preview id (redacted by the backend). */
+  loaderLog: Record<string, string>;
+  onLoaderLog(e: LoaderLogEvent): void;
+
   osk: OskTarget | null;
   openOsk(t: OskTarget): void;
   closeOsk(): void;
@@ -134,6 +187,10 @@ export interface UiState {
   /** The add-game dialog (the Games view's "Add game" tile) is open. */
   addGame: boolean;
   setAddGame(open: boolean): void;
+
+  browse: BrowseSession | null;
+  /** Merge into the game's Browse session (a session of another game is replaced). */
+  saveBrowse(game: string, patch: Partial<Omit<BrowseSession, "game">>): void;
 }
 
 let seq = 0;
@@ -151,8 +208,11 @@ const initial = {
   notices: [],
   deployDue: {},
   busy: {},
+  loaderConsents: [],
+  loaderLog: {},
   osk: null,
   addGame: false,
+  browse: null as BrowseSession | null,
 };
 
 export const useUi = create<UiState>()((set, get) => ({
@@ -238,8 +298,7 @@ export const useUi = create<UiState>()((set, get) => ({
         -MAX_NOTICES,
       ),
     }));
-    const ttl = NOTICE_TTL[tone];
-    if (ttl && !deploy) setTimeout(() => get().dismiss(id), ttl);
+    setTimeout(() => get().dismiss(id), NOTICE_TTL[tone]);
   },
   dismiss: (id) => set((s) => ({ notices: s.notices.filter((n) => n.id !== id) })),
 
@@ -265,10 +324,27 @@ export const useUi = create<UiState>()((set, get) => ({
       return { busy };
     }),
 
+  openLoaderConsent: (c) =>
+    set((s) => {
+      const pid = c.preview?.preview_id ?? c.pending?.preview_id;
+      if (s.loaderConsents.some((x) => (x.preview?.preview_id ?? x.pending?.preview_id) === pid)) return s;
+      return { loaderConsents: [...s.loaderConsents, { ...c, id: ++seq }] };
+    }),
+  dropLoaderConsent: (id) => set((s) => ({ loaderConsents: s.loaderConsents.filter((c) => c.id !== id) })),
+  onLoaderLog: (e) =>
+    set((s) => {
+      const next = (s.loaderLog[e.preview_id] ?? "") + e.text;
+      // Bounded: the full log stays on disk (loader_log_get).
+      return { loaderLog: { ...s.loaderLog, [e.preview_id]: next.length > 200_000 ? next.slice(-200_000) : next } };
+    }),
+
   openOsk: (t) => set({ osk: t }),
   closeOsk: () => set({ osk: null }),
 
   setAddGame: (open) => set({ addGame: open }),
+
+  saveBrowse: (game, patch) =>
+    set((s) => ({ browse: { ...(s.browse?.game === game ? s.browse : browseDefaults(game)), ...patch } })),
 }));
 
 /** Drop the oldest finished jobs past MAX_JOBS (running ones always stay). */

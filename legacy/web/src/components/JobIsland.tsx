@@ -9,7 +9,7 @@ import { spring } from './ui'
 /** Colours a console line by the markers modman prints. */
 export function ConsoleLine({ text }: { text: string }) {
   const banner = /^\s*│\s*(.*?)\s*│\s*$/.exec(text)
-  if (banner) return <div className="pt-1 pb-1 font-sans text-[14px] font-medium text-zinc-100">{banner[1]}</div>
+  if (banner) return <div className="pt-1 pb-1 font-sans text-body font-medium text-zinc-100">{banner[1]}</div>
   const tone =
     /^\s*\[(ERR|ERR )\]|✗|failed|Error/i.test(text) ? 'text-rose-300'
       : /^\s*\[WARN\]/.test(text) ? 'text-amber-300'
@@ -76,7 +76,7 @@ export function JobIsland() {
             <div className="flex items-center gap-3 border-b border-white/[0.06] px-5 py-3.5">
               <StateIcon running={running} failed={failed} />
               <div className="min-w-0 flex-1">
-                <div className="truncate text-[14px] font-medium text-zinc-100">{job.label}</div>
+                <div className="truncate text-body font-medium text-zinc-100">{job.label}</div>
                 <div className="font-mono text-[11px] text-zinc-500">
                   {running ? 'running' : job.status}{job.code != null && !running ? ` · exit ${job.code}` : ''}
                   {job.queued > 0 && ` · ${job.queued} queued`}
@@ -85,7 +85,7 @@ export function JobIsland() {
               {running && job.summary && (
                 <button
                   onClick={() => job.summary && api.cancelJob(job.summary.id)}
-                  className="flex h-9 items-center gap-1.5 rounded-xl px-3 text-[13px] text-zinc-400 hover:bg-white/[0.06] hover:text-rose-300"
+                  className="flex h-9 items-center gap-1.5 rounded-xl px-3 text-label text-zinc-400 hover:bg-white/[0.06] hover:text-rose-300"
                 >
                   <StopIcon size={14} weight="fill" /> Stop
                 </button>

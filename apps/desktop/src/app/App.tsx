@@ -6,28 +6,24 @@
 
 import {
   BooksIcon,
-  CheckCircleIcon,
-  CheckIcon,
   CompassIcon,
   GameControllerIcon,
   GearSixIcon,
-  InfoIcon,
   PowerIcon,
   PuzzlePieceIcon,
   SquaresFourIcon,
   StackIcon,
   TerminalWindowIcon,
-  WarningIcon,
-  XCircleIcon,
-  XIcon,
 } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type JSX, type ReactNode } from "react";
+import vesselLogo from "../assets/vessel-logo.svg";
 import { AddGameHost } from "../components/dialogs/AddGameDialog";
 import { ViewBoundary } from "../components/shell/ErrorBoundary";
 import { OskHost } from "../components/shell/Osk";
 import { PromptHost } from "../components/dialogs/PromptDialog";
-import { Button, IconButton, cx } from "../components/ui";
+import { LoaderConsentHost } from "../components/loaders/LoaderConsent";
+import { Button, JobIsland, Notice, cx } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import { installKeyboardNav, performNav } from "../nav/actions";
 import { startGamepadLoop } from "../nav/gamepad";
@@ -44,7 +40,7 @@ import { Settings } from "../views/Settings";
 import { jobLabel, jobOutcome } from "./jobs";
 import { useAccount, useActiveGame } from "./queries";
 import { useDeploy } from "./run";
-import { VIEWS, useUi, type JobEntry, type NoticeTone, type ViewId } from "./store";
+import { VIEWS, useUi, type JobEntry, type ViewId } from "./store";
 
 const VIEW: Record<ViewId, () => JSX.Element> = {
   games: Games,
@@ -111,7 +107,7 @@ export function App() {
           {view === "overview" && <HeroBackdrop />}
           <main className={cx("relative h-full scroll-pt-32 overflow-y-auto", STACK_ROOM[stack] ?? STACK_ROOM[4])}>
             {/* key: each view enters with the short legacy fade/rise. */}
-            <div key={view} className="mx-auto w-full max-w-[1400px] animate-rise px-10 pt-10">
+            <div key={view} className="mx-auto w-full max-w-content animate-rise px-10 pt-10">
               <ViewBoundary name={VIEWS.find((v) => v.id === view)?.label ?? view}>
                 <View />
               </ViewBoundary>
@@ -122,6 +118,7 @@ export function App() {
         <AddGameHost />
       </div>
       <PromptHost />
+      <LoaderConsentHost />
       <OskHost />
     </>
   );
@@ -131,19 +128,9 @@ function Brand() {
   const info = useQuery({ queryKey: ["appinfo"], queryFn: ipc.appInfo });
   return (
     <div className="flex items-center gap-3">
-      <svg viewBox="0 0 32 32" className="size-8 shrink-0" aria-hidden>
-        <rect width="32" height="32" rx="9" className="fill-ink-3" />
-        <path
-          d="M8 22V10l8 7 8-7v12"
-          fill="none"
-          className="stroke-accent-400"
-          strokeWidth="2.6"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
+      <img src={vesselLogo} alt="" aria-hidden className="size-8 shrink-0" />
       <div className="leading-tight">
-        <div className="text-[15px] font-semibold tracking-tight text-zinc-50">Vessel</div>
+        <div className="text-lead font-semibold tracking-tight text-zinc-50">Vessel</div>
         <div className="font-mono text-[10.5px] text-dim">v{info.data?.version ?? (info.isError ? "?" : "…")}</div>
       </div>
     </div>
@@ -155,7 +142,7 @@ function Sidebar() {
     // Scrolls by itself on short windows, so the app never grows past the viewport.
     <aside
       aria-label="Sidebar"
-      className="flex h-full min-h-0 w-[268px] shrink-0 flex-col overflow-y-auto border-r border-white/[0.05] bg-ink"
+      className="flex h-full min-h-0 w-sidebar shrink-0 flex-col overflow-y-auto border-r border-white/5 bg-ink"
     >
       <GameHeader />
       <TabRail />
@@ -190,16 +177,16 @@ function GameHeader() {
       <Brand />
       <div data-nav-rail className="grid grid-cols-[minmax(0,1fr)] gap-2">
         {isLoading ? (
-          <span className="text-[14px] text-zinc-400">Loading…</span>
+          <span className="text-body text-zinc-400">Loading…</span>
         ) : game ? (
           <span className="min-w-0 truncate text-title font-semibold tracking-tight text-zinc-100" title={game.name}>
             {game.name}
           </span>
         ) : (
-          <span className="text-[14px] text-zinc-400">No game selected</span>
+          <span className="text-body text-zinc-400">No game selected</span>
         )}
         {progress && (
-          <span className="grid gap-1.5 pt-1 font-mono text-[11px] text-dim">
+          <span className="grid gap-1.5 pt-1 font-mono text-micro text-dim">
             <progress aria-label="Deploy progress" max={progress.total || 1} value={progress.done} />
             deploying {progress.done}/{progress.total}
           </span>
@@ -233,7 +220,7 @@ function TabRail() {
             <span className={cx("transition-colors duration-150", on && "text-accent-300 in-highlight:text-accent-700")}>{ICON[v.id]}</span>
             <span className="flex-1">{v.label}</span>
             {v.id === "activity" && running + prompts > 0 && (
-              <span className="rounded-pill bg-accent-400 px-2 font-mono text-[11px] font-semibold text-accent-950">
+              <span className="rounded-pill bg-accent-400 px-2 font-mono text-micro font-semibold text-accent-950">
                 {running + prompts}
               </span>
             )}
@@ -249,14 +236,14 @@ function AccountFooter() {
   const a = q.data;
   const signedIn = !!a?.key_source;
   return (
-    <div className="grid gap-4 border-t border-white/[0.05] px-6 py-5">
+    <div className="grid gap-4 border-t border-white/5 px-6 py-5">
       {q.isError ? (
-        <p className="text-[13px] text-rose-300">Could not read the Nexus account. See Settings.</p>
+        <p className="text-label text-rose-300">Could not read the Nexus account. See Settings.</p>
       ) : signedIn ? (
         <div className="flex items-center gap-3">
           <div
             aria-hidden
-            className="grid size-9 place-items-center rounded-control bg-accent-950 font-mono text-[12px] font-semibold text-accent-50"
+            className="grid size-9 place-items-center rounded-control bg-accent-950 font-mono text-caption font-semibold text-accent-50"
           >
             {(a?.user ?? "?").slice(0, 2).toUpperCase()}
           </div>
@@ -266,7 +253,7 @@ function AccountFooter() {
           </div>
         </div>
       ) : (
-        <p className="text-[13px] text-zinc-400">Not signed in to Nexus Mods. See Settings.</p>
+        <p className="text-label text-zinc-400">Not signed in to Nexus Mods. See Settings.</p>
       )}
       <p className="font-mono text-[10.5px] leading-relaxed text-dim">LB/RB or PgUp/PgDn switch tabs · A/Enter select · B/Esc back</p>
     </div>
@@ -289,16 +276,6 @@ function useIslandJob(): JobEntry | null {
   return job.state === "started" || left > 0 ? job : null;
 }
 
-const NOTICE_TONE: Record<NoticeTone, { border: string; icon: ReactNode }> = {
-  info: { border: "border-white/10", icon: <InfoIcon aria-hidden size={18} weight="duotone" className="text-zinc-300" /> },
-  success: {
-    border: "border-accent-400/25",
-    icon: <CheckCircleIcon aria-hidden size={18} weight="duotone" className="text-accent-300" />,
-  },
-  warn: { border: "border-amber-400/30", icon: <WarningIcon aria-hidden size={18} weight="duotone" className="text-amber-300" /> },
-  error: { border: "border-rose-400/40", icon: <XCircleIcon aria-hidden size={18} weight="duotone" className="text-rose-300" /> },
-};
-
 /** Notices to show: a "Deploy now" notice belongs to its game and is hidden while another game is active. */
 function useVisibleNotices() {
   const all = useUi((s) => s.notices);
@@ -313,42 +290,36 @@ function BottomStack({ island }: { island: JobEntry | null }) {
   const deploy = useDeploy();
   if (!notices.length && !island) return null;
   return (
-    <div className="pointer-events-none fixed inset-y-auto right-0 bottom-5 left-[268px] z-40 flex flex-col items-center gap-2 px-6">
+    <div className="pointer-events-none fixed inset-y-auto right-0 bottom-5 left-sidebar z-40 flex flex-col items-center gap-2 px-6">
       {notices.length > 0 && (
         <aside aria-label="Notices" aria-live="polite" className="grid w-full max-w-xl gap-2">
           {notices.map((n) => (
-            <div
+            <Notice
               key={n.id}
-              role={n.tone === "error" ? "alert" : "status"}
-              className={cx(
-                "glass pointer-events-auto flex animate-island items-center gap-3 rounded-card py-2 pr-2 pl-4",
-                NOTICE_TONE[n.tone].border,
-              )}
+              tone={n.tone}
+              action={
+                n.deploy && (
+                  <Button
+                    tone="primary"
+                    size="sm"
+                    onClick={() => {
+                      dismiss(n.id);
+                      void deploy(n.game);
+                    }}
+                  >
+                    Deploy now
+                  </Button>
+                )
+              }
             >
-              {NOTICE_TONE[n.tone].icon}
-              <p className="min-w-0 flex-1 text-[13.5px] break-words text-zinc-100">{n.text}</p>
-              {n.deploy && (
-                <Button
-                  tone="primary"
-                  size="sm"
-                  onClick={() => {
-                    dismiss(n.id);
-                    void deploy(n.game);
-                  }}
-                >
-                  Deploy now
-                </Button>
-              )}
-              <IconButton label="Dismiss notice" onClick={() => dismiss(n.id)}>
-                <XIcon aria-hidden size={16} />
-              </IconButton>
-            </div>
+              {n.text}
+            </Notice>
           ))}
         </aside>
       )}
       {island && (
         <aside aria-label="Job status" className="flex w-full justify-center">
-          <JobIsland job={island} />
+          <CurrentJob job={island} />
         </aside>
       )}
     </div>
@@ -356,11 +327,10 @@ function BottomStack({ island }: { island: JobEntry | null }) {
 }
 
 /**
- * Legacy dynamic-island status pill: the running job and its latest line,
- * then "Finished"/"Failed" for a few seconds. Status only (not focusable):
- * the full output is in Activity.
+ * The island job's pill: its latest output line while running, then
+ * "Finished"/"Failed" for a few seconds. The full output is in Activity.
  */
-function JobIsland({ job }: { job: JobEntry }) {
+function CurrentJob({ job }: { job: JobEntry }) {
   const last = useUi((s) => {
     for (let i = s.activity.length - 1; i >= 0; i--) {
       const a = s.activity[i];
@@ -371,54 +341,15 @@ function JobIsland({ job }: { job: JobEntry }) {
   const progress = useUi((s) => (s.deployProgress?.job === job.id ? s.deployProgress : null));
   const queued = useUi((s) => Object.values(s.jobs).filter((j) => j.state === "started" && j.id !== job.id).length);
   const outcome = jobOutcome(job);
-  const running = outcome === "running";
-  const failed = outcome === "failed";
-  return (
-    <div
-      role="status"
-      aria-label="Current job"
-      className="glass pointer-events-auto relative flex min-h-14 w-full max-w-xl animate-island items-center gap-3 overflow-hidden rounded-pill py-2 pr-5 pl-2.5"
-    >
-      <span
-        aria-hidden
-        className={cx(
-          "relative grid size-9 shrink-0 place-items-center rounded-pill",
-          failed
-            ? "bg-rose-400/15 text-rose-300"
-            : outcome === "cancelled"
-              ? "bg-white/[0.08] text-zinc-300"
-              : "bg-accent-400/15 text-accent-300",
-        )}
-      >
-        {running ? (
-          <span className="flex gap-[3px]">
-            <span className="h-3.5 w-[3px] animate-bar rounded-pill bg-current" />
-            <span className="h-3.5 w-[3px] animate-bar rounded-pill bg-current [animation-delay:150ms]" />
-            <span className="h-3.5 w-[3px] animate-bar rounded-pill bg-current [animation-delay:300ms]" />
-          </span>
-        ) : failed ? (
-          <WarningIcon size={17} weight="bold" />
-        ) : outcome === "cancelled" ? (
-          <XIcon size={17} weight="bold" />
-        ) : (
-          <CheckIcon size={17} weight="bold" />
-        )}
-      </span>
-      <span className="relative min-w-0 flex-1">
-        <span className="block truncate text-[13.5px] font-medium text-zinc-100">{jobLabel(job.kind)}</span>
-        <span className="block truncate font-mono text-[11px] text-dim">
-          {running
-            ? progress
-              ? `deploying ${progress.done}/${progress.total}`
-              : (last ?? "Starting…")
-            : failed
-              ? `Failed${job.error ? `: ${job.error}` : ""} · see Activity`
-              : outcome === "cancelled"
-                ? "Cancelled"
-                : "Finished"}
-        </span>
-      </span>
-      {queued > 0 && <span className="relative font-mono text-[11px] text-zinc-400">+{queued}</span>}
-    </div>
-  );
+  const detail =
+    outcome === "running"
+      ? progress
+        ? `deploying ${progress.done}/${progress.total}`
+        : (last ?? "Starting…")
+      : outcome === "failed"
+        ? `Failed${job.error ? `: ${job.error}` : ""} · see Activity`
+        : outcome === "cancelled"
+          ? "Cancelled"
+          : "Finished";
+  return <JobIsland title={jobLabel(job.kind)} detail={detail} outcome={outcome} queued={queued} />;
 }

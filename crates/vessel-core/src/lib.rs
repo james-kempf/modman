@@ -17,6 +17,7 @@ pub mod fomod; // M5: ModuleConfig.xml parser and install plan
 pub mod games; // M1: game definitions, Steam detection, configured games
 pub mod ipc; // M3: nxm routing constants (CLI -> GUI)
 pub mod legacy; // pre-rebrand names, for migration only
+pub mod loaders; // mod loaders / script extenders: plugin contract, declarative [[loaders]]
 pub mod loadorder; // M6: LOOT sorting and collection rules
 pub mod migrate; // first-launch migration of legacy (pre-rebrand) state
 pub mod mods; // M3: installed mods, order, profiles, install pipeline
@@ -51,6 +52,7 @@ mod tests {
         let _ = |e: crate::download::DownloadError| takes(e.into());
         let _ = |e: crate::fomod::FomodError| takes(e.into());
         let _ = |e: crate::loadorder::LoadOrderError| takes(e.into());
+        takes(crate::loaders::LoaderError::UnknownLoader("x".into()).into());
         takes(crate::store::StoreError::LockBusy("/l".into()).into());
         takes(crate::games::GamesError::NoActiveGame.into());
         takes(crate::config::ConfigError::NoHome.into());

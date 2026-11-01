@@ -39,7 +39,7 @@ export function Activity() {
         actions={
           <div className="flex h-11 rounded-xl border border-white/[0.06] bg-ink p-1">
             {(['actions', 'log'] as const).map((t) => (
-              <button key={t} onClick={() => setTab(t)} className={cx('relative rounded-lg px-4 text-[13px]', tab === t ? 'text-zinc-50' : 'text-zinc-500 hover:text-zinc-300')}>
+              <button key={t} onClick={() => setTab(t)} className={cx('relative rounded-lg px-4 text-label', tab === t ? 'text-zinc-50' : 'text-zinc-500 hover:text-zinc-300')}>
                 {tab === t && <motion.span layoutId="activity-tab" transition={spring} className="absolute inset-0 rounded-lg bg-white/[0.07]" />}
                 <span className="relative">{t === 'actions' ? 'This session' : 'modman log'}</span>
               </button>
@@ -66,7 +66,7 @@ export function Activity() {
                   >
                     <StatusDot tone={j.status === 'running' ? 'accent' : j.status === 'done' ? 'zinc' : 'rose'} live={j.status === 'running'} />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[14px] text-zinc-200">{j.label}</span>
+                      <span className="block truncate text-body text-zinc-200">{j.label}</span>
                       <span className="block font-mono text-[11px] text-zinc-500">{j.status} · {ago(j.started)}</span>
                     </span>
                   </button>

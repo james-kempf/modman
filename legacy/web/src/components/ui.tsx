@@ -17,9 +17,9 @@ const variants: Record<Variant, string> = {
   danger: 'bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 border border-rose-400/15',
 }
 const sizes: Record<Size, string> = {
-  sm: 'h-9 px-3 text-[13px] gap-1.5 rounded-xl',
+  sm: 'h-9 px-3 text-label gap-1.5 rounded-xl',
   md: 'h-11 px-4 text-sm gap-2 rounded-xl',
-  lg: 'h-14 px-6 text-[15px] gap-2.5 rounded-2xl',
+  lg: 'h-14 px-6 text-lead gap-2.5 rounded-2xl',
 }
 
 interface BtnProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -134,7 +134,7 @@ export function EmptyState({ icon, title, children, action }: { icon: ReactNode;
       <div className="grid size-16 place-items-center rounded-2xl border border-white/[0.06] bg-ink-2 text-zinc-500">{icon}</div>
       <div className="max-w-[52ch]">
         <h3 className="text-xl font-medium tracking-tight text-zinc-100">{title}</h3>
-        {children && <div className="mt-2 text-[15px] leading-relaxed text-zinc-400">{children}</div>}
+        {children && <div className="mt-2 text-lead leading-relaxed text-zinc-400">{children}</div>}
         {action && <div className="mt-6 flex flex-wrap gap-3">{action}</div>}
       </div>
     </div>
@@ -146,7 +146,7 @@ export function Field({ label, helper, error, children, id }: { label: string; h
   const fid = id ?? auto
   return (
     <div className="grid gap-2">
-      <label htmlFor={fid} className="text-[13px] font-medium text-zinc-300">{label}</label>
+      <label htmlFor={fid} className="text-label font-medium text-zinc-300">{label}</label>
       {children(fid)}
       {helper && !error && <p className="text-[12.5px] leading-relaxed text-zinc-500">{helper}</p>}
       {error && <p className="text-[12.5px] text-rose-300">{error}</p>}
@@ -219,7 +219,7 @@ export function PageHeader({ eyebrow, title, children, actions }: { eyebrow?: st
       <div className="min-w-0">
         {eyebrow && <div className="eyebrow mb-3">{eyebrow}</div>}
         <h1 className="text-3xl font-medium tracking-tighter text-zinc-50 md:text-[40px] md:leading-none">{title}</h1>
-        {children && <div className="mt-3 max-w-[65ch] text-[15px] leading-relaxed text-zinc-400">{children}</div>}
+        {children && <div className="mt-3 max-w-[65ch] text-lead leading-relaxed text-zinc-400">{children}</div>}
       </div>
       {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
     </header>
@@ -228,6 +228,6 @@ export function PageHeader({ eyebrow, title, children, actions }: { eyebrow?: st
 
 export function ErrorNote({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-2xl border border-rose-400/15 bg-rose-500/[0.06] px-4 py-3 text-[14px] text-rose-200">{children}</div>
+    <div className="rounded-2xl border border-rose-400/15 bg-rose-500/[0.06] px-4 py-3 text-body text-rose-200">{children}</div>
   )
 }

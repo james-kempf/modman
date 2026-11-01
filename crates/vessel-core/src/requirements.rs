@@ -10,6 +10,7 @@ use std::path::Path;
 use rusqlite::{params, Connection};
 
 use crate::games::GameConfig;
+use crate::loaders::{GameCtx, LoaderRegistry, LoaderStatus};
 use crate::mods::{list_mods, ModRecord, ModsError};
 use crate::nexus::cached_requirements;
 use crate::store::{self, Store};
@@ -386,9 +387,62 @@ fn scan(
     }
 }
 
+/// State of every managed loader among `tools` (built-in and user
+/// definitions in `definitions_dir`, plus the plugins Vessel ships for the
+/// game). Failures count as unknown.
+fn loader_states<'a>(
+    store: &Store,
+    game: &GameConfig,
+    definitions_dir: Option<&Path>,
+    tools: impl Iterator<Item = &'a Tool>,
+) -> HashMap<&'static str, LoaderStatus> {
+    let mut out = HashMap::new();
+    let Some(folder) = game.folder.clone() else {
+        return out;
+    };
+    let defs = match crate::games::definitions::load_definitions(definitions_dir) {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::debug!(error = %e, "game definitions unavailable for loader status");
+            return out;
+        }
+    };
+    let def = game
+        .definition
+        .as_deref()
+        .and_then(|d| crate::games::definitions::find_definition(&defs, d));
+    let Ok(registry) = LoaderRegistry::for_game(def, game.definition.as_deref()) else {
+        return out;
+    };
+    let ctx = GameCtx {
+        game_id: game.id.clone(),
+        nexus_domain: game.nexus_domain.clone(),
+        game_dir: folder,
+        steam_appid: game.appid,
+        occupied: Vec::new(),
+    };
+    for t in tools {
+        if let Some(p) = registry.get(t.key) {
+            match p.detect(&ctx, store) {
+                Ok(st) => {
+                    out.insert(t.key, st);
+                }
+                Err(e) => tracing::debug!(loader = t.key, error = %e, "loader status unavailable"),
+            }
+        }
+    }
+    out
+}
+
 /// Builds the requirement rows for `scope`, from the requirements cache only
-/// (call `nexus::refresh_requirements` first to update it).
-pub fn analyze(store: &Store, game: &GameConfig, scope: &Scope) -> Result<Vec<ReqRow>, ModsError> {
+/// (call `nexus::refresh_requirements` first to update it). User game
+/// definitions in `definitions_dir` contribute their `[[loaders]]`.
+pub fn analyze(
+    store: &Store,
+    game: &GameConfig,
+    scope: &Scope,
+    definitions_dir: Option<&Path>,
+) -> Result<Vec<ReqRow>, ModsError> {
     let conn = store.conn();
     let mods = list_mods(conn, &game.id)?;
     let in_scope: Vec<&ModRecord> = mods
@@ -563,6 +617,14 @@ pub fn analyze(store: &Store, game: &GameConfig, scope: &Scope) -> Result<Vec<Re
         }
     }
 
+    // Loaders Vessel manages report their own state (loader_installs and
+    // the plugin's drift check); anything else falls back to the file scan.
+    let loader_state = loader_states(
+        store,
+        game,
+        definitions_dir,
+        groups.values().filter_map(|g| g.tool),
+    );
     let acked = acks(conn, id)?;
     let mut available = |id: &str| -> bool {
         *avail_cache.entry(id.to_string()).or_insert_with(|| {
@@ -580,7 +642,23 @@ pub fn analyze(store: &Store, game: &GameConfig, scope: &Scope) -> Result<Vec<Re
         let off = g.nexus.iter().find_map(|i| disabled.get(i));
         let mut hint = String::new();
         let mut detail = String::new();
-        let status = if let Some(h) = have {
+        let loader = g.tool.and_then(|t| loader_state.get(t.key));
+        let ver = |v: &Option<String>| v.as_ref().map_or(String::new(), |v| format!(" {v}"));
+        let status = if let Some(LoaderStatus::Installed { version, .. }) = loader {
+            detail = format!("installed by Vessel:{}", ver(version))
+                .trim_end_matches(':')
+                .to_string();
+            ReqStatus::Ok
+        } else if let Some(LoaderStatus::Drifted {
+            version, reason, ..
+        }) = loader
+        {
+            detail = format!(
+                "warning: installed by Vessel{} but {reason}; repair it",
+                ver(version)
+            );
+            ReqStatus::Ok
+        } else if let Some(h) = have {
             detail = format!("installed: {}", h.name);
             ReqStatus::Ok
         } else if let Some(f) = found.get(&g.key) {
@@ -747,7 +825,7 @@ mod tests {
             Some(true),
         );
         seed_reqs(&s, "sse", 3, "[]", Some(false));
-        let rows = analyze(&s, &g, &Scope::default()).unwrap();
+        let rows = analyze(&s, &g, &Scope::default(), None).unwrap();
         let st: Vec<(&str, ReqStatus)> = rows.iter().map(|r| (r.key.as_str(), r.status)).collect();
         assert_eq!(
             st,
@@ -763,7 +841,7 @@ mod tests {
 
         let target = find_ack_target(&rows, "skse", false).unwrap();
         ack(s.conn(), "sse", &target.key).unwrap();
-        let rows = analyze(&s, &g, &Scope::default()).unwrap();
+        let rows = analyze(&s, &g, &Scope::default(), None).unwrap();
         let skse = rows.iter().find(|r| r.key == "tool:skse").unwrap();
         assert_eq!(
             (skse.status, skse.detail.as_str(), skse.acked),
@@ -790,7 +868,7 @@ mod tests {
             Some(true),
         );
         std::fs::write(tmp.path().join("SKSE64_Loader.exe"), "x").unwrap();
-        let rows = analyze(&s, &g, &Scope::default()).unwrap();
+        let rows = analyze(&s, &g, &Scope::default(), None).unwrap();
         assert_eq!(
             (rows[0].status, rows[0].detail.as_str()),
             (ReqStatus::Ok, "found: SKSE64_Loader.exe")
@@ -803,8 +881,66 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            analyze(&s, &g, &Scope::default()).unwrap()[0].status,
+            analyze(&s, &g, &Scope::default(), None).unwrap()[0].status,
             ReqStatus::Missing
+        );
+    }
+
+    /// Catches: requirements reading built-in definitions only, so a loader
+    /// declared in a user definition file never reports its managed state.
+    #[test]
+    fn user_defined_loader_reports_its_managed_state() {
+        use crate::loaders::records::{InstallStatus, NewLoaderInstall, Strategy};
+        let defs = tempfile::tempdir().unwrap();
+        std::fs::write(
+            defs.path().join("valheim.toml"),
+            crate::loaders::declarative::tests::BEPINEX_TOML,
+        )
+        .unwrap();
+        let game_dir = tempfile::tempdir().unwrap();
+        let s = Store::open_in_memory().unwrap();
+        let mut g = GameConfig::custom("valheim");
+        g.folder = Some(game_dir.path().to_path_buf());
+        g.definition = Some("valheim".into());
+        games::save_game(s.conn(), &g).unwrap();
+        add(&s, "valheim", "P-1-1", "Some Plugin", Some(1));
+        seed_reqs(
+            &s,
+            "valheim",
+            1,
+            r#"[{"modName":"BepInEx","externalRequirement":true,"url":"https://github.com/BepInEx/BepInEx"}]"#,
+            Some(true),
+        );
+        s.insert_loader_install(&NewLoaderInstall {
+            game_id: "valheim".into(),
+            game_dir: game_dir.path().display().to_string(),
+            loader_key: "bepinex".into(),
+            version: Some("5.4.23".into()),
+            runtime: "proton".into(),
+            strategy: Strategy::Deploy,
+            status: InstallStatus::Installed,
+            nexus_mod_id: None,
+            nexus_file_id: None,
+            origin: "local".into(),
+            archive_sha256: None,
+            archive_path: None,
+            vanilla_sha256: None,
+            game_build: None,
+        })
+        .unwrap();
+        let row = |dir: Option<&Path>| {
+            analyze(&s, &g, &Scope::default(), dir)
+                .unwrap()
+                .into_iter()
+                .find(|r| r.key == "tool:bepinex")
+                .unwrap()
+        };
+        let builtin_only = row(None);
+        assert_eq!(builtin_only.status, ReqStatus::Missing);
+        let with_user = row(Some(defs.path()));
+        assert_eq!(
+            (with_user.status, with_user.detail.as_str()),
+            (ReqStatus::Ok, "installed by Vessel: 5.4.23")
         );
     }
 }

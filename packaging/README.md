@@ -103,6 +103,8 @@ The `AppRun` launcher dispatches on the arguments:
 
 ### Add Vessel as a non-Steam game (Desktop Mode)
 
+Quick way: run `packaging/add-to-steam.sh`. It asks how Vessel is installed (AppImage, Flatpak or package), finds it and runs `vessel steam add`, which writes the shortcut for every Steam account. The steps below do the same by hand.
+
 1. Download `Vessel_<version>_amd64.AppImage` to e.g. `~/Applications/` and make it executable (Dolphin: Properties, Permissions, "Is executable"; or `chmod +x`).
 2. Start it once in Desktop Mode. Then run `~/Applications/Vessel_<version>_amd64.AppImage nxm register` in Konsole, so browser "Mod manager download" buttons open Vessel.
 3. In Steam (Desktop Mode): **Games, Add a Non-Steam Game to My Library, Browse**. Pick the AppImage (set the file type filter to "All files"), then **Add Selected Programs**.

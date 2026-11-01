@@ -51,7 +51,7 @@ export function Collections() {
         <div className="flex flex-col justify-between gap-4">
           <label className="flex items-center justify-between gap-4 rounded-2xl border border-white/[0.05] bg-ink px-4 py-3">
             <span>
-              <span className="block text-[14px] text-zinc-200">Include optional mods</span>
+              <span className="block text-body text-zinc-200">Include optional mods</span>
               <span className="block text-[12.5px] text-zinc-500">Otherwise only the required ones</span>
             </span>
             <Toggle checked={optional} onChange={setOptional} label="Include optional mods" />
@@ -85,10 +85,10 @@ export function Collections() {
                   <div className="h-1.5 w-40 overflow-hidden rounded-full bg-white/[0.06]">
                     <div className="h-full rounded-full bg-accent-400" style={{ width: `${c.installedMods ? (c.enabledMods / c.installedMods) * 100 : 0}%` }} />
                   </div>
-                  <span className="font-mono text-[12px] text-zinc-400">{c.enabledMods}/{c.installedMods} enabled</span>
+                  <span className="font-mono text-caption text-zinc-400">{c.enabledMods}/{c.installedMods} enabled</span>
                 </div>
                 {c.failed.length > 0 && (
-                  <div className="mt-4 rounded-xl border border-amber-400/15 bg-amber-400/[0.05] px-3.5 py-2.5 text-[13px] text-amber-200">
+                  <div className="mt-4 rounded-xl border border-amber-400/15 bg-amber-400/[0.05] px-3.5 py-2.5 text-label text-amber-200">
                     <div className="flex items-center gap-2 font-medium"><WarningIcon size={14} /> {c.failed.length} mod(s) did not install</div>
                     <div className="mt-1 text-amber-200/70">{c.failed.join(', ')}</div>
                   </div>
@@ -104,7 +104,7 @@ export function Collections() {
                   <Button size="sm" className="flex-1" variant="ghost" disabled={busy} onClick={() => run(['disable', '--collection', c.slug], { label: `Disable ${c.name}` })}>Disable</Button>
                 </div>
                 <div className="flex gap-2">
-                  <a href={c.url} target="_blank" rel="noreferrer" className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl bg-white/[0.06] px-3 text-[13px] text-zinc-200 hover:bg-white/[0.1]">
+                  <a href={c.url} target="_blank" rel="noreferrer" className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl bg-white/[0.06] px-3 text-label text-zinc-200 hover:bg-white/[0.1]">
                     <ArrowSquareOutIcon size={14} /> Nexus
                   </a>
                   <Button size="sm" variant="danger" disabled={busy} icon={<TrashIcon size={14} />} onClick={() => setRemoving(c)} aria-label={`Remove ${c.name}`} />

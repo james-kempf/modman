@@ -103,6 +103,10 @@ pub struct SearchHit {
     #[serde(flatten)]
     pub hit: SearchMod,
     pub installed: bool,
+    /// Key of the loader this mod is installed as (e.g. `smapi`); its
+    /// removal goes through the loader uninstall flow.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub loader: Option<String>,
 }
 
 /// A browsed collection and the revision installed, if any.
@@ -177,6 +181,22 @@ pub enum BrowseView {
     },
 }
 
+/// Nexus mod ids installed for `game`: managed mods (no loader key) plus
+/// mods installed as a loader (e.g. SMAPI), which have no mods row.
+fn installed_nexus_ids(cx: &Cx<'_>, game: &GameConfig) -> R<Vec<(u64, Option<String>)>> {
+    let mut ids: Vec<(u64, Option<String>)> = mods::list_mods(cx.store.conn(), &game.id)?
+        .iter()
+        .filter_map(|m| m.nexus_mod_id.map(|i| (i, None)))
+        .collect();
+    let defs = cx.paths.definitions_dir();
+    ids.extend(
+        super::loaders::installed_loaders(Some(&defs), cx.store, game)?
+            .into_iter()
+            .filter_map(|l| l.nexus_mod_id.map(|i| (i, Some(l.key)))),
+    );
+    Ok(ids)
+}
+
 /// Top, newest or matching mods or collections of `game` on Nexus (works
 /// without login), marked when installed. Adult content follows the
 /// `adult` setting.
@@ -195,18 +215,21 @@ pub fn browse(cx: &Cx<'_>, game: &GameConfig, req: &BrowseRequest) -> R<BrowseVi
     Ok(match req.kind {
         BrowseKind::Mods => {
             let res = nexus.run(nexus.client.browse_mods(domain, &q))??;
-            let installed: Vec<u64> = mods::list_mods(cx.store.conn(), &game.id)?
-                .iter()
-                .filter_map(|m| m.nexus_mod_id)
-                .collect();
+            let installed = installed_nexus_ids(cx, game)?;
             BrowseView::Mods {
                 total: res.total,
                 mods: res
                     .mods
                     .into_iter()
-                    .map(|m| SearchHit {
-                        installed: m.mod_id.is_some_and(|i| installed.contains(&i)),
-                        hit: m,
+                    .map(|m| {
+                        let found = m
+                            .mod_id
+                            .and_then(|i| installed.iter().find(|(id, _)| *id == i));
+                        SearchHit {
+                            installed: found.is_some(),
+                            loader: found.and_then(|(_, l)| l.clone()),
+                            hit: m,
+                        }
                     })
                     .collect(),
             }
@@ -293,6 +316,58 @@ mod tests {
             json["options"],
             serde_json::json!(["auto", "ask", "default"])
         );
+    }
+
+    /// Catches: Browse marking a loader-installed mod (SMAPI, no mods row)
+    /// as not installed. Covers a local install with no stored Nexus id.
+    #[test]
+    fn browse_installed_set_includes_loader_installs() {
+        use crate::loaders::records::{InstallStatus, NewLoaderInstall, Strategy};
+        let home = tempfile::tempdir().unwrap();
+        let paths = Paths::for_home(home.path());
+        let mut store = crate::store::Store::open_in_memory().unwrap();
+        let mut g = GameConfig::custom("stardewvalley");
+        g.definition = Some("stardewvalley".into());
+        crate::games::save_game(store.conn(), &g).unwrap();
+        let ui = crate::app::testing::Recorder::default();
+        {
+            let cx = Cx::new(&paths, &mut store, &ui);
+            assert!(installed_nexus_ids(&cx, &g).unwrap().is_empty());
+        }
+        let install = |status: InstallStatus| NewLoaderInstall {
+            game_id: "stardewvalley".into(),
+            game_dir: "/g".into(),
+            loader_key: crate::loaders::smapi::KEY.into(),
+            version: Some("4.0.0".into()),
+            runtime: "native".into(),
+            strategy: Strategy::Installer,
+            status,
+            nexus_mod_id: None,
+            nexus_file_id: None,
+            origin: "local".into(),
+            archive_sha256: None,
+            archive_path: None,
+            vanilla_sha256: None,
+            game_build: None,
+        };
+        let id = store
+            .insert_loader_install(&install(InstallStatus::Installed))
+            .unwrap();
+        let cx = Cx::new(&paths, &mut store, &ui);
+        assert_eq!(
+            installed_nexus_ids(&cx, &g).unwrap(),
+            [(
+                crate::loaders::smapi::NEXUS_MOD_ID,
+                Some("smapi".to_string())
+            )]
+        );
+        let loaders =
+            crate::app::loaders::installed_loaders(Some(&paths.definitions_dir()), cx.store, &g)
+                .unwrap();
+        assert_eq!(loaders.len(), 1);
+        assert_eq!(loaders[0].key, "smapi");
+        assert_eq!(loaders[0].install_id, id);
+        assert_eq!(loaders[0].version.as_deref(), Some("4.0.0"));
     }
 
     #[test]

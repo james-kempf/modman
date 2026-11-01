@@ -37,8 +37,8 @@ const tile = (name: string) => within(screen.getByRole("list", { name: "Game lib
 const overview = () => screen.findByRole("heading", { level: 1, name: "Overview" });
 
 describe("game library", () => {
-  // Fails when the app does not open on the library, or a game / the Add game tile is missing or misplaced.
-  it("is the landing view: one tile per game, Add game last", async () => {
+  // Fails when the app does not open on the library, a game tile is missing, or an Add game tile comes back.
+  it("is the landing view: one tile per game, no Add game tile", async () => {
     const { list } = await library();
     expect(useUi.getState().view).toBe("games");
     expect(document.activeElement).toHaveAttribute("data-tab", "games");
@@ -46,7 +46,6 @@ describe("game library", () => {
     expect(tiles.map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual([
       "Skyrim Special Edition",
       "Cyberpunk 2077",
-      "Add game",
     ]);
     expect(tiles[0]).toHaveAttribute("aria-current", "true");
     expect(tiles[0]).toHaveAccessibleDescription(/Active/);
@@ -103,9 +102,8 @@ describe("game library", () => {
     tile("Skyrim Special Edition").focus();
     act(() => performNav({ type: "move", dir: "right" }));
     expect(document.activeElement).toBe(tile("Cyberpunk 2077"));
-    act(() => performNav({ type: "move", dir: "down" }));
-    expect(document.activeElement).toBe(within(list).getByRole("button", { name: "Add game" }));
     act(() => performNav({ type: "move", dir: "left" }));
+    act(() => performNav({ type: "move", dir: "down" }));
     expect(document.activeElement).toBe(tile("Starfield"));
     act(() => performNav({ type: "move", dir: "up" }));
     expect(document.activeElement).toBe(tile("Skyrim Special Edition"));
@@ -170,10 +168,11 @@ describe("game library", () => {
   });
 
   // Fails when an empty library offers nothing to do.
-  it("with zero games shows only the Add game tile and a short note", async () => {
-    const { list } = await library({}, []);
-    expect(within(list).getAllByRole("button").map((b) => b.textContent)).toEqual(["Add game"]);
-    expect(screen.getByText(/No games yet/)).toBeInTheDocument();
+  it("with zero games shows a short note and the Add game button", async () => {
+    await setup({}, []).then((env) => env.renderApp());
+    expect(await screen.findByText(/No games yet/)).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Game library" })).toBeNull();
+    expect(within(screen.getByRole("main")).getByRole("button", { name: "Add game" })).toBeInTheDocument();
     expect(within(screen.getByRole("complementary", { name: "Sidebar" })).getByText("No game selected")).toBeInTheDocument();
   });
 
@@ -194,9 +193,9 @@ describe("add-game dialog", () => {
   ];
 
   // Fails when detected games are not offered, or Add does not pass the Steam folder / close the dialog.
-  it("adds a game found in Steam from the Add game tile and returns focus to it", async () => {
-    const { t, user, list } = await library({ games_detect: () => detected, game_add: () => game({ id: "fallout4" }) });
-    const open = within(list).getByRole("button", { name: "Add game" });
+  it("adds a game found in Steam from the Add game button and returns focus to it", async () => {
+    const { t, user } = await library({ games_detect: () => detected, game_add: () => game({ id: "fallout4" }) });
+    const open = within(screen.getByRole("main")).getByRole("button", { name: "Add game" });
     open.focus();
     await user.keyboard("{Enter}");
     const dlg = await screen.findByRole("dialog", { name: "Add a game" });
@@ -213,8 +212,8 @@ describe("add-game dialog", () => {
 
   // Fails when the manual form drops the domain or folder, or Escape does not close.
   it("adds any game by Nexus domain; Escape closes", async () => {
-    const { t, user, list } = await library({ game_add: () => undefined });
-    await user.click(within(list).getByRole("button", { name: "Add game" }));
+    const { t, user } = await library({ game_add: () => undefined });
+    await user.click(within(screen.getByRole("main")).getByRole("button", { name: "Add game" }));
     const dlg = await screen.findByRole("dialog", { name: "Add a game" });
     await within(dlg).findByText(/No other supported games/);
     await user.type(within(dlg).getByLabelText("Nexus game domain"), "stardewvalley");

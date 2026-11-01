@@ -77,7 +77,7 @@ function Onboarding() {
         </p>
         <ol className="mt-10 grid gap-5 border-l border-white/[0.07] pl-6">
           {['Sign in to Nexus Mods', 'Add a game', 'Install a mod or a collection, then deploy'].map((s, i) => (
-            <li key={s} className="text-[14.5px] text-zinc-300"><span className="mr-3 font-mono text-[12px] text-zinc-500">0{i + 1}</span>{s}</li>
+            <li key={s} className="text-[14.5px] text-zinc-300"><span className="mr-3 font-mono text-caption text-zinc-500">0{i + 1}</span>{s}</li>
           ))}
         </ol>
       </div>

@@ -7,11 +7,12 @@
 // prompt counts as cancel. Mods, the "changed since deploy" flag, profiles
 // and collections are kept per game.
 
-import type { Answer, BrowseRequest, CollectionRecord, ConfigEntry, ModView, Msg, ProfileSummary, Prompt, ReqRow, UpdateReport } from "../ipc/types";
+import type { Answer, BrowseRequest, CollectionRecord, ConfigEntry, LoaderCard, ModView, Msg, ProfileSummary, Prompt, ReqRow, UpdateReport } from "../ipc/types";
 import { createFakeTransport, type Args, type FakeTransport } from "./fake";
 import { afterChange, autoupdateStatus, deployReport, experimentalGame, game, mod } from "./fixtures";
 import { demoBrowse } from "./browse";
 import { demoPoisoned, repairHandlers } from "./repair";
+import { DEMO_LOADER_MOD, installedLoaders, loaderHandlers } from "./loaders";
 
 export function createDemoBackend(): FakeTransport {
   const games = [
@@ -277,7 +278,9 @@ export function createDemoBackend(): FakeTransport {
       }),
     mods_list: (a: Args) => {
       const g = st(a);
-      return { mods: g.mods.map((m) => ({ ...m })), changed_since_deploy: g.dirty };
+      // Mods installed as a loader (SKSE64 once installed) list apart from the load order.
+      const cards = (t.handlers.loader_status?.(a) ?? []) as LoaderCard[];
+      return { mods: g.mods.map((m) => ({ ...m })), changed_since_deploy: g.dirty, loaders: installedLoaders(cards) };
     },
     mod_detail: (a: Args) => {
       const m = st(a).mods.find((x) => x.uid === a!.reference)!;
@@ -350,7 +353,8 @@ export function createDemoBackend(): FakeTransport {
       job("mods_uninstall", async (id) => {
         const refs = a!.refs as string[];
         const g = st(a);
-        const gone = g.mods.filter((m) => refs.includes(m.uid));
+        // A uid, or a bare Nexus id (Browse's Remove).
+        const gone = g.mods.filter((m) => refs.includes(m.uid) || (m.nexus_mod_id !== null && refs.includes(String(m.nexus_mod_id))));
         if (!gone.length) throw { message: `no mod matches ${refs.join(", ")}` };
         if (!(await confirm(id, `Uninstall ${gone.length} mod(s)?`))) {
           say(id, "Cancelled.");
@@ -460,6 +464,10 @@ export function createDemoBackend(): FakeTransport {
           total_size: 50 * 1024 * 1024,
           summary: "Two demo mods with the curator's choices.",
           url: `https://next.nexusmods.com/${active().nexus_domain}/collections/${slug}`,
+          mods: [
+            { name: "SkyUI", version: "5.2", author: "SkyUI Team", mod_id: 12604, size: 30 * 1024 * 1024, optional: false },
+            { name: "Static Mesh Improvement Mod", version: "2.05", author: "Brumbek", mod_id: 659, size: 20 * 1024 * 1024, optional: true },
+          ],
         },
         installed,
         update_available: installed && installed.revision < 3 ? 3 : null,
@@ -601,6 +609,27 @@ export function createDemoBackend(): FakeTransport {
       { [games[0].id]: demoPoisoned() },
     ),
   );
+  // Mod loaders (SKSE64 on the first game): its Nexus page gives a pending preview, never a mod.
+  const loaders = loaderHandlers(
+    {
+      job,
+      say: (id, text) => say(id, text),
+      log: (preview_id, text) => t.emit("vessel:loader-log", { preview_id, step: 1, text }),
+      game: (a) => (typeof a?.game === "string" && a.game ? a.game : active().id),
+    },
+    games[0].id,
+  );
+  const installMod = t.handlers.install;
+  Object.assign(t.handlers, loaders, {
+    install: (a: Args) =>
+      String(a?.target) === String(DEMO_LOADER_MOD) && st(a) === state.get(games[0].id)
+        ? job("install", async (id) => {
+            say(id, "SKSE64 is a mod loader: review it before it runs.");
+            return { game: games[0].id, installed: null, loader: loaders.demo_loader_install(a), collection: null, after: afterChange({ needs_deploy: false }) };
+          })
+        : installMod(a),
+  });
+  delete t.handlers.demo_loader_install;
   function setAck(key: string, acked: boolean): ReqRow {
     const d = deps.find((x) => x.key === key);
     if (!d || d.status !== "external") throw { message: `'${key}' is not an external requirement` };

@@ -112,7 +112,7 @@ export function Mods() {
                 <button
                   key={f}
                   onClick={() => setFilter(f)}
-                  className={cx('relative flex-1 rounded-lg px-3.5 text-[13px] capitalize', filter === f ? 'text-zinc-50' : 'text-zinc-500 hover:text-zinc-300')}
+                  className={cx('relative flex-1 rounded-lg px-3.5 text-label capitalize', filter === f ? 'text-zinc-50' : 'text-zinc-500 hover:text-zinc-300')}
                 >
                   {filter === f && <motion.span layoutId="mods-filter" transition={spring} className="absolute inset-0 rounded-lg bg-white/[0.07]" />}
                   <span className="relative">{f}</span>
@@ -129,7 +129,7 @@ export function Mods() {
           {filtering ? (
             <ul className="grid gap-2">
               {visible.map((m) => <li key={m.id} className="min-w-0"><ModRow {...rowProps(m)} /></li>)}
-              {!visible.length && <li className="py-14 text-center text-[14px] text-zinc-500">Nothing matches this filter.</li>}
+              {!visible.length && <li className="py-14 text-center text-body text-zinc-500">Nothing matches this filter.</li>}
             </ul>
           ) : (
             <Reorder.Group axis="y" values={order} onReorder={setOrder} className="grid min-w-0 gap-2">
@@ -197,11 +197,11 @@ const ModRow = memo(function ModRow({
     <div className={cx('min-w-0 rounded-2xl border transition-colors duration-200', open ? 'border-white/[0.09] bg-ink-3' : 'border-white/[0.05] bg-ink-2 hover:border-white/[0.08]')}>
       <div className="flex min-h-16 items-center gap-3 py-2.5 pr-4 pl-1.5">
         {handle ?? <span className="w-1.5" />}
-        <span className="w-9 shrink-0 text-right font-mono text-[12px] text-zinc-600">{mod.position}</span>
+        <span className="w-9 shrink-0 text-right font-mono text-caption text-zinc-600">{mod.position}</span>
         <Thumb src={thumb} name={mod.name} className={cx('size-11 shrink-0 rounded-xl transition-opacity', !on && 'opacity-40 grayscale')} />
         <button onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-3 text-left">
           <span className="min-w-0 flex-1">
-            <span className={cx('block truncate text-[15px] transition-colors', on ? 'text-zinc-100' : 'text-zinc-500')}>{mod.name}</span>
+            <span className={cx('block truncate text-lead transition-colors', on ? 'text-zinc-100' : 'text-zinc-500')}>{mod.name}</span>
             <span className="block truncate font-mono text-[11.5px] text-zinc-500">
               {mod.version || '—'}{mod.author ? ` · ${mod.author}` : ''}{mod.category ? ` · ${mod.category}` : ''}
             </span>
@@ -226,7 +226,7 @@ const ModRow = memo(function ModRow({
             transition={spring}
             className="border-t border-white/[0.05] px-5 pt-5 pb-5 md:pl-[5.5rem]"
           >
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-4 text-[13px] md:grid-cols-4">
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-4 text-label md:grid-cols-4">
               <Fact k="Nexus ID" v={mod.modId ? `${mod.modId} / file ${mod.fileId}` : 'local archive'} />
               <Fact k="Files" v={`${mod.files ?? 0} · ${bytes(mod.size)}`} />
               <Fact k="Installed" v={dateTime(mod.installed)} />
@@ -235,13 +235,13 @@ const ModRow = memo(function ModRow({
             {choices.length > 0 && (
               <div className="mt-5">
                 <div className="eyebrow mb-2">Installer choices</div>
-                <ul className="grid gap-1 text-[13px] text-zinc-400">
+                <ul className="grid gap-1 text-label text-zinc-400">
                   {choices.map((c, i) => <li key={i}><span className="text-zinc-500">{c.group}:</span> {c.picks.join(', ') || '—'}</li>)}
                 </ul>
               </div>
             )}
             <div className="mt-5 flex flex-wrap gap-2">
-              {nexus && <a href={nexus} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-white/[0.06] px-3 text-[13px] text-zinc-200 hover:bg-white/[0.1]"><ArrowSquareOutIcon size={14} /> Nexus page</a>}
+              {nexus && <a href={nexus} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-white/[0.06] px-3 text-label text-zinc-200 hover:bg-white/[0.1]"><ArrowSquareOutIcon size={14} /> Nexus page</a>}
               <Button size="sm" disabled={busy || mod.position === 1} icon={<ArrowLineUpIcon size={14} />} onClick={() => onMove(1)}>Lowest priority</Button>
               <Button size="sm" disabled={busy || mod.position === total} icon={<ArrowLineDownIcon size={14} />} onClick={() => onMove(total)}>Highest priority</Button>
               <Button size="sm" disabled={busy} icon={<ArrowsClockwiseIcon size={14} />} onClick={onReinstall}>Reinstall</Button>

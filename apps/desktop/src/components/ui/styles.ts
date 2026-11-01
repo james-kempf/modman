@@ -13,6 +13,12 @@ export const CARD_SHELL = "rounded-card border border-hairline bg-ink-2";
 export const DIVIDE = "divide-y divide-hairline";
 /** A sunken well inside a card or dialog (tiles, typed-text output, side panels); add padding per use. */
 export const TILE = "rounded-card border border-hairline bg-ink";
+/**
+ * An activatable card (a <button>: game tiles, Browse results): the whole card is one control and takes the
+ * shared highlight. Add the direction (flex-col / flex-row), bottom padding, border colour and fill per use.
+ */
+export const CARD_TILE =
+  "group flex h-full w-full min-w-0 gap-3 rounded-card-lg border p-2.5 text-left transition-colors duration-200";
 /** A compact status pill / chip row (mono log lines, repair steps). */
 export const PILL = "rounded-control border border-hairline bg-ink px-3 py-1.5 text-label";
 /** A free-standing list row (jobs, entries); the shared highlight shows when it is interactive. */

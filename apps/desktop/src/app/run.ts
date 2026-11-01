@@ -6,7 +6,7 @@
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import * as ipc from "../ipc/commands";
-import type { AfterChange, CollectionResult, DeployReport, GameView } from "../ipc/types";
+import type { AfterChange, CollectionResult, DeployReport, GameView, LoaderPending } from "../ipc/types";
 import { errMsg } from "./bridge";
 import { isCancelError } from "./jobs";
 import { refreshAll, useMods } from "./queries";
@@ -26,6 +26,23 @@ export function collectionResultOf(r: unknown): CollectionResult | null {
   if ("slug" in r && "up_to_date" in r && "deployed" in r) return r as CollectionResult;
   if ("collection" in r) return collectionResultOf((r as { collection: unknown }).collection);
   return null;
+}
+
+/**
+ * Loader archives a result left pending (install: `loader`; collections:
+ * `loaders_pending`, also nested under `collection`). They open the consent
+ * dialog; nothing ran.
+ */
+export function loaderPendingOf(r: unknown): LoaderPending[] {
+  if (!r || typeof r !== "object") return [];
+  const o = r as { loader?: LoaderPending | null; loaders_pending?: LoaderPending[]; collection?: unknown };
+  return [...(o.loader ? [o.loader] : []), ...(o.loaders_pending ?? []), ...loaderPendingOf(o.collection)];
+}
+
+/** Queue the consent dialog for each pending loader of a result. */
+export function openPendingLoaders(r: unknown, game: string | null): void {
+  const ui = useUi.getState();
+  for (const pending of loaderPendingOf(r)) ui.openLoaderConsent({ game, pending });
 }
 
 /** The game (id) a result names, if any. */
@@ -95,6 +112,7 @@ export function useRun(): Run {
         const game = gameOf(r) ?? started;
         const after = afterChangeOf(r);
         const coll = collectionResultOf(r);
+        openPendingLoaders(r, game);
         if (after && !(coll?.deployed && !after.deployed)) applyAfterChange(after, game);
         else if (coll) await applyCollection(qc, coll, gameOf(coll) ?? game);
         return r;

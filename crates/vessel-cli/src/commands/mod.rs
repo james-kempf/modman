@@ -13,6 +13,7 @@ pub mod log;
 pub mod mods;
 pub mod nxm;
 pub mod plugins;
+pub mod steam;
 
 use anyhow::{bail, Result};
 
@@ -53,6 +54,7 @@ pub fn dispatch(ctx: &mut Ctx, command: Commands) -> Result<()> {
         C::Nxm(a) => nxm::run(ctx, a),
         C::Autoupdate(a) => autoupdate::run(ctx, a),
         C::Plugins(a) => plugins::run(ctx, a),
+        C::Steam(a) => steam::run(ctx, a),
         C::External(args) => external(ctx, args),
         // Handled before a context exists.
         C::Version => unreachable!("version is handled in main"),

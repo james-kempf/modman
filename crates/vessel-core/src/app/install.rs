@@ -14,7 +14,8 @@ use super::{fail, human_size, staging_lock, AppError, Cx, Msg, R};
 use crate::download::{self, NxmLink};
 use crate::fomod::{FomodMode, FomodResolver, ResolvedMode};
 use crate::games::{self, GameConfig};
-use crate::mods::{self, InstallHooks, InstallMeta, InstallOutcome, ModRecord};
+use crate::loaders::{DownloadOrigin, LoaderError, Op};
+use crate::mods::{self, InstallHooks, InstallMeta, InstallOutcome, ModRecord, ModsError};
 use crate::nexus::{FileInfo, NxmKey};
 
 /// What an install target names.
@@ -104,8 +105,100 @@ pub fn parse_target(t: &str) -> R<Option<Target>> {
     }))
 }
 
+/// A loader archive held for the loader flow: nothing was installed; the
+/// user reviews and confirms the preview (Requirements / loader dialog).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LoaderPending {
+    pub loader_key: String,
+    pub preview_id: String,
+    pub plan_hash: String,
+    /// install, adopt (a hand-made install exists) or upgrade.
+    pub op: Op,
+    pub version: Option<String>,
+}
+
+/// What [`install_archive`] did with an archive.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Installed {
+    Mod(Box<InstallOutcome>),
+    /// A mod loader: a pending preview, no mod row, nothing under Mods/.
+    Loader(LoaderPending),
+}
+
+impl Installed {
+    pub fn as_mod(&self) -> Option<&InstallOutcome> {
+        match self {
+            Installed::Mod(o) => Some(o.as_ref()),
+            Installed::Loader(_) => None,
+        }
+    }
+
+    pub fn loader(&self) -> Option<&LoaderPending> {
+        match self {
+            Installed::Loader(l) => Some(l),
+            Installed::Mod(_) => None,
+        }
+    }
+}
+
+/// Loaders for `game`, including the user's definition overrides.
+fn loader_registry(cx: &Cx<'_>, game: &GameConfig) -> Option<crate::loaders::LoaderRegistry> {
+    let defs = games::definitions::load_definitions(Some(&cx.paths.definitions_dir())).ok()?;
+    let def = game
+        .definition
+        .as_deref()
+        .and_then(|d| games::definitions::find_definition(&defs, d));
+    crate::loaders::LoaderRegistry::for_game(def, game.definition.as_deref()).ok()
+}
+
+/// Creates the pending preview for a loader archive: install, or adopt
+/// when a hand-made install exists, or upgrade when Vessel manages one.
+/// Never runs anything.
+fn preview_loader(
+    cx: &Cx<'_>,
+    game: &GameConfig,
+    data_dir: &Path,
+    archive: &Path,
+    key: &str,
+    origin: &DownloadOrigin,
+) -> R<LoaderPending> {
+    use super::loaders::{preview, LoaderEnv, PreviewRequest};
+    let env = LoaderEnv::new(cx.paths, data_dir);
+    let mut req = PreviewRequest {
+        game_id: game.id.clone(),
+        op: Op::Install,
+        loader_key: Some(key.to_string()),
+        archive: Some(archive.to_path_buf()),
+        origin: origin.clone(),
+        unverified_ack: false,
+    };
+    let p = match preview(&env, cx.store, &req) {
+        Err(AppError::Core(crate::Error::Loader(e))) => {
+            req.op = match e {
+                LoaderError::ManualInstallDetected(_) => Op::Adopt,
+                LoaderError::AlreadyInstalled(_) => Op::Upgrade,
+                e => return Err(crate::Error::Loader(e).into()),
+            };
+            preview(&env, cx.store, &req)?
+        }
+        other => other?,
+    };
+    Ok(LoaderPending {
+        loader_key: p.loader_key,
+        preview_id: p.preview_id,
+        plan_hash: p.plan_hash,
+        op: p.op,
+        version: p.version,
+    })
+}
+
 /// Runs the core install pipeline with the UI's prompts and reports
 /// FOMOD/layout warnings. `ask_explicit` = `--fomod ask` / `reinstall --ask`.
+///
+/// A loader archive never becomes a mod. With `origin` (where Vessel got
+/// the archive: a Nexus API download, or a local file) it becomes a
+/// pending loader preview; without it (restage, reinstall) the install
+/// fails with [`ModsError::LoaderArchive`].
 pub fn install_archive(
     cx: &mut Cx<'_>,
     game: &GameConfig,
@@ -113,7 +206,8 @@ pub fn install_archive(
     archive: &Path,
     meta: &InstallMeta,
     ask_explicit: bool,
-) -> R<InstallOutcome> {
+    origin: Option<&DownloadOrigin>,
+) -> R<Installed> {
     let ui = cx.ui;
     let prompts = ui.install_prompts(ask_explicit);
     let chooser = |c: &[String]| ui.choose_variant(c);
@@ -123,14 +217,27 @@ pub fn install_archive(
     } else {
         None
     };
+    let registry = loader_registry(cx, game);
     let hooks = InstallHooks {
         choose_variant: prompts
             .variant
             .then_some(&chooser as &dyn Fn(&[String]) -> Option<usize>),
         fomod: resolver.as_deref_mut().map(|r| r as &mut dyn FomodResolver),
+        loaders: registry.as_ref(),
     };
-    let o = mods::install_archive(cx.store, game, data_dir, archive, meta, hooks)?;
+    let res = mods::install_archive(cx.store, game, data_dir, archive, meta, hooks);
     drop(resolver);
+    let o = match (res, origin) {
+        (Err(ModsError::LoaderArchive { loader_key }), Some(origin)) => {
+            let p = preview_loader(cx, game, data_dir, archive, &loader_key, origin)?;
+            ui.info(&format!(
+                "This is the {} mod loader: it installs into the game folder, not as a mod. Review and confirm it in Requirements.",
+                p.loader_key
+            ));
+            return Ok(Installed::Loader(p));
+        }
+        (r, _) => r?,
+    };
     if let Some(run) = &o.fomod {
         match run.mode {
             ResolvedMode::Ask => {}
@@ -147,7 +254,7 @@ pub fn install_archive(
     for w in &o.layout.warnings {
         ui.warn(w);
     }
-    Ok(o)
+    Ok(Installed::Mod(Box::new(o)))
 }
 
 /// `--fomod` value, else the `fomod` config key (legacy ambiguity A2: the
@@ -206,7 +313,7 @@ pub fn install_nexus(
     nexus: &Nexus,
     game: &GameConfig,
     req: NexusInstall,
-) -> R<Option<InstallOutcome>> {
+) -> R<Option<Installed>> {
     let ui = cx.ui;
     let d = game.nexus_domain()?;
     let mod_id = req.mod_id;
@@ -314,16 +421,32 @@ pub fn install_nexus(
         ..Default::default()
     };
     let data_dir = cx.config()?.data_dir;
+    // Vessel downloaded it through the Nexus API: provenance can verify it.
+    let origin = DownloadOrigin::Nexus {
+        domain: d.to_string(),
+        mod_id,
+        file_id,
+    };
     let lock = staging_lock(cx.paths)?;
-    let o = install_archive(cx, game, &data_dir, &archive, &meta, fomod == Some("ask"))?;
+    let done = install_archive(
+        cx,
+        game,
+        &data_dir,
+        &archive,
+        &meta,
+        fomod == Some("ask"),
+        Some(&origin),
+    )?;
     drop(lock);
-    ui.say(
-        Msg::success("Installed ")
-            .b(&name)
-            .p(format!(" → {}", o.uid)),
-    );
-    super::updates::requirements_after_install(cx, game, o.mod_id);
-    Ok(Some(o))
+    if let Installed::Mod(o) = &done {
+        ui.say(
+            Msg::success("Installed ")
+                .b(&name)
+                .p(format!(" → {}", o.uid)),
+        );
+        super::updates::requirements_after_install(cx, game, o.mod_id);
+    }
+    Ok(Some(done))
 }
 
 /// Identifies a local archive on Nexus by its md5 when logged in, so
@@ -371,7 +494,7 @@ pub fn install_local(
     path: &Path,
     name: Option<&str>,
     fomod: Option<&str>,
-) -> R<InstallOutcome> {
+) -> R<Installed> {
     let path = path
         .canonicalize()
         .map_err(|e| AppError::Msg(format!("{}: {e}", path.display())))?;
@@ -407,25 +530,30 @@ pub fn install_local(
         identify(cx, game, &mut meta);
     }
     cx.ui.info(&format!("Installing from {base}..."));
+    // A local file stays unverified even when its md5 matched a Nexus file.
+    let origin = DownloadOrigin::Local { path: path.clone() };
     let lock = staging_lock(cx.paths)?;
-    let o = install_archive(
+    let done = install_archive(
         cx,
         game,
         &cfg.data_dir,
         &archive,
         &meta,
         fomod == Some("ask"),
+        Some(&origin),
     )?;
     drop(lock);
-    cx.ui.say(
-        Msg::success("Installed ")
-            .b(&o.name)
-            .p(format!(" → {}", o.uid)),
-    );
-    if meta.nexus_mod_id.is_some() {
-        super::updates::requirements_after_install(cx, game, o.mod_id);
+    if let Installed::Mod(o) = &done {
+        cx.ui.say(
+            Msg::success("Installed ")
+                .b(&o.name)
+                .p(format!(" → {}", o.uid)),
+        );
+        if meta.nexus_mod_id.is_some() {
+            super::updates::requirements_after_install(cx, game, o.mod_id);
+        }
     }
-    Ok(o)
+    Ok(done)
 }
 
 /// Options of [`install`] (legacy `cmd_install` L3323-3360).
@@ -449,8 +577,11 @@ pub struct InstallRequest {
 pub struct InstallResult {
     /// Game the target was installed into.
     pub game: Option<String>,
-    /// The installed mod (`None`: declined, collection, or download only).
+    /// The installed mod (`None`: declined, collection, download only, or
+    /// a loader).
     pub installed: Option<InstalledMod>,
+    /// The target was a mod loader: a pending preview to confirm.
+    pub loader: Option<LoaderPending>,
     /// A collection was installed (or downloaded).
     pub collection: Option<super::collection::CollectionResult>,
     pub after: AfterChangeView,
@@ -527,7 +658,7 @@ pub fn install(cx: &mut Cx<'_>, req: InstallRequest) -> R<InstallResult> {
         Target::Local(p) => {
             let game = cx.need_game()?;
             let o = install_local(cx, &game, &p, req.name.as_deref(), req.fomod.as_deref())?;
-            (game, Some(InstalledMod::from(&o)))
+            (game, o)
         }
         Target::Collection(reference) => {
             // `install --fomod` values that collections accept pass through.
@@ -579,7 +710,18 @@ pub fn install(cx: &mut Cx<'_>, req: InstallRequest) -> R<InstallResult> {
                     ..Default::default()
                 });
             };
-            (game, Some(InstalledMod::from(&o)))
+            (game, o)
+        }
+    };
+    let (installed, loader) = match installed {
+        Installed::Mod(o) => (Some(InstalledMod::from(o.as_ref())), None),
+        Installed::Loader(l) => {
+            // Nothing was deployed or staged; the loader waits for consent.
+            return Ok(InstallResult {
+                game: Some(game.id),
+                loader: Some(l),
+                ..Default::default()
+            });
         }
     };
     let after = if req.deploy {
@@ -594,6 +736,7 @@ pub fn install(cx: &mut Cx<'_>, req: InstallRequest) -> R<InstallResult> {
     Ok(InstallResult {
         game: Some(game.id),
         installed,
+        loader,
         collection: None,
         after: after.into(),
     })
@@ -694,6 +837,7 @@ pub fn reinstall(
     cx.ui.info(&format!("Reinstalling {}...", rec.uid));
     let data_dir = cx.config()?.data_dir;
     let lock = staging_lock(cx.paths)?;
+    // No origin: a loader archive fails here instead of becoming a mod.
     let o = install_archive(
         cx,
         game,
@@ -701,12 +845,19 @@ pub fn reinstall(
         &archive,
         &meta,
         fomod_mode == FomodMode::Ask,
+        None,
     )?;
     drop(lock);
+    let Installed::Mod(o) = o else {
+        fail!(
+            "{} is a mod loader archive; install it from Requirements.",
+            rec.uid
+        );
+    };
     cx.ui.success(&format!("Reinstalled {}", rec.uid));
     let after = dep::after_change(cx, game)?;
     Ok(Reinstalled {
-        installed: InstalledMod::from(&o),
+        installed: InstalledMod::from(o.as_ref()),
         after: after.into(),
     })
 }

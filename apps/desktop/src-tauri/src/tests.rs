@@ -216,7 +216,88 @@ fn ts_bindings_list_the_same_commands_and_events() {
         crate::events::DEPLOY_PROGRESS,
         crate::events::NXM,
         crate::events::STARTUP_CHECK,
+        crate::events::LOADER_LOG,
+        crate::events::LOADER_PENDING,
+        crate::events::LOADER_RECOVERED,
     ] {
         assert!(TS_EVENTS.contains(&format!("\"{ev}\"")), "{ev}");
     }
+}
+
+/// Catches: a loader command dropped from the registry, the capability
+/// file or the TS bindings (the webview would get "command not found" or
+/// "not allowed" only when the user clicks it).
+#[test]
+fn loader_commands_are_registered_granted_and_bound() {
+    let caps: Value = serde_json::from_str(CAPS).unwrap();
+    let granted = caps["permissions"].to_string();
+    for c in [
+        "loader_status",
+        "loader_preview",
+        "loader_preview_reopen",
+        "loader_run",
+        "loader_rollback",
+        "loader_decline_rollback",
+        "game_runtime_set",
+        "launch_options_get",
+        "launch_options_ack",
+        "launch_options_apply",
+        "loader_junk_scan",
+        "loader_junk_remove",
+        "loader_log_get",
+    ] {
+        assert!(COMMANDS.contains(&c), "{c} not in COMMANDS");
+        assert!(
+            LIB.contains(&format!("commands::{c},")),
+            "{c} not registered"
+        );
+        let perm = format!("allow-{}", c.replace('_', "-"));
+        assert!(
+            granted.contains(&format!("\"{perm}\"")),
+            "{perm} not granted"
+        );
+        assert!(
+            TS_COMMANDS.contains(&format!("(\"{c}\"")),
+            "no TS wrapper for {c}"
+        );
+    }
+}
+
+/// Catches: an nxm link that named a loader (or a collection holding one)
+/// ending silently, so the user never sees the consent dialog.
+#[test]
+fn processed_loader_links_emit_loader_pending() {
+    use vessel_core::app::install::LoaderPending;
+    use vessel_core::app::nxm::Processed;
+    let pending = LoaderPending {
+        loader_key: "smapi".into(),
+        preview_id: "ab".into(),
+        plan_hash: "cd".into(),
+        op: vessel_core::loaders::Op::Install,
+        version: Some("4.5.2".into()),
+    };
+    let rec = Recorder::default();
+    crate::events::emit_loader_pending(
+        &rec,
+        &Processed {
+            game: "stardewvalley".into(),
+            kind: "mod".into(),
+            ..Default::default()
+        },
+    );
+    assert!(rec.named(crate::events::LOADER_PENDING).is_empty());
+    crate::events::emit_loader_pending(
+        &rec,
+        &Processed {
+            game: "stardewvalley".into(),
+            kind: "loader".into(),
+            loader: Some(pending),
+            ..Default::default()
+        },
+    );
+    let ev = rec.named(crate::events::LOADER_PENDING);
+    assert_eq!(ev.len(), 1);
+    assert_eq!(ev[0]["game"], "stardewvalley");
+    assert_eq!(ev[0]["pending"][0]["preview_id"], "ab");
+    assert_eq!(ev[0]["pending"][0]["op"], "install");
 }

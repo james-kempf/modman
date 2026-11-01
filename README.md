@@ -5,6 +5,7 @@ Nexus Mods manager for Linux (Rust rewrite). Work in progress.
 - Design: `linux_mod_manager_tech_stack.md`
 - Porting plan: `feature_parity_checklist.md`
 - Packaging and Steam Deck setup: `packaging/README.md`
+- Mod loaders (SMAPI) and their security model: [`docs/loaders.md`](docs/loaders.md); manual smoke test: [`docs/loaders-smoke-test.md`](docs/loaders-smoke-test.md)
 - Old bash tool and web UI: `legacy/` (reference only)
 
 ```sh

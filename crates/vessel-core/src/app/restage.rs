@@ -608,6 +608,7 @@ mod tests {
             let hooks = InstallHooks {
                 choose_variant: None,
                 fomod,
+                loaders: None,
             };
             let o = mods::install_archive(&mut self.store, game, &data, src, &meta, hooks).unwrap();
             self.rec(o.mod_id)

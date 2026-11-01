@@ -141,6 +141,8 @@ export interface DeployReport {
   purged: PurgeReport | null;
   recovered: RecoveryReport | null;
   plugins: PluginStage | null;
+  /** Mod files not placed because an installed loader owns the path. */
+  loader_owned?: string[];
 }
 
 export interface VerifyIssue {
@@ -245,9 +247,20 @@ export interface ModRecord {
 export interface ModView extends ModRecord {
   collections: string[];
 }
+/** A mod installed as a loader (e.g. SMAPI): an active loader install record, no mods row. */
+export interface InstalledLoader {
+  key: string;
+  name: string;
+  version: string | null;
+  nexus_mod_id: number | null;
+  install_id: number;
+  status: "installed" | "running" | "interrupted";
+}
 export interface ModsView {
   mods: ModView[];
   changed_since_deploy: boolean;
+  /** Mods installed as a loader; removed through the loader uninstall flow. */
+  loaders: InstalledLoader[];
 }
 export interface FomodStepView {
   step: string;
@@ -299,9 +312,19 @@ export interface InstalledMod {
   replaced: string | null;
   warnings: string[];
 }
+/** A mod loader archive held for consent: nothing was installed or run. */
+export interface LoaderPending {
+  loader_key: string;
+  preview_id: string;
+  plan_hash: string;
+  op: "install" | "upgrade" | "repair" | "uninstall" | "adopt";
+  version: string | null;
+}
 export interface InstallResult {
   game: string | null;
   installed: InstalledMod | null;
+  /** The target was a mod loader (pending preview). */
+  loader?: LoaderPending | null;
   collection: CollectionResult | null;
   after: AfterChange;
 }
@@ -378,6 +401,8 @@ export interface CollectionResult {
   removed: number;
   up_to_date: boolean;
   deployed: DeployReport | null;
+  /** Mod loaders in the collection, pending consent (not failed). */
+  loaders_pending?: LoaderPending[];
 }
 export interface CollectionRecord {
   id: number;
@@ -408,6 +433,17 @@ export interface RevisionInfo {
   total_size: number;
   summary: string;
   url: string;
+  /** The revision's mods, in collection order. */
+  mods: RevisionMod[];
+}
+export interface RevisionMod {
+  name: string;
+  version: string | null;
+  author: string | null;
+  mod_id: number | null;
+  /** Bytes; 0 = unknown. */
+  size: number;
+  optional: boolean;
 }
 export interface CollectionInfo {
   game: string;
@@ -465,6 +501,8 @@ export interface SearchHit {
   category: string | null;
   updatedAt: string | null;
   installed: boolean;
+  /** Key of the loader this mod is installed as (absent for managed mods); Remove uses the loader flow. */
+  loader?: string;
 }
 /** Nexus collection in a browse page. */
 export interface CollectionHit {
@@ -574,6 +612,8 @@ export interface StartupCheck {
 export interface ReadyInfo {
   startup_check: StartupCheck | null;
   queued: number;
+  /** Loader runs startup recovery finished (a rollback may be offered). */
+  loader_recovered?: Recovered[];
 }
 export interface TimerStatus {
   installed: boolean;
@@ -666,6 +706,8 @@ export type Answer =
 /** Rejection value of every command. */
 export interface CmdError {
   message: string;
+  /** Stable code of a typed error (see `loaderErrors.ts`); absent otherwise. */
+  code?: string;
 }
 
 // ── backup cleanup and restage ──────────────────────────────
@@ -731,4 +773,127 @@ export interface RestageReport {
   backup_dir: string | null;
   poisoned_confirmed: number;
   poisoned_ambiguous: number;
+}
+
+// ── loaders ─────────────────────────────────────────────────
+
+export type LoaderOp = LoaderPending["op"];
+
+export type DownloadOrigin =
+  | { kind: "nexus"; domain: string; mod_id: number; file_id: number }
+  | { kind: "github"; repo: string; tag: string; asset: string }
+  | { kind: "local"; path: string };
+
+export type Provenance =
+  | { kind: "verified"; origin: DownloadOrigin }
+  | { kind: "unverified"; origin: DownloadOrigin; reason: string };
+
+export type Runtime =
+  | { kind: "native" }
+  | { kind: "proton"; proton: string; compat_data: string; client_root: string; app_id: number; slr: string | null }
+  | { kind: "unknown" };
+
+/** One process a loader op starts, exactly as it will run. */
+export interface PlannedCommand {
+  program: string;
+  args: string[];
+  cwd: string;
+  /** [name, value] pairs: the whole environment the installer gets. */
+  env: [string, string][];
+  /** The cmd.exe line (Proton .bat targets). */
+  cmd_line: string | null;
+}
+
+/** A consentable loader op (`loader_preview`, `loader_preview_reopen`). Nothing ran yet. */
+export interface Preview {
+  preview_id: string;
+  plan_hash: string;
+  loader_key: string;
+  op: LoaderOp;
+  version: string | null;
+  runtime: Runtime;
+  commands: PlannedCommand[];
+  /** Game-folder globs the op may change (backed up, tracked, rolled back on failure). */
+  touch_scope: string[];
+  /** Changes outside the game folder: cannot be rolled back. */
+  external_side_effects: string[];
+  /** null = no archive involved. */
+  provenance: Provenance | null;
+  warnings: string[];
+  permissions: string;
+  /** Unix seconds. */
+  expires_at: number;
+  /** The installer is stopped after this long. */
+  timeout_secs: number;
+}
+
+export type LoaderRunOutcome = { kind: "succeeded" } | { kind: "failed"; reason: string };
+export interface RunReport {
+  install_id: number;
+  run_id: number;
+  outcome: LoaderRunOutcome;
+  status: string;
+  version: string | null;
+  log_dir: string;
+  warnings: string[];
+  /** Launch options the game now needs (null = none). */
+  launch_desired: string | null;
+}
+
+export type RecoveryAction = { kind: "discarded" } | { kind: "rollback_offered"; killed: boolean };
+export interface Recovered {
+  run_id: number;
+  install_id: number;
+  action: RecoveryAction;
+}
+
+export type LoaderStatus =
+  | { state: "not_installed" }
+  | { state: "installed"; install_id: number; version: string | null }
+  /** status: running | interrupted (interrupted = a rollback is offered). */
+  | { state: "busy"; install_id: number; status: string }
+  | { state: "manual_detected"; evidence: string[] }
+  | { state: "drifted"; install_id: number; version: string | null; reason: string };
+
+export interface LaunchState {
+  /** What the installed loaders need. */
+  desired: string | null;
+  /** What the user confirmed setting by hand. */
+  acked: string | null;
+  /** What Vessel last wrote to Steam. */
+  applied: string | null;
+}
+
+/** A loader of the game (`loader_status`). */
+export interface LoaderCard {
+  key: string;
+  name: string;
+  nexus_mod_id: number | null;
+  status: LoaderStatus;
+  runtime: "native" | "proton" | "unknown";
+  runtime_override: string | null;
+  launch: LaunchState;
+  steam_running: boolean;
+  last_run: number | null;
+  recovered: Recovered | null;
+}
+
+export interface SteamAccount {
+  account_id: number;
+  steam_id: string;
+  account_name: string;
+  persona_name: string;
+  timestamp: number | null;
+  localconfig: string;
+}
+export type ApplyOutcome =
+  | { kind: "applied"; account_id: number; path: string; value: string; backup: string | null }
+  | { kind: "choose_account"; accounts: SteamAccount[]; default: number | null };
+
+/** A mod row that is really a loader archive (`loader_junk_scan`). */
+export interface LoaderJunk {
+  mod_id: number;
+  uid: string;
+  name: string;
+  loader_key: string;
 }

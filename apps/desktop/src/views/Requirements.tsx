@@ -29,6 +29,7 @@ import {
 import * as ipc from "../ipc/commands";
 import type { ReqRow, ReqStatus } from "../ipc/types";
 import { NoGame } from "../components/shell/NoGame";
+import { LoaderCards } from "../components/loaders/LoaderCards";
 
 const ORDER: ReqStatus[] = ["missing", "disabled", "external", "gone", "ok"];
 const LABEL: Record<ReqStatus, string> = {
@@ -94,10 +95,11 @@ export function Requirements() {
           Refresh from Nexus
         </Button>
       </ViewHeader>
+      {game && <LoaderCards game={game.id} />}
       {!game ? (
         <NoGame icon={<PuzzlePieceIcon size={28} weight="duotone" />} />
       ) : q.isLoading ? (
-        <p className="px-1 py-6 text-[14px] text-zinc-400">
+        <p className="px-1 py-6 text-body text-zinc-400">
           Checking requirements…
         </p>
       ) : q.error ? (
@@ -122,7 +124,7 @@ export function Requirements() {
                 title={
                   <>
                     {LABEL[s]}{" "}
-                    <span className="ml-1 font-mono text-[12px] font-normal text-dim">
+                    <span className="ml-1 font-mono text-caption font-normal text-dim">
                       {items.length}
                     </span>
                   </>
@@ -206,24 +208,24 @@ function Row({ r }: { r: ReqRow }) {
             {r.acked && <Badge tone="accent">acknowledged</Badge>}
           </div>
           {r.detail && (
-            <p className="mt-1 text-[13px] wrap-anywhere text-dim">
+            <p className="mt-1 text-label wrap-anywhere text-dim">
               {r.detail}
             </p>
           )}
           {r.by.length > 0 && (
-            <p className="mt-2 text-[13px] leading-relaxed wrap-anywhere text-zinc-400">
+            <p className="mt-2 text-label leading-relaxed wrap-anywhere text-zinc-400">
               Needed by {r.by.join(", ")}
             </p>
           )}
           {r.hint && !target && r.status !== "ok" && (
-            <p className="mt-2 font-mono text-[12px] wrap-anywhere text-zinc-400">
+            <p className="mt-2 font-mono text-caption wrap-anywhere text-zinc-400">
               fix: vessel {r.hint}
             </p>
           )}
           {r.urls.map((u) => (
             <p
               key={u}
-              className="mt-2 flex items-center gap-1.5 font-mono text-[12px] break-all text-zinc-400 select-all"
+              className="mt-2 flex items-center gap-1.5 font-mono text-caption break-all text-zinc-400 select-all"
             >
               <LinkIcon aria-hidden size={13} className="shrink-0" />
               {u}

@@ -257,7 +257,7 @@ fn shortcut_files(home: &Path) -> Vec<PathBuf> {
 }
 
 /// Whether the Steam client is running (a process named `steam`).
-fn steam_running() -> bool {
+pub(crate) fn steam_running() -> bool {
     std::fs::read_dir("/proc")
         .into_iter()
         .flatten()

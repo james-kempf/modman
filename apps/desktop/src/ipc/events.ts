@@ -2,7 +2,7 @@
 // Backend events (apps/desktop/src-tauri/src/events.rs) and typed listeners.
 
 import { transport, type Unlisten } from "./transport";
-import type { Msg, Prompt, StartupCheck } from "./types";
+import type { LoaderPending, Msg, Prompt, Recovered, StartupCheck } from "./types";
 
 export const EVENTS = {
   activity: "vessel:activity",
@@ -13,6 +13,9 @@ export const EVENTS = {
   deployProgress: "vessel:deploy-progress",
   nxm: "vessel:nxm",
   startupCheck: "vessel:startup-check",
+  loaderLog: "vessel:loader-log",
+  loaderPending: "vessel:loader-pending",
+  loaderRecovered: "vessel:loader-recovered",
 } as const;
 
 /** A core message for the activity log. */
@@ -69,6 +72,19 @@ export interface NxmEvent {
   error: string | null;
 }
 
+/** Redacted installer output of a running `loader_run`, whole lines. */
+export interface LoaderLogEvent {
+  preview_id: string;
+  step: number;
+  text: string;
+}
+
+/** Loader archives held for consent by an nxm link: open the consent dialog (never auto-run). */
+export interface LoaderPendingEvent {
+  game: string;
+  pending: LoaderPending[];
+}
+
 export interface EventPayloads {
   "vessel:activity": ActivityEvent;
   "vessel:job": JobEvent;
@@ -79,6 +95,9 @@ export interface EventPayloads {
   "vessel:nxm": NxmEvent;
   /** null = the check failed (see the log). */
   "vessel:startup-check": StartupCheck | null;
+  "vessel:loader-log": LoaderLogEvent;
+  "vessel:loader-pending": LoaderPendingEvent;
+  "vessel:loader-recovered": Recovered[];
 }
 export type EventName = keyof EventPayloads;
 

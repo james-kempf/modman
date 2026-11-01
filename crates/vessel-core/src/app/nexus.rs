@@ -11,6 +11,7 @@ use serde::Serialize;
 
 use super::{fail, AppError, Cx, Msg, Ui, R};
 use crate::blocking::block_on;
+use crate::deploy::place::sha256_file;
 use crate::download::{self, DownloadSource, DownloadStatus, FetchRequest, Fetcher, NewDownload};
 use crate::games::{self, GameConfig};
 use crate::migrate::LegacyKeyRetry;
@@ -31,8 +32,20 @@ pub const PREMIUM_KEY: &str = "nexus.premium";
 /// Test hook: Nexus API base URL (REST `<base>/v1`, GraphQL `<base>/v2/graphql`).
 pub const BASE_URL_ENV: &str = "VESSEL_NEXUS_URL";
 
+#[cfg(test)]
+thread_local! {
+    /// Per-test-thread base URL: a mock server without touching the
+    /// process environment other tests read.
+    pub(crate) static TEST_BASE_URL: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 /// Client settings, honouring [`BASE_URL_ENV`].
 pub fn config() -> R<NexusConfig> {
+    #[cfg(test)]
+    if let Some(base) = TEST_BASE_URL.with(|b| b.borrow().clone()) {
+        return Ok(NexusConfig::with_base(&base)?);
+    }
     Ok(match std::env::var(BASE_URL_ENV) {
         Ok(base) if !base.is_empty() => NexusConfig::with_base(&base)?,
         _ => NexusConfig::default(),
@@ -184,7 +197,15 @@ fn existing_download(
         })
         .find_map(|d| {
             let p = PathBuf::from(d.dest_path?);
-            p.is_file().then_some((p, d.md5))
+            // The file may have been replaced since it was downloaded; it
+            // is reused (with this file's Nexus origin) only while it still
+            // has the recorded hash.
+            let same = match (&d.sha256, &d.md5) {
+                (Some(sha), _) => sha256_file(&p).ok().as_deref() == Some(sha.as_str()),
+                (None, Some(md5)) => download::md5_file(&p).ok().as_deref() == Some(md5.as_str()),
+                (None, None) => false,
+            };
+            (p.is_file() && same).then_some((p, d.md5))
         }))
 }
 
@@ -446,6 +467,37 @@ mod tests {
         assert!(keys
             .iter()
             .all(|k| !k.contains("key") || *k == "keyring_unavailable"));
+    }
+
+    /// Catches: a finished download whose file was replaced afterwards
+    /// being reused as that Nexus file (it would carry a verified origin).
+    #[test]
+    fn existing_download_is_reused_only_while_its_hash_matches() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open_in_memory().unwrap();
+        let file = dir.path().join("SMAPI.zip");
+        std::fs::write(&file, b"original").unwrap();
+        let mut d = NewDownload::new(DownloadSource::Nexus);
+        d.game = Some("stardewvalley".into());
+        d.nexus_mod_id = Some(2400);
+        d.nexus_file_id = Some(7);
+        let id = download::enqueue(&store, &d).unwrap();
+        download::mark_done(
+            &store,
+            id,
+            &download::Fetched {
+                path: file.clone(),
+                size: 8,
+                sha256: sha256_file(&file).unwrap(),
+                md5: download::md5_file(&file).unwrap(),
+                resumed_from: 0,
+            },
+        )
+        .unwrap();
+        let found = || existing_download(&store, "stardewvalley", 2400, 7).unwrap();
+        assert_eq!(found().map(|f| f.0), Some(file.clone()));
+        std::fs::write(&file, b"replaced").unwrap();
+        assert_eq!(found(), None);
     }
 
     #[test]

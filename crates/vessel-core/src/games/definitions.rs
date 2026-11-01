@@ -7,6 +7,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use super::{GamesError, KNOWN_PROFILES};
+use crate::loaders::LoaderDef;
 
 /// How well a game is supported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -175,6 +176,9 @@ pub struct GameDefinition {
     pub ue4ss: Option<Ue4ssDef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shared_files: Vec<SharedFileDef>,
+    /// Mod loaders installed into the game root (`[[loaders]]`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub loaders: Vec<LoaderDef>,
 }
 
 macro_rules! def {
@@ -278,6 +282,12 @@ pub fn parse_definition(text: &str, origin: &str) -> Result<GameDefinition, Game
                 "shared file name '{}' must be one path component",
                 f.name
             )));
+        }
+    }
+    for (i, l) in def.loaders.iter().enumerate() {
+        l.validate().map_err(bad)?;
+        if def.loaders[..i].iter().any(|o| o.key == l.key) {
+            return Err(bad(format!("loader key '{}' is declared twice", l.key)));
         }
     }
     Ok(def)

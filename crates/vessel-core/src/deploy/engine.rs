@@ -81,14 +81,16 @@ pub fn deploy(
         ..Default::default()
     };
     if opts.dry_run {
-        let plan = build_plan(store.conn(), game)?;
+        let mut plan = build_plan(store.conn(), game)?;
+        report.loader_owned = exclude_loader_owned(store.conn(), game, &mut plan)?;
         fill_plan_info(&mut report, &plan);
         dry_run(store.conn(), game, &root, &plan, &mut report)?;
         return Ok(report);
     }
     let _lock = guard(game, env)?;
     report.recovered = recover_locked(store, game, env)?;
-    let plan = build_plan(store.conn(), game)?;
+    let mut plan = build_plan(store.conn(), game)?;
+    report.loader_owned = exclude_loader_owned(store.conn(), game, &mut plan)?;
     fill_plan_info(&mut report, &plan);
     if games::deployment_active(store.conn(), &game.id)? {
         report.purged = Some(purge_locked(store, game, env)?);
@@ -111,6 +113,51 @@ pub fn deploy(
             Err(e)
         }
     }
+}
+
+/// Game-folder paths (lower-cased) that active loader installs created or
+/// changed (`loader_files`). The deploy engine never places, backs up,
+/// restores or removes these.
+fn loader_owned(
+    conn: &Connection,
+    game_id: &str,
+) -> Result<std::collections::HashSet<String>, DeployError> {
+    let mut stmt = conn.prepare(
+        "SELECT f.path FROM loader_files f JOIN loader_installs i ON i.id = f.install_id
+         WHERE i.game_id = ?1 AND i.status IN ('installed', 'running', 'interrupted')
+           AND f.change <> 'deleted'",
+    )?;
+    let rows = stmt.query_map([game_id], |r| r.get::<_, String>(0))?;
+    Ok(rows
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .map(|p| p.to_lowercase())
+        .collect())
+}
+
+/// Drops game-folder plan items a loader owns; returns their paths.
+fn exclude_loader_owned(
+    conn: &Connection,
+    game: &GameConfig,
+    plan: &mut Plan,
+) -> Result<Vec<String>, DeployError> {
+    if plan.target != Target::GameDir {
+        return Ok(Vec::new());
+    }
+    let owned = loader_owned(conn, &game.id)?;
+    if owned.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut skipped = Vec::new();
+    plan.items.retain(|it| {
+        let mine = owned.contains(&it.rel_path.to_lowercase());
+        if mine {
+            tracing::warn!(path = %it.rel_path, "not deploying over a loader's file");
+            skipped.push(it.rel_path.clone());
+        }
+        !mine
+    });
+    Ok(skipped)
 }
 
 fn fill_plan_info(report: &mut DeployReport, plan: &Plan) {
@@ -527,16 +574,22 @@ fn recover_locked(
     Ok(last)
 }
 
-/// Deletes blobs no held backup (of any game) refers to, and leftover
-/// `.incoming-*` temp files. A crash between storing a backup (step A) and
-/// journaling it (step B) leaves such orphans. Runs under the deploy lock,
-/// which is global, so no other deploy is between A and B.
+/// Deletes blobs no held backup (of any game) and no loader file refers
+/// to, and leftover `.incoming-*` temp files. A crash between storing a
+/// backup (step A) and journaling it (step B) leaves such orphans. Runs
+/// under the deploy lock, which is global, so no other deploy or loader
+/// backup is between A and B. `loader_files.backup_ref` and
+/// `loader_run_backups.backup_ref` (backups of a run that has not finished
+/// or still offers a rollback) start with the blob's sha256 (see
+/// `loaders::snapshot::BackupRef`).
 fn sweep_orphan_blobs(conn: &Connection, backup_dir: &Path) -> Result<(), DeployError> {
     let Ok(top) = fs::read_dir(backup_dir) else {
         return Ok(());
     };
     let mut held = conn.prepare(
-        "SELECT EXISTS (SELECT 1 FROM backups WHERE sha256 = ?1 AND restored_at IS NULL)",
+        "SELECT EXISTS (SELECT 1 FROM backups WHERE sha256 = ?1 AND restored_at IS NULL)
+             OR EXISTS (SELECT 1 FROM loader_files WHERE substr(backup_ref, 1, 64) = ?1)
+             OR EXISTS (SELECT 1 FROM loader_run_backups WHERE substr(backup_ref, 1, 64) = ?1)",
     )?;
     for shard in top.flatten() {
         let name = shard.file_name();
@@ -833,11 +886,20 @@ fn undo_all(
         })?;
         rows.collect::<Result<_, _>>()?
     };
+    let owned = loader_owned(store.conn(), &game.id)?;
     for (n, (id, target, rel, method, source, inode, size, mtime, backup_id)) in
         rows.into_iter().enumerate()
     {
         if crash_after == Some(n) {
             return Err(DeployError::InjectedCrash);
+        }
+        // A loader now owns this path: its file stays, only our record goes.
+        if target == Target::GameDir.as_str() && owned.contains(&rel.to_lowercase()) {
+            store
+                .conn()
+                .execute("DELETE FROM deployments WHERE id = ?1", [id])?;
+            report.kept += 1;
+            continue;
         }
         let backup = match backup_id {
             Some(b) => load_backup(store.conn(), b)?,
@@ -1037,4 +1099,75 @@ pub fn status(conn: &Connection, domain: &str) -> Result<DeployStatus, DeployErr
          AND EXISTS (SELECT 1 FROM deployments d WHERE d.game = m.game AND d.mod_id = m.id)",
     )? as usize;
     Ok(s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Catches: the GC deleting blobs that only a loader install still
+    /// needs for rollback.
+    #[test]
+    fn sweep_keeps_blobs_referenced_by_loader_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let blobs = BlobStore { root: tmp.path() };
+        let src = tmp.path().join("src");
+        let (kept, orphan) = {
+            fs::write(&src, "loader original").unwrap();
+            let a = blobs.store(&src).unwrap();
+            fs::write(&src, "nobody's").unwrap();
+            (a, blobs.store(&src).unwrap())
+        };
+        fs::write(tmp.path().join(".incoming-1"), "partial").unwrap();
+        let store = Store::open_in_memory().unwrap();
+        store
+            .conn()
+            .execute_batch(&format!(
+                "INSERT INTO games (id, name, added_at) VALUES ('g', 'G', 0);
+                 INSERT INTO loader_installs (id, game_id, game_dir, loader_key, runtime, strategy,
+                     status, origin, installed_at, updated_at)
+                   VALUES (1, 'g', '/g', 'smapi', 'native', 'installer', 'installed', 'local', 0, 0);
+                 INSERT INTO loader_files (install_id, path, change, kind, backup_ref)
+                   VALUES (1, 'StardewValley', 'modified', 'file', '{}:100755:0');",
+                kept.sha256
+            ))
+            .unwrap();
+        sweep_orphan_blobs(store.conn(), tmp.path()).unwrap();
+        assert!(kept.path.exists());
+        assert!(!orphan.path.exists());
+        assert!(!tmp.path().join(".incoming-1").exists());
+    }
+
+    /// Catches: the GC deleting the backup of a run that crashed after
+    /// spawning, before its loader_files rows existed (F4).
+    #[test]
+    fn sweep_keeps_blobs_of_a_crashed_spawned_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        let blobs = BlobStore { root: tmp.path() };
+        let src = tmp.path().join("src");
+        fs::write(&src, "vanilla launcher").unwrap();
+        let b = blobs.store(&src).unwrap();
+        let store = Store::open_in_memory().unwrap();
+        store
+            .conn()
+            .execute_batch(&format!(
+                "INSERT INTO games (id, name, added_at) VALUES ('g', 'G', 0);
+                 INSERT INTO loader_installs (id, game_id, game_dir, loader_key, runtime, strategy,
+                     status, origin, installed_at, updated_at)
+                   VALUES (1, 'g', '/g', 'smapi', 'native', 'installer', 'running', 'local', 0, 0);
+                 INSERT INTO loader_runs (id, install_id, op, consent_hash, phase, started_at)
+                   VALUES (7, 1, 'install', 'h', 'spawned', 0);
+                 INSERT INTO loader_run_backups (run_id, backup_ref) VALUES (7, '{}:100755:0');",
+                b.sha256
+            ))
+            .unwrap();
+        sweep_orphan_blobs(store.conn(), tmp.path()).unwrap();
+        assert!(b.path.exists());
+        store
+            .conn()
+            .execute("DELETE FROM loader_run_backups WHERE run_id = 7", [])
+            .unwrap();
+        sweep_orphan_blobs(store.conn(), tmp.path()).unwrap();
+        assert!(!b.path.exists(), "cleared refs are no longer roots");
+    }
 }

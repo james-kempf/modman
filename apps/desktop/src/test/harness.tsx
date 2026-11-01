@@ -44,6 +44,8 @@ export function baseHandlers(games: GameView[] = [game()]): Record<string, Handl
     prompt_answer: () => true,
     backups_poisoned: () => [],
     quarantines_list: () => [],
+    loader_status: () => [],
+    loader_junk_scan: () => [],
   };
 }
 

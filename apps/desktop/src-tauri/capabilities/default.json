@@ -75,6 +75,19 @@
     "allow-backups-clean",
     "allow-quarantines-list",
     "allow-quarantine-restore",
-    "allow-restage"
+    "allow-restage",
+    "allow-loader-status",
+    "allow-loader-preview",
+    "allow-loader-preview-reopen",
+    "allow-loader-run",
+    "allow-loader-rollback",
+    "allow-loader-decline-rollback",
+    "allow-game-runtime-set",
+    "allow-launch-options-get",
+    "allow-launch-options-ack",
+    "allow-launch-options-apply",
+    "allow-loader-junk-scan",
+    "allow-loader-junk-remove",
+    "allow-loader-log-get"
   ]
 }

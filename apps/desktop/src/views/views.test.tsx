@@ -178,25 +178,11 @@ describe("Browse", () => {
     expect(req()).toEqual({ kind: "collections", period: "month", sort: "newest", text: "sky ui", offset: 0 });
   });
 
-  // Fails when Load more asks for the wrong page, or stays offered when everything is shown.
-  it("Load more fetches the next page by offset until every match is shown", async () => {
-    const { t, user } = await open("browse", {
-      browse: (a) => {
-        const offset = (a as { request: { offset: number } }).request.offset;
-        const ids = offset === 0 ? Array.from({ length: 24 }, (_, i) => i + 1) : [25];
-        return { kind: "mods", total: 25, mods: ids.map((i) => hit(i)) };
-      },
-    });
-    await user.click(await screen.findByRole("button", { name: "Load more" }));
-    expect(await screen.findByText("Mod 25")).toBeInTheDocument();
-    expect((t.callsOf("browse").at(-1) as { request: { offset: number } }).request.offset).toBe(24);
-    expect(screen.getByText("25 of 25")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
-  });
+  // Paging (Previous/Next by offset) is covered in browse.test.tsx.
 
-  // Fails when a tile installs the wrong thing: a mod by its Nexus id with the wizard, a new collection by
-  // slug (optional mods asked), an installed one behind the latest revision by update; current ones say Installed.
-  it("tiles install mods and collections, update stale collections, and mark installed ones", async () => {
+  // Fails when a card's dialog installs the wrong thing: a mod by its Nexus id with the wizard, a new collection by
+  // slug (optional mods asked), an installed one behind the latest revision by update; installed cards are badged.
+  it("card dialogs install mods and collections, update stale collections, and installed cards say Installed", async () => {
     const { t, user } = await open("browse", {
       browse: (a) =>
         (a as { request: { kind: string } }).request.kind === "mods"
@@ -210,18 +196,31 @@ describe("Browse", () => {
       collection_install: () => ({ game: "skyrimspecialedition", slug: "new", revision: 3, cancelled: false, up_to_date: false, download_only: false, installed: 10, present: 0, failed: [], removed: 0, deployed: null }),
       collection_update: () => ({ game: "skyrimspecialedition", slug: "old", revision: 3, cancelled: false, up_to_date: false, download_only: false, installed: 1, present: 9, failed: [], removed: 0, deployed: null }),
     });
-    await user.click(await screen.findByRole("button", { name: "Install Mod 7" }));
+    const inDialog = async (card: string, action: string) => {
+      await user.click(await screen.findByRole("button", { name: card }));
+      const dlg = await screen.findByRole("dialog", { name: card });
+      await user.click(within(dlg).getByRole("button", { name: action }));
+      return dlg;
+    };
+    await inDialog("Mod 7", "Install Mod 7");
     await waitFor(() => expect(t.callsOf("install")).toEqual([expect.objectContaining({ target: "7", fomod: "ask" })]));
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     const mods = screen.getByRole("list", { name: "Mods" });
     expect(within(mods).getAllByText("Installed")).toHaveLength(1);
 
     await user.click(within(screen.getByRole("group", { name: "Show" })).getByRole("button", { name: "Collections" }));
-    await user.click(await screen.findByRole("button", { name: "Install Coll new" }));
+    await inDialog("Coll new", "Install Coll new");
     await waitFor(() => expect(t.callsOf("collection_install")).toEqual([expect.objectContaining({ reference: "new", optional: "ask" })]));
-    await user.click(screen.getByRole("button", { name: "Update Coll old" }));
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await inDialog("Coll old", "Update Coll old");
     await waitFor(() => expect(t.callsOf("collection_update")).toEqual([expect.objectContaining({ reference: "old" })]));
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     const cols = screen.getByRole("list", { name: "Collections" });
-    expect(within(cols).getAllByText("Installed")).toHaveLength(1);
+    // "old" (behind) and "cur" are both installed.
+    expect(within(cols).getAllByText("Installed")).toHaveLength(2);
   });
 
   // Fails when a game without a Nexus domain asks Nexus anyway (the backend would refuse).
@@ -229,6 +228,50 @@ describe("Browse", () => {
     const { t } = await open("browse", {}, [game({ nexus_domain: null })]);
     expect(await screen.findByText(/not linked to a Nexus Mods game/)).toBeInTheDocument();
     expect(t.callsOf("browse")).toEqual([]);
+  });
+
+  // Fails when a Browse card picture loses its ratio (mods 16:9, collections 4:5), is stretched instead of
+  // cropped, or the monogram fallback takes a different box than the picture (the grid shifts as pictures load);
+  // or when collection tiles stop being horizontal 2-up cards, or mod tiles stop being vertical 3-up cards.
+  it("card pictures are 16:9 for mods and 4:5 for collections, image or monogram", async () => {
+    const JPEG = "data:image/jpeg;base64,AAAA";
+    const { user } = await open("browse", {
+      browse: (a) =>
+        (a as { request: { kind: string } }).request.kind === "mods"
+          ? { kind: "mods", total: 2, mods: [hit(7, { thumbnailUrl: "https://x/7.jpg" }), hit(8)] }
+          : { kind: "collections", total: 2, collections: [coll("art", { image_url: "https://x/c.jpg" }), coll("plain")] },
+      picture: () => JPEG,
+    });
+    const ratio = async (list: string, aspect: RegExp, width: RegExp) => {
+      const ul = await screen.findByRole("list", { name: list });
+      const img = await within(ul).findByTestId("picture");
+      const mono = within(ul).getByTestId("picture-monogram");
+      for (const el of [img, mono]) {
+        expect(el.className).toMatch(aspect);
+        expect(el.className).toMatch(width);
+        expect(el.className).toMatch(/\bshrink-0\b/);
+        expect(el.className).toMatch(/\brounded-card\b/);
+      }
+      expect(img.className).toMatch(/\bobject-cover\b/);
+      // The monogram takes exactly the picture's box.
+      expect(mono.className.replace(/^.*?(?=aspect-)/, "")).toBe(img.className.replace(/^.*?(?=aspect-)/, ""));
+      return { ul, img };
+    };
+    const mods = await ratio("Mods", /\baspect-video\b/, /\bw-full\b/);
+    expect(mods.ul.className).toMatch(/\bsm:grid-cols-2\b/);
+    expect(mods.ul.className).toMatch(/\bxl:grid-cols-3\b/);
+    expect(mods.img.closest("button")!.className).toMatch(/\bflex-col\b/);
+    await user.click(within(screen.getByRole("group", { name: "Show" })).getByRole("button", { name: "Collections" }));
+    // Collections: a fixed portrait column beside the text (as wide as a mod picture is tall), not the tile's width.
+    const colls = await ratio("Collections", /\baspect-\[4\/5\]/, /\bw-\[calc\(/);
+    expect(colls.img.className).not.toMatch(/\baspect-video\b|\bw-full\b/);
+    expect(colls.ul.className).toMatch(/\bsm:grid-cols-2\b/);
+    expect(colls.ul.className).not.toMatch(/xl:grid-cols-3/);
+    expect(colls.img.closest("button")!.className).toMatch(/\bflex-row\b/);
+    // Fails when the row's default align-items: stretch pulls the picture to the text column's height (taller
+    // than 4:5): image and monogram must opt out of the stretch.
+    for (const el of [colls.img, within(colls.ul).getByTestId("picture-monogram")]) expect(el.className).toMatch(/\bself-start\b/);
+    expect(mods.img.className).not.toMatch(/\bself-start\b/);
   });
 });
 

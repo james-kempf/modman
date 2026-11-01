@@ -5,6 +5,8 @@
 
 use serde::Serialize;
 
+use vessel_core::app::install::LoaderPending;
+use vessel_core::app::nxm::Processed;
 use vessel_core::app::Msg;
 use vessel_core::download::DownloadEvent;
 
@@ -25,6 +27,13 @@ pub const DEPLOY_PROGRESS: &str = "vessel:deploy-progress";
 pub const NXM: &str = "vessel:nxm";
 /// Result of the one-time auto-update check at start.
 pub const STARTUP_CHECK: &str = "vessel:startup-check";
+/// Redacted installer output of a running loader op, line by line.
+pub const LOADER_LOG: &str = "vessel:loader-log";
+/// Loader archives held for consent outside a UI command (an nxm link):
+/// the webview opens the consent dialog. Nothing ran.
+pub const LOADER_PENDING: &str = "vessel:loader-pending";
+/// Startup recovery finished unfinished loader runs (rollback offered).
+pub const LOADER_RECOVERED: &str = "vessel:loader-recovered";
 
 /// Where events go: the app handle, or a recorder in tests.
 pub trait Sink: Send + Sync {
@@ -103,6 +112,41 @@ pub struct Nxm {
     /// `downloads` row.
     pub row: Option<i64>,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LoaderLog<'a> {
+    /// The preview being run (`loader_run`'s `preview_id`).
+    pub preview_id: &'a str,
+    /// Installer step, from 1.
+    pub step: u32,
+    /// Complete lines, redacted.
+    pub text: &'a str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LoaderPendingEv<'a> {
+    pub game: &'a str,
+    pub pending: Vec<&'a LoaderPending>,
+}
+
+/// Emits [`LOADER_PENDING`] when a processed link left loader previews.
+pub fn emit_loader_pending(sink: &dyn Sink, p: &Processed) {
+    let pending: Vec<&LoaderPending> = p
+        .loader
+        .iter()
+        .chain(p.collection.iter().flat_map(|c| c.loaders_pending.iter()))
+        .collect();
+    if !pending.is_empty() {
+        emit(
+            sink,
+            LOADER_PENDING,
+            &LoaderPendingEv {
+                game: &p.game,
+                pending,
+            },
+        );
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]

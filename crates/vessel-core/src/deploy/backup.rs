@@ -6,7 +6,7 @@
 use std::fs::{self, File};
 use std::io;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use super::place::{hash_copy, mtime_ns, sha256_file, system_time, tmp_path};
@@ -48,7 +48,24 @@ impl BlobStore<'_> {
             let target = fs::read_link(path)?;
             hash_copy(target.as_os_str().as_bytes(), Some(&mut out))?
         } else {
-            hash_copy(File::open(path)?, Some(&mut out))?
+            // Never follow a link swapped in after the lstat, and never block
+            // opening a FIFO: only a regular file is copied.
+            let src = fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(
+                    rustix::fs::OFlags::NOFOLLOW.bits() as i32
+                        | rustix::fs::OFlags::NONBLOCK.bits() as i32,
+                )
+                .open(path)
+                .inspect_err(|_| drop(fs::remove_file(&tmp)))?;
+            if !src.metadata()?.is_file() {
+                let _ = fs::remove_file(&tmp);
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("{} is not a regular file", path.display()),
+                ));
+            }
+            hash_copy(src, Some(&mut out))?
         };
         out.sync_all()?;
         drop(out);

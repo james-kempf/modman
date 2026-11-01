@@ -10,10 +10,13 @@ const TONES: Record<Tone, string> = {
   default: "bg-fill-2 text-zinc-100 border border-hairline",
   // Tonal: a muted rose wash with rose text (no saturated fill, no coloured border); transparent border keeps the size of default.
   danger: "bg-rose-500/15 text-rose-200 border border-transparent [--focus-text:var(--color-rose-700)]",
-  ghost: "text-zinc-300",
+  // A toggle (aria-pressed, e.g. a segment) takes the selected fill while pressed.
+  ghost: "text-zinc-300 aria-pressed:bg-fill-3 aria-pressed:text-zinc-50",
 };
-type Size = "sm" | "md" | "lg";
+type Size = "icon" | "sm" | "md" | "lg";
 const SIZES: Record<Size, string> = {
+  // Square, glyph only (IconButton).
+  icon: "size-control rounded-control",
   sm: "min-h-control-sm px-3.5 text-label gap-1.5 rounded-control",
   md: "min-h-control px-4 text-body gap-2 rounded-control",
   lg: "min-h-control-lg px-7 text-lead gap-2.5 rounded-card",

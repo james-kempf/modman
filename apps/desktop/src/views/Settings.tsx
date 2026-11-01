@@ -206,7 +206,7 @@ function Facts({ items }: { items: readonly (readonly [string, ReactNode])[] }) 
       {items.map(([k, v]) => (
         <div key={k} className="flex min-w-0 gap-2">
           <dt className="shrink-0 text-dim">{k}</dt>
-          <dd className="min-w-0 font-mono text-[12px] break-words text-zinc-300">{v}</dd>
+          <dd className="min-w-0 font-mono text-caption wrap-break-word text-zinc-300">{v}</dd>
         </div>
       ))}
     </dl>
@@ -340,7 +340,7 @@ export function RunLog({ runs }: { runs: RunLogEntry[] }) {
   return (
     <ul aria-label="Auto-update runs" className="grid gap-1.5">
       {runs.map((r) => (
-        <li key={r.id} tabIndex={0} className="grid gap-0.5 rounded-control border border-white/[0.05] bg-ink px-3 py-2 text-[12.5px]">
+        <li key={r.id} tabIndex={0} className="grid gap-0.5 rounded-control border border-white/5 bg-ink px-3 py-2 text-[12.5px]">
           <span className="flex flex-wrap items-center gap-2">
             <StatusDot tone={OUTCOME[r.outcome]} />
             <span className="text-zinc-200">{when(r.started_at)}</span>
@@ -368,7 +368,7 @@ function ConfigCard() {
         </CardSection>
       ) : (
         // Rows divide with a top border; the first row has none.
-        <ul className="grid [&>li]:border-t [&>li]:border-white/[0.05] [&>li:first-child]:border-t-0">
+        <ul className="grid [&>li]:border-t [&>li]:border-white/5 [&>li:first-child]:border-t-0">
           {q.data?.map((e) => (
             // Text fields key on the value too: a saved (or refetched) value resets the field. Switches and
             // dropdowns show the value as given and must stay mounted, so focus stays on them after a change.
@@ -405,8 +405,8 @@ function ConfigRow({ entry }: { entry: ConfigEntry }) {
   };
   const title = (
     <>
-      <span className="block font-mono text-[13px] text-zinc-100">{entry.key}</span>{" "}
-      <span className="block text-[12px] leading-snug text-dim">{entry.description}</span>
+      <span className="block font-mono text-label text-zinc-100">{entry.key}</span>{" "}
+      <span className="block text-caption leading-snug text-dim">{entry.description}</span>
     </>
   );
   const label = "min-w-0 flex-[1_1_9rem] wrap-anywhere";
@@ -515,7 +515,7 @@ function AppInfo() {
   if (!i) return null;
   return (
     <CardSection>
-      <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-0.5 font-mono text-[12px] leading-relaxed text-zinc-400">
+      <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-0.5 font-mono text-caption leading-relaxed text-zinc-400">
         {(
           [
             ["Vessel", i.version],

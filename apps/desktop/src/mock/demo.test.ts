@@ -4,7 +4,7 @@
 // follows the real backend's semantics.
 import { describe, expect, it } from "vitest";
 import type { JobEvent, PromptEvent } from "../ipc/events";
-import type { Answer, ConfigEntry, GameView, InstallResult, ModsView, ReqRow } from "../ipc/types";
+import type { Answer, ApplyOutcome, ConfigEntry, GameView, InstallResult, LoaderCard, ModsView, Preview, ReqRow, RunReport } from "../ipc/types";
 import { createDemoBackend } from "./demo";
 
 function demo() {
@@ -190,9 +190,31 @@ describe("demo backend", () => {
     await d.call("mods_set_enabled", { ids: [sky[0].id], enabled: false });
     expect((await d.call<ModsView>("mods_list", { game: "skyrimspecialedition" })).changed_since_deploy).toBe(true);
     const cp = await d.call<ModsView>("mods_list", { game: "cyberpunk2077" });
-    expect(cp).toEqual({ mods: [], changed_since_deploy: false });
+    expect(cp).toEqual({ mods: [], changed_since_deploy: false, loaders: [] });
     await d.call("deploy", { game: "cyberpunk2077" });
     expect((await d.call<ModsView>("mods_list")).changed_since_deploy).toBe(true);
     expect(await d.call("collections_list", { game: "cyberpunk2077" })).toEqual([]);
   });
+
+  // Fails when the demo's loader flow drifts from the core contract: a loader download must give a pending
+  // preview (no mod), a run must use the reviewed token once, and the card must reflect the result.
+  it("loaders: install gives a pending preview; the reviewed token runs once and updates the card", async () => {
+    const d = demo();
+    const before = (await d.call<ModsView>("mods_list")).mods.length;
+    const r = await d.call<InstallResult>("install", { target: "30379" });
+    expect(r.installed).toBeNull();
+    expect(r.loader).toMatchObject({ loader_key: "skse", op: "install" });
+    expect((await d.call<ModsView>("mods_list")).mods).toHaveLength(before);
+    const p = await d.call<Preview>("loader_preview_reopen", { preview_id: r.loader!.preview_id, unverified_ack: false });
+    await expect(d.call("loader_run", { preview_id: r.loader!.preview_id, plan_hash: r.loader!.plan_hash })).rejects.toHaveProperty("code", "loader_consent");
+    expect(await d.call<RunReport>("loader_run", { preview_id: p.preview_id, plan_hash: p.plan_hash })).toMatchObject({ outcome: { kind: "succeeded" } });
+    await expect(d.call("loader_run", { preview_id: p.preview_id, plan_hash: p.plan_hash })).rejects.toHaveProperty("code", "loader_consent");
+    const [card] = await d.call<LoaderCard[]>("loader_status");
+    expect(card.status).toMatchObject({ state: "installed" });
+    expect(card.launch.desired).toBeTruthy();
+    expect(await d.call<ApplyOutcome>("launch_options_apply", { account: null })).toMatchObject({ kind: "choose_account" });
+    expect(await d.call("loader_junk_remove", { mod_ids: [9001] })).toBe(1);
+    expect(await d.call("loader_junk_scan")).toEqual([]);
+  });
 });
+

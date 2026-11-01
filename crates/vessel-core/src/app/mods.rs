@@ -189,6 +189,8 @@ pub struct ModsView {
     pub mods: Vec<ModView>,
     /// Mods changed since the last deploy while a deployment is active.
     pub changed_since_deploy: bool,
+    /// Mods installed as a loader (e.g. SMAPI); they have no mods row.
+    pub loaders: Vec<super::loaders::InstalledLoader>,
 }
 
 pub fn mods_view(cx: &Cx<'_>, game: &GameConfig) -> R<ModsView> {
@@ -201,9 +203,11 @@ pub fn mods_view(cx: &Cx<'_>, game: &GameConfig) -> R<ModsView> {
     }
     let st = deploy::status(cx.store.conn(), &game.id)?;
     let changed = st.active && mods::changed_since(cx.store, &game.id, st.last_deployed_at)?;
+    let defs = cx.paths.definitions_dir();
     Ok(ModsView {
         mods: v,
         changed_since_deploy: changed,
+        loaders: super::loaders::installed_loaders(Some(&defs), cx.store, game)?,
     })
 }
 

@@ -16,6 +16,7 @@ pub mod collection;
 pub mod deploy;
 pub mod games;
 pub mod install;
+pub mod loaders;
 pub mod mods;
 pub mod nexus;
 pub mod nxm;
@@ -77,6 +78,7 @@ via_core!(
     crate::download::DownloadError,
     crate::fomod::FomodError,
     crate::loadorder::LoadOrderError,
+    crate::loaders::LoaderError,
     StoreError,
     GamesError,
     crate::config::ConfigError,

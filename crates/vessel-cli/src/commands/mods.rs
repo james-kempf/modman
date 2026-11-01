@@ -352,6 +352,7 @@ pub fn info(ctx: &mut Ctx, args: InfoArgs) -> Result<()> {
             &Scope {
                 mods: Some(vec![m.id]),
             },
+            Some(&ctx.paths.definitions_dir()),
         )?;
         print_report(ctx, &rows, false, "Requirements");
     }
@@ -551,6 +552,7 @@ pub fn deps(ctx: &mut Ctx, args: DepsArgs) -> Result<()> {
             &Scope {
                 mods: Some(vec![m.id]),
             },
+            Some(&ctx.paths.definitions_dir()),
         )?;
         if args.json {
             println!("{}", rows_json(&rows));
@@ -568,7 +570,12 @@ pub fn deps(ctx: &mut Ctx, args: DepsArgs) -> Result<()> {
         if !ids.is_empty() {
             refresh_deps(ctx, &game, &ids, args.refresh, true);
         }
-        let rows = requirements::analyze(&ctx.store, &game, &Scope::default())?;
+        let rows = requirements::analyze(
+            &ctx.store,
+            &game,
+            &Scope::default(),
+            Some(&ctx.paths.definitions_dir()),
+        )?;
         println!("{}", rows_json(&rows));
         return Ok(());
     }
@@ -578,7 +585,12 @@ pub fn deps(ctx: &mut Ctx, args: DepsArgs) -> Result<()> {
         return Ok(());
     }
     refresh_deps(ctx, &game, &ids, args.refresh, false);
-    let rows = requirements::analyze(&ctx.store, &game, &Scope::default())?;
+    let rows = requirements::analyze(
+        &ctx.store,
+        &game,
+        &Scope::default(),
+        Some(&ctx.paths.definitions_dir()),
+    )?;
     print_report(
         ctx,
         &rows,

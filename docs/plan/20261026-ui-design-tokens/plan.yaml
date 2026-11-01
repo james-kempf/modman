@@ -126,7 +126,7 @@ tasks:
     retries_used: 0
     context_cluster: tokens
     acceptance_criteria:
-      - "style.test.ts has a token guard test that fails when a new text-[13px], rounded-3xl, border-white/[0.07], tracking-[0.2em], h-[37px] or duration-[250ms] is added to any non-test tsx (verified by temporarily inserting one and seeing the test fail, then reverting)."
+      - "style.test.ts has a token guard test that fails when a new text-label, rounded-3xl, border-white/[0.07], tracking-[0.2em], h-[37px] or duration-[250ms] is added to any non-test tsx (verified by temporarily inserting one and seeing the test fail, then reverting)."
       - "Guard allowlist entries each carry a one-line justification; allowlist matches the merged exceptions list from T1-T3."
       - "grep -rE '(text|tracking|rounded|leading|opacity|shadow|duration)-\\[' apps/desktop/src --include=*.tsx (excluding tests) returns only allowlisted entries."
       - "Consolidated report returned: token table, full snapping list (old -> new, file:line), remaining arbitrary values with justification."

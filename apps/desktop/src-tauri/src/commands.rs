@@ -138,6 +138,8 @@ pub struct ReadyInfo {
     pub startup_check: Option<StartupCheck>,
     /// Queued nxm links now being processed.
     pub queued: usize,
+    /// Loader runs startup recovery finished (a rollback may be offered).
+    pub loader_recovered: Vec<vessel_core::app::loaders::Recovered>,
 }
 
 /// Call once the event listeners are registered: returns the start-up
@@ -148,12 +150,14 @@ pub struct ReadyInfo {
 pub async fn app_ready(app: AppHandle, state: St<'_>) -> CmdResult<ReadyInfo> {
     let (inner, sink) = (state.0.clone(), sink(&app));
     blocking(move || {
+        let loader_recovered = crate::startup::loader_recovery(&inner);
         let check = crate::startup::startup_check(&inner, &LiveHost::new(&inner.paths.home));
         inner.prompts.reemit(&*sink);
         let queued = inner.mark_ready(sink)?;
         Ok(ReadyInfo {
             startup_check: check,
             queued,
+            loader_recovered,
         })
     })
     .await
@@ -1065,4 +1069,456 @@ pub async fn restage(
         apprs::restage(cx, &g, &req)
     })
     .await
+}
+
+// ── loaders ─────────────────────────────────────────────────
+
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use vessel_core::app::loaders::{
+    self as apploaders, LoaderEnv, LoaderJunk, LoaderView, Preview, PreviewRequest, Recovered,
+    RunReport,
+};
+use vessel_core::loaders::launch::{self as launch, ApplyOutcome, LaunchState};
+use vessel_core::loaders::{housekeeping, DownloadOrigin, LoaderError, LoaderStatus, Op};
+
+fn loader_env(cx: &Cx<'_>) -> R<LoaderEnv> {
+    Ok(LoaderEnv::new(cx.paths, &cx.config()?.data_dir))
+}
+
+/// The configured Nexus key, only to redact it from installer logs.
+fn nexus_secret(cx: &Cx<'_>) -> Option<String> {
+    appnx::load_key(cx.paths, cx.store)
+        .ok()
+        .flatten()
+        .map(|k| k.expose().to_string())
+}
+
+/// A loader of the active game for the Requirements card.
+#[derive(Debug, Clone, Serialize)]
+pub struct LoaderCard {
+    #[serde(flatten)]
+    pub view: LoaderView,
+    /// What startup recovery did with this install's last run (this app
+    /// start); a rollback is offered while the status is `interrupted`.
+    pub recovered: Option<Recovered>,
+}
+
+fn install_of(s: &LoaderStatus) -> Option<i64> {
+    match s {
+        LoaderStatus::Installed { install_id, .. }
+        | LoaderStatus::Busy { install_id, .. }
+        | LoaderStatus::Drifted { install_id, .. } => Some(*install_id),
+        _ => None,
+    }
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn loader_status(
+    app: AppHandle,
+    state: St<'_>,
+    game: Option<String>,
+) -> CmdResult<Vec<LoaderCard>> {
+    let recovered = state.0.loader_recovered.get().cloned().unwrap_or_default();
+    query(app, &state, game, move |cx| {
+        let g = cx.need_game()?;
+        let env = loader_env(cx)?;
+        Ok(apploaders::views(&env, cx.store, &g)?
+            .into_iter()
+            .map(|view| {
+                let id = install_of(&view.status);
+                LoaderCard {
+                    recovered: recovered.iter().find(|r| Some(r.install_id) == id).cloned(),
+                    view,
+                }
+            })
+            .collect())
+    })
+    .await
+}
+
+/// A preview as the consent dialog shows it.
+#[derive(Debug, Clone, Serialize)]
+pub struct PreviewView {
+    #[serde(flatten)]
+    pub preview: Preview,
+    /// The installer is killed after this long.
+    pub timeout_secs: u64,
+}
+
+fn preview_view(env: &LoaderEnv, preview: Preview) -> PreviewView {
+    PreviewView {
+        preview,
+        timeout_secs: env.timeout.as_secs(),
+    }
+}
+
+/// Previews a loader op (nothing runs). `archive`: a local loader archive
+/// (install, upgrade, adopt; unverified unless `unverified_ack`). Repair
+/// and uninstall use the install's cached archive.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn loader_preview(
+    app: AppHandle,
+    state: St<'_>,
+    game: Option<String>,
+    op: Op,
+    loader_key: String,
+    archive: Option<String>,
+    unverified_ack: bool,
+) -> CmdResult<PreviewView> {
+    query(app, &state, game, move |cx| {
+        let g = cx.need_game()?;
+        let env = loader_env(cx)?;
+        let archive = archive.map(PathBuf::from);
+        let origin = DownloadOrigin::Local {
+            path: archive.clone().unwrap_or_default(),
+        };
+        let req = PreviewRequest {
+            game_id: g.id,
+            op,
+            loader_key: Some(loader_key),
+            archive,
+            origin,
+            unverified_ack,
+        };
+        let p = apploaders::preview(&env, cx.store, &req)?;
+        Ok(preview_view(&env, p))
+    })
+    .await
+}
+
+/// A pending preview (from install, a collection or an nxm link) in full,
+/// re-previewed with `unverified_ack`; the old token is dropped.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn loader_preview_reopen(
+    app: AppHandle,
+    state: St<'_>,
+    preview_id: String,
+    unverified_ack: bool,
+) -> CmdResult<PreviewView> {
+    query(app, &state, None, move |cx| {
+        let env = loader_env(cx)?;
+        let p = apploaders::reopen_preview(&env, cx.store, &preview_id, unverified_ack)?;
+        Ok(preview_view(&env, p))
+    })
+    .await
+}
+
+/// Follows a run's step logs (`<run dir>/step-N.log`) and emits complete,
+/// redacted lines as `vessel:loader-log` until stopped.
+struct LogTail {
+    stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl LogTail {
+    fn start(
+        sink: Arc<dyn Sink>,
+        dir: PathBuf,
+        preview_id: String,
+        home: PathBuf,
+        secret: Option<String>,
+    ) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let flag = stop.clone();
+        let thread = std::thread::Builder::new()
+            .name("loader-log".into())
+            .spawn(move || {
+                // Per step: bytes read so far and the unfinished last line.
+                let mut seen: Vec<(u64, String)> = Vec::new();
+                loop {
+                    let last = flag.load(Ordering::SeqCst);
+                    for step in 1u32.. {
+                        let path = dir.join(format!("step-{step}.log"));
+                        let Ok(bytes) =
+                            read_from(&path, seen.get(step as usize - 1).map_or(0, |s| s.0))
+                        else {
+                            break;
+                        };
+                        if seen.len() < step as usize {
+                            seen.push((0, String::new()));
+                        }
+                        let (off, buf) = &mut seen[step as usize - 1];
+                        *off += bytes.len() as u64;
+                        buf.push_str(&String::from_utf8_lossy(&bytes));
+                        // Whole lines only, so a secret is never split
+                        // across two redaction passes.
+                        let cut = if last {
+                            buf.len()
+                        } else {
+                            buf.rfind('\n').map_or(0, |i| i + 1)
+                        };
+                        if cut > 0 {
+                            let chunk: String = buf.drain(..cut).collect();
+                            let secrets: Vec<&str> = secret.as_deref().into_iter().collect();
+                            let text = housekeeping::redact_with(&chunk, &home, &secrets);
+                            crate::events::emit(
+                                &*sink,
+                                crate::events::LOADER_LOG,
+                                &crate::events::LoaderLog {
+                                    preview_id: &preview_id,
+                                    step,
+                                    text: &text,
+                                },
+                            );
+                        }
+                    }
+                    if last {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                }
+            })
+            .ok();
+        Self { stop, thread }
+    }
+
+    fn finish(mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+
+fn read_from(path: &std::path::Path, offset: u64) -> std::io::Result<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path)?;
+    f.seek(SeekFrom::Start(offset))?;
+    let mut out = Vec::new();
+    f.read_to_end(&mut out)?;
+    Ok(out)
+}
+
+/// Job: runs a confirmed preview. `plan_hash` must be the one the user
+/// saw. Runs on this blocking thread until the installer is gone (the
+/// runner's PDEATHSIG contract) and streams `vessel:loader-log`.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn loader_run(
+    app: AppHandle,
+    state: St<'_>,
+    preview_id: String,
+    plan_hash: String,
+) -> CmdResult<RunReport> {
+    let s = sink(&app);
+    job(app, &state, "loader_run", None, move |cx| {
+        let env = loader_env(cx)?;
+        let tail = preview_id.bytes().all(|b| b.is_ascii_hexdigit()).then(|| {
+            LogTail::start(
+                s,
+                env.data_dir.join("loaders/runs").join(&preview_id),
+                preview_id.clone(),
+                env.home.clone(),
+                nexus_secret(cx),
+            )
+        });
+        let r = apploaders::run(&env, cx.store, &preview_id, &plan_hash);
+        if let Some(t) = tail {
+            t.finish();
+        }
+        r
+    })
+    .await
+}
+
+/// Job: undoes every tracked change of an install (the offered rollback
+/// after an interrupted run). Returns what could not be restored.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn loader_rollback(
+    app: AppHandle,
+    state: St<'_>,
+    install_id: i64,
+) -> CmdResult<Vec<String>> {
+    job(app, &state, "loader_rollback", None, move |cx| {
+        let env = loader_env(cx)?;
+        apploaders::rollback(&env, cx.store, install_id)
+    })
+    .await
+}
+
+/// Keeps an interrupted install's files (the offered rollback declined).
+#[tauri::command(rename_all = "snake_case")]
+pub async fn loader_decline_rollback(
+    app: AppHandle,
+    state: St<'_>,
+    install_id: i64,
+) -> CmdResult<()> {
+    query(app, &state, None, move |cx| {
+        let env = loader_env(cx)?;
+        apploaders::decline_rollback(&env, cx.store, install_id)
+    })
+    .await
+}
+
+/// `runtime`: native, proton, or null to detect it again.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn game_runtime_set(
+    app: AppHandle,
+    state: St<'_>,
+    game: Option<String>,
+    runtime: Option<String>,
+) -> CmdResult<()> {
+    query(app, &state, game, move |cx| {
+        let g = cx.need_game()?;
+        apploaders::set_runtime_override(cx.store, &g.id, runtime.as_deref())
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn launch_options_get(
+    app: AppHandle,
+    state: St<'_>,
+    game: Option<String>,
+) -> CmdResult<LaunchState> {
+    query(app, &state, game, |cx| {
+        let g = cx.need_game()?;
+        Ok(cx.store.launch_state(&g.id).map_err(LoaderError::from)?)
+    })
+    .await
+}
+
+/// The user set the desired launch options by hand; returns them.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn launch_options_ack(
+    app: AppHandle,
+    state: St<'_>,
+    game: Option<String>,
+) -> CmdResult<Option<String>> {
+    query(app, &state, game, |cx| {
+        let g = cx.need_game()?;
+        Ok(cx
+            .store
+            .ack_launch_options(&g.id)
+            .map_err(LoaderError::from)?)
+    })
+    .await
+}
+
+/// Writes the desired launch options into Steam's localconfig.vdf for
+/// `account` (refused while Steam runs). Without `account` and several
+/// accounts, returns the list to pick from and writes nothing.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn launch_options_apply(
+    app: AppHandle,
+    state: St<'_>,
+    game: Option<String>,
+    account: Option<u32>,
+) -> CmdResult<ApplyOutcome> {
+    query(app, &state, game, move |cx| {
+        let g = cx.need_game()?;
+        let appid = g.appid.ok_or_else(|| {
+            vessel_core::app::AppError::Msg(format!("{} has no Steam app id.", g.name))
+        })?;
+        Ok(
+            launch::apply(cx.store, &cx.paths.home, &g.id, appid, account)
+                .map_err(LoaderError::from)?,
+        )
+    })
+    .await
+}
+
+/// Mod rows that are really loader archives (an old SMAPI installer under Mods/).
+#[tauri::command(rename_all = "snake_case")]
+pub async fn loader_junk_scan(
+    app: AppHandle,
+    state: St<'_>,
+    game: Option<String>,
+) -> CmdResult<Vec<LoaderJunk>> {
+    query(app, &state, game, |cx| {
+        let g = cx.need_game()?;
+        apploaders::find_loader_junk(cx, &g)
+    })
+    .await
+}
+
+/// Job: removes those rows through the normal mod removal (purge, delete,
+/// redeploy). Returns how many were removed.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn loader_junk_remove(
+    app: AppHandle,
+    state: St<'_>,
+    game: Option<String>,
+    mod_ids: Vec<i64>,
+) -> CmdResult<usize> {
+    job(app, &state, "loader_junk_remove", game, move |cx| {
+        let g = cx.need_game()?;
+        apploaders::remove_loader_junk(cx, &g, &mod_ids)
+    })
+    .await
+}
+
+/// A run's installer output, redacted (API keys, tokens, home path).
+#[tauri::command(rename_all = "snake_case")]
+pub async fn loader_log_get(app: AppHandle, state: St<'_>, run_id: i64) -> CmdResult<String> {
+    query(app, &state, None, move |cx| {
+        let env = loader_env(cx)?;
+        let key = nexus_secret(cx);
+        Ok(housekeeping::read_log(
+            &env,
+            cx.store,
+            run_id,
+            key.as_deref(),
+        )?)
+    })
+    .await
+}
+
+#[cfg(test)]
+mod loader_tests {
+    use super::*;
+    use crate::events::testing::Recorder;
+
+    /// Catches: installer output reaching the webview unredacted, a line
+    /// split across events (a key could straddle two redaction passes),
+    /// or the tail losing output written just before the run returned.
+    #[test]
+    fn log_tail_streams_whole_redacted_lines() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let dir = tmp.path().join("run");
+        std::fs::create_dir_all(&dir).unwrap();
+        let rec = Arc::new(Recorder::default());
+        let tail = LogTail::start(
+            rec.clone(),
+            dir.clone(),
+            "ab12".into(),
+            home.clone(),
+            Some("SECRETKEY0123456789".into()),
+        );
+        std::fs::write(
+            dir.join("step-1.log"),
+            format!("in {}/game\nkey SECRETKEY0123456789\npart", home.display()),
+        )
+        .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        std::fs::write(dir.join("step-2.log"), "two\n").unwrap();
+        tail.finish();
+        let evs = rec.named(crate::events::LOADER_LOG);
+        let text: String = evs
+            .iter()
+            .map(|e| e["text"].as_str().unwrap().to_string())
+            .collect();
+        assert!(!text.contains("SECRETKEY"), "{text}");
+        assert!(!text.contains(&home.display().to_string()), "{text}");
+        assert!(text.contains("~/game"), "{text}");
+        assert!(text.contains("part") && text.contains("two"), "{text}");
+        assert!(evs.iter().all(|e| e["preview_id"] == "ab12"));
+        assert!(evs.iter().any(|e| e["step"] == 2));
+        // "part" had no newline: held back until the run ended, never split.
+        assert!(evs.iter().any(|e| e["text"] == "part"));
+    }
+
+    /// Catches: the loader card losing the recovery note for its install.
+    #[test]
+    fn install_ids_come_from_every_tracked_state() {
+        assert_eq!(
+            install_of(&LoaderStatus::Busy {
+                install_id: 3,
+                status: "interrupted".into()
+            }),
+            Some(3)
+        );
+        assert_eq!(install_of(&LoaderStatus::NotInstalled), None);
+    }
 }

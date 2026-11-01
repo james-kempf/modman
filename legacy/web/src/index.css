@@ -61,7 +61,7 @@
   }
   .eyebrow { @apply font-mono text-[11px] tracking-[0.14em] text-zinc-500 uppercase; }
   .input {
-    @apply h-11 w-full rounded-xl border border-white/[0.08] bg-ink px-3.5 text-[15px] text-zinc-100 placeholder:text-zinc-600
+    @apply h-11 w-full rounded-xl border border-white/[0.08] bg-ink px-3.5 text-lead text-zinc-100 placeholder:text-zinc-600
       transition-colors duration-200 outline-none focus:border-accent-500/60 focus:bg-ink-3;
   }
 }

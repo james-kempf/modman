@@ -49,6 +49,10 @@ pub enum ModsError {
     ProfileNotFound(String),
     #[error("no installable files in {0}")]
     NoInstallableFiles(String),
+    /// The archive is a mod loader (SMAPI, BepInEx, ...): it installs into
+    /// the game folder through the loader flow, never as a mod.
+    #[error("this archive is the '{loader_key}' mod loader; install it from Requirements (loaders go into the game folder, not into Mods)")]
+    LoaderArchive { loader_key: String },
     #[error(transparent)]
     Archive(#[from] ArchiveError),
     #[error(transparent)]

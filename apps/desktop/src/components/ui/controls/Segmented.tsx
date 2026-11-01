@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { cx } from "../styles";
+import { Button } from "./Button";
 
 /** Legacy pill switcher (Mods filter / Activity tabs). */
 export function Segmented<T extends string>({
@@ -16,20 +16,18 @@ export function Segmented<T extends string>({
   return (
     <div role="group" aria-label={label} className="flex flex-wrap items-center gap-3">
       <span className="eyebrow">{label}</span>
-      <span className="flex max-w-full flex-wrap rounded-control border border-hairline bg-ink p-1">
+      {/* rounded-card: one step above the segments' rounded-control, so the corners nest. */}
+      <span className="flex max-w-full flex-wrap rounded-card border border-hairline bg-ink p-1">
         {options.map((o) => (
-          <button
+          <Button
             key={o.value}
-            type="button"
+            tone="ghost"
+            size="sm"
             aria-pressed={o.value === value}
             onClick={() => onChange(o.value)}
-            className={cx(
-              "min-h-control-sm rounded-control-sm px-4 text-label transition-colors duration-base",
-              o.value === value ? "bg-fill-3 text-zinc-50" : "text-zinc-400",
-            )}
           >
             {o.label}
-          </button>
+          </Button>
         ))}
       </span>
     </div>

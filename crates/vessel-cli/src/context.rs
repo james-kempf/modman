@@ -41,27 +41,9 @@ impl Ctx {
         }
     }
 
-    /// Prompts are allowed (legacy `is_interactive`, L87).
-    pub fn is_interactive(&self) -> bool {
-        self.ui().interactive()
-    }
-
     /// Legacy `confirm`: yes with `-y`, the default without a tty.
     pub fn confirm(&self, question: &str, default_yes: bool) -> bool {
         self.ui().confirm(question, default_yes)
-    }
-
-    /// Asks for a value; empty input takes `default`.
-    pub fn ask(&self, question: &str, default: &str) -> String {
-        let prompt = if default.is_empty() {
-            format!("{question}: ")
-        } else {
-            format!("{question} [{default}]: ")
-        };
-        match read_line(&prompt) {
-            Some(a) if !a.is_empty() => a,
-            _ => default.to_string(),
-        }
     }
 
     /// Embedded definitions plus user overrides.

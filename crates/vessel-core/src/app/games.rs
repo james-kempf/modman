@@ -294,11 +294,27 @@ pub fn detect(cx: &Cx<'_>) -> R<Vec<Detected>> {
 }
 
 /// What [`launch`] did.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Launched {
     pub appid: u32,
     /// Pending mod changes were deployed first.
     pub deployed: bool,
+    /// Launch options the game's loaders need that the user has neither
+    /// acknowledged setting nor had Vessel apply.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub launch_options_pending: Option<String>,
+}
+
+/// The desired launch options when they differ from what was acked or
+/// applied; a failed read only logs, it never blocks launching.
+fn pending_launch_options(cx: &Cx<'_>, game_id: &str) -> Option<String> {
+    match cx.store.launch_state(game_id) {
+        Ok(s) => s.mismatch().map(str::to_string),
+        Err(e) => {
+            tracing::warn!("launch options of {game_id}: {e}");
+            None
+        }
+    }
 }
 
 /// Starts `game` through Steam (`steam://rungameid/<appid>`). When mods
@@ -323,6 +339,13 @@ pub fn launch(cx: &mut Cx<'_>, game: &GameConfig) -> R<Launched> {
             deployed = true;
         }
     }
+    let launch_options_pending = pending_launch_options(cx, &game.id);
+    if let Some(want) = &launch_options_pending {
+        cx.ui.warn(&format!(
+            "{} needs these Steam launch options, which are not confirmed as set: {want}",
+            game.name
+        ));
+    }
     cx.ui
         .info(&format!("Launching {} (Steam app {appid})...", game.name));
     let url = format!("steam://rungameid/{appid}");
@@ -343,7 +366,11 @@ pub fn launch(cx: &mut Cx<'_>, game: &GameConfig) -> R<Launched> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()?;
-    Ok(Launched { appid, deployed })
+    Ok(Launched {
+        appid,
+        deployed,
+        launch_options_pending,
+    })
 }
 
 /// A folder of a game that [`open_folder`] opens.
@@ -562,6 +589,29 @@ mod tests {
         assert!(open_folder(&cx, "foo", GameFolder::Prefix, never).is_err());
         // Unknown game.
         assert!(open_folder(&cx, "nope", GameFolder::Game, never).is_err());
+    }
+
+    // Fails when launch stays silent about launch options the loaders need
+    // but the user neither acked nor had applied.
+    #[test]
+    fn pending_launch_options_report_only_an_unconfirmed_desired_string() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = Paths::for_home(home.path());
+        let mut store = Store::open_in_memory().unwrap();
+        let ui = Recorder::default();
+        let cx = Cx::new(&paths, &mut store, &ui);
+        stored_game(&cx, None, None);
+        assert_eq!(pending_launch_options(&cx, "foo"), None);
+        cx.store
+            .set_launch_desired("foo", Some("X %command%"))
+            .unwrap();
+        assert_eq!(
+            pending_launch_options(&cx, "foo").as_deref(),
+            Some("X %command%")
+        );
+        cx.store.ack_launch_options("foo").unwrap();
+        assert_eq!(pending_launch_options(&cx, "foo"), None);
+        assert_eq!(pending_launch_options(&cx, "nope"), None);
     }
 
     // Fails when the webview names a folder kind other than game/prefix.

@@ -74,35 +74,24 @@ function Osk() {
             {[...row].map((ch, i) => {
               const k = shift ? ch.toUpperCase() : ch;
               return (
-                <button
-                  key={ch}
-                  type="button"
-                  data-autofocus={row === ROWS[0] && i === 0 ? true : undefined}
-                  onClick={() => type(ch)}
-                  className="min-h-control min-w-control rounded-control border border-hairline bg-fill-2 font-mono text-lg text-zinc-100 transition-colors duration-fast active:scale-95"
-                >
-                  {k}
-                </button>
+                <Button key={ch} data-autofocus={row === ROWS[0] && i === 0 ? true : undefined} onClick={() => type(ch)}>
+                  {/* The span sets the key face: Button's own text size stays for its other uses. */}
+                  <span className="font-mono text-lg font-normal">{k}</span>
+                </Button>
               );
             })}
           </div>
         ))}
       </div>
       <div className="mt-4 flex flex-wrap justify-center gap-2">
-        <button
-          type="button"
+        <Button
+          tone={shift ? "primary" : "default"}
           aria-pressed={shift}
+          icon={<ArrowFatUpIcon aria-hidden size={16} weight={shift ? "fill" : "regular"} />}
           onClick={() => setShift((s) => !s)}
-          className={cx(
-            "inline-flex min-h-control items-center gap-2 rounded-control border px-4 text-body font-medium transition-colors duration-base",
-            shift
-              ? "border-accent-400/40 bg-accent-400/10 text-accent-200"
-              : "border-hairline bg-fill-2 text-zinc-100",
-          )}
         >
-          <ArrowFatUpIcon aria-hidden size={16} weight={shift ? "fill" : "regular"} />
           Shift
-        </button>
+        </Button>
         <Button icon={<BackspaceIcon aria-hidden size={16} />} onClick={() => setValue((v) => v.slice(0, -1))}>
           Backspace
         </Button>

@@ -12,8 +12,10 @@ export { Empty } from "./feedback/Empty";
 export { ErrorNote } from "./feedback/ErrorNote";
 export { Fact } from "./display/Fact";
 export { IconButton } from "./controls/IconButton";
+export { JobIsland, type IslandOutcome } from "./feedback/JobIsland";
 export { ListToggle } from "./controls/ListToggle";
 export { MsgLine } from "./display/MsgLine";
+export { Notice, type NoticeTone } from "./feedback/Notice";
 export { Picture } from "./display/Picture";
 export { Row } from "./layout/Row";
 export { Segmented } from "./controls/Segmented";
@@ -28,6 +30,7 @@ export { ViewHeader } from "./layout/ViewHeader";
 export { ago, bytes, monogram, when } from "./format";
 export {
   CARD_SHELL,
+  CARD_TILE,
   CARD_TITLE,
   DIVIDE,
   INSET_HEADER_PAD,

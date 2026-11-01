@@ -76,7 +76,7 @@ describe("focus and hover highlight", () => {
 
   // Fails when any highlight drifts from the one shared solid white (tints, per-control fills, an outline or ring).
   it("paints the highlight with the one solid white token, no outline", () => {
-    expect(token("--color-focus")).toBe("var(--color-zinc-100)");
+    expect(token("--color-focus")).toBe("var(--color-zinc-200)");
     expect(css).toMatch(/\* \{\s*@variant highlighted \{\s*box-shadow: inset 0 0 0 100vmax var\(--color-focus\);\s*\}/);
     expect(css).not.toMatch(/--color-focus-fill/);
   });

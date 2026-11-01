@@ -45,6 +45,7 @@ import {
 import * as ipc from "../ipc/commands";
 import type {
   ConflictData,
+  InstalledLoader,
   ModView,
   ProfileLoaded,
   UninstallResult,
@@ -186,15 +187,23 @@ function ModList({ game }: { game: string }) {
       </Empty>
     );
   const list = mods.data?.mods ?? [];
+  // Older mocks and stale caches may lack the field.
+  const loaders = mods.data?.loaders ?? [];
+  const loaderCard = loaders.length > 0 && (
+    <LoaderList game={game} loaders={loaders} />
+  );
   if (!list.length)
     return (
-      <Empty
-        icon={<StackIcon size={28} weight="duotone" />}
-        title="No mods installed yet"
-      >
-        Install a single mod by its Nexus ID or URL, or a whole collection, from
-        the Install tab. They appear here in load order.
-      </Empty>
+      <>
+        {loaderCard}
+        <Empty
+          icon={<StackIcon size={28} weight="duotone" />}
+          title="No mods installed yet"
+        >
+          Install a single mod by its Nexus ID or URL, or a whole collection,
+          from the Install tab. They appear here in load order.
+        </Empty>
+      </>
     );
   const on = list.filter((m) => m.enabled).length;
   const shown = filterMods(list, filter, {
@@ -213,7 +222,7 @@ function ModList({ game }: { game: string }) {
         hasUpdates={!!updates}
       />
       {mods.data?.changed_since_deploy && (
-        <p className="flex items-center gap-2.5 rounded-card border border-amber-400/15 bg-amber-400/[0.05] px-4 py-3 text-[14px] text-amber-200">
+        <p className="flex items-center gap-2.5 rounded-card border border-amber-400/15 bg-amber-400/5 px-4 py-3 text-body text-amber-200">
           <StatusDot tone="amber" live />
           The mod set changed since the last deploy.
         </p>
@@ -243,6 +252,7 @@ function ModList({ game }: { game: string }) {
             : "Nothing in the load order matches the search and filters."}
         </Empty>
       )}
+      {loaderCard}
       <Card title="Load order">
         <ol aria-label="Load order" className="rows stagger min-w-0">
           {shown.map((m) => (
@@ -252,7 +262,7 @@ function ModList({ game }: { game: string }) {
             >
               {/* The name keeps about 12rem; on a narrow row the controls wrap below it as one group. */}
               <span className="flex min-w-0 flex-[1_1_18rem] items-center gap-3">
-                <span className="w-9 shrink-0 text-right font-mono text-[12px] text-dim">
+                <span className="w-9 shrink-0 text-right font-mono text-caption text-dim">
                   {m.position}
                 </span>
                 <Thumb
@@ -267,7 +277,7 @@ function ModList({ game }: { game: string }) {
                 <span className="min-w-0 flex-1">
                   <span
                     className={cx(
-                      "block truncate text-[15px]",
+                      "block truncate text-lead",
                       m.enabled ? "text-zinc-100" : "text-zinc-400",
                     )}
                     title={m.name}
@@ -341,6 +351,45 @@ function ModList({ game }: { game: string }) {
         />
       )}
     </>
+  );
+}
+
+/**
+ * Mods installed as a loader (e.g. SMAPI). They sit outside the load order;
+ * the Requirements view manages them (repair, uninstall).
+ */
+function LoaderList({
+  game,
+  loaders,
+}: {
+  game: string;
+  loaders: InstalledLoader[];
+}) {
+  return (
+    <Card title="Loaders">
+      <ul aria-label="Loaders" className="rows min-w-0">
+        {loaders.map((l) => (
+          <li
+            key={l.key}
+            className="flex min-h-16 min-w-0 items-center gap-3 py-2 pr-3 pl-2"
+          >
+            <span className="w-9 shrink-0" />
+            <Thumb game={game} modId={l.nexus_mod_id} name={l.name} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-lead text-zinc-100" title={l.name}>
+                {l.name}
+              </span>
+              <span className="block truncate font-mono text-[11.5px] text-dim">
+                {l.version ? `v${l.version}` : "—"} · loader
+              </span>
+            </span>
+            <Badge tone={l.status === "installed" ? "accent" : "amber"}>
+              {l.status}
+            </Badge>
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }
 
@@ -480,7 +529,7 @@ function ModDetailDialog({
       {d && d.fomod.length > 0 && (
         <div className="mt-5">
           <h3 className="eyebrow mb-2">Installer choices</h3>
-          <ul className="grid gap-1 text-[13px] text-zinc-300">
+          <ul className="grid gap-1 text-label text-zinc-300">
             {d.fomod.map((s) => (
               <li key={s.step}>
                 <span className="text-dim">{s.step}:</span>{" "}
@@ -531,7 +580,7 @@ function ModDetailDialog({
 }
 
 function Loading() {
-  return <p className="px-1 py-6 text-[14px] text-zinc-400">Loading…</p>;
+  return <p className="px-1 py-6 text-body text-zinc-400">Loading…</p>;
 }
 
 function Conflicts({ game }: { game: string }) {
@@ -587,15 +636,15 @@ function Conflicts({ game }: { game: string }) {
                   tabIndex={0}
                   className="flex flex-wrap items-center gap-3 rounded-control py-2.5"
                 >
-                  <span className="w-9 text-right font-mono text-[12px] text-dim">
+                  <span className="w-9 text-right font-mono text-caption text-dim">
                     {p.load_index ?? "–"}
                   </span>
-                  <span className="min-w-0 flex-1 font-mono text-[13px] text-zinc-200">
+                  <span className="min-w-0 flex-1 font-mono text-label text-zinc-200">
                     {p.name}
                   </span>
                   {!p.active && <Badge>inactive</Badge>}
                   {p.provider && (
-                    <span className="text-[13px] text-zinc-400">
+                    <span className="text-label text-zinc-400">
                       {p.provider.name}
                     </span>
                   )}
@@ -665,7 +714,7 @@ function Updates({ game }: { game: string }) {
           <Empty>Check Nexus for newer files of your mods.</Empty>
         ) : (
           <>
-            <p className="mb-4 font-mono text-[12px] text-dim">
+            <p className="mb-4 font-mono text-caption text-dim">
               Checked {report.checked} mods
               {report.stopped_early && " (stopped early: rate limit)"}
               {report.installed > 0 && `, installed ${report.installed}`}.
@@ -683,7 +732,7 @@ function Updates({ game }: { game: string }) {
                     <span className="text-[14.5px] text-zinc-100">
                       {u.mod.name}
                     </span>{" "}
-                    <span className="font-mono text-[12px] text-zinc-400">
+                    <span className="font-mono text-caption text-zinc-400">
                       {u.mod.version ?? "?"} → {u.file.version ?? u.file.name}
                     </span>
                     {u.pinned && <Badge tone="amber">pinned</Badge>}

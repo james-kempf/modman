@@ -110,7 +110,7 @@ function Installed({ game }: { game: string }) {
               <CollectionArt game={c.game} slug={c.slug} name={c.name ?? c.slug} />
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="truncate text-[15px] font-medium tracking-tight text-zinc-50">{c.name ?? c.slug}</h3>
+                  <h3 className="truncate text-lead font-medium tracking-tight text-zinc-50">{c.name ?? c.slug}</h3>
                   <Badge>rev {c.revision}</Badge>
                 </div>
                 <p className="mt-1 text-[13.5px] text-zinc-400">
@@ -118,12 +118,12 @@ function Installed({ game }: { game: string }) {
                 </p>
                 <div className="mt-4 flex items-center gap-3">
                   <progress aria-label={`${c.name ?? c.slug} enabled mods`} className="w-40" max={c.mods.length || 1} value={enabled} />
-                  <span className="font-mono text-[12px] text-zinc-400">
+                  <span className="font-mono text-caption text-zinc-400">
                     {enabled}/{c.mods.length} enabled
                   </span>
                 </div>
                 {c.failed.length > 0 && (
-                  <div className="mt-4 rounded-control border border-amber-400/15 bg-amber-400/[0.05] px-3.5 py-2.5 text-[13px] text-amber-200">
+                  <div className="mt-4 rounded-control border border-amber-400/15 bg-amber-400/5 px-3.5 py-2.5 text-label text-amber-200">
                     <div className="flex items-center gap-2 font-medium">
                       <WarningIcon aria-hidden size={14} /> {c.failed.length} failed
                     </div>
@@ -213,9 +213,9 @@ function Lookup() {
             <CollectionArt game={info.game} slug={info.slug} name={info.revision.name} />
             <div className="min-w-0 flex-1">
               <h3 className="text-xl font-medium tracking-tight wrap-anywhere text-zinc-50">
-                {info.revision.name} <span className="text-[15px] font-normal text-zinc-400">by {info.revision.author}</span>
+                {info.revision.name} <span className="text-lead font-normal text-zinc-400">by {info.revision.author}</span>
               </h3>
-              <p className="mt-1 font-mono text-[12px] text-dim">
+              <p className="mt-1 font-mono text-caption text-dim">
                 Revision {info.revision.number} · {info.revision.mod_count} mods ({info.revision.optional_count} optional) ·{" "}
                 {bytes(info.revision.total_size)} · {info.revision.game_name}
               </p>
@@ -259,7 +259,8 @@ export function CollectionArt({ game, slug, name }: { game: string; slug: string
     staleTime: Infinity,
   });
   const src = q.data && q.data.startsWith("data:image/") ? q.data : null;
-  const tile = "size-20 shrink-0 rounded-card-lg";
+  // Portrait 9:16 sized by width, so the tall tile stays modest beside the row's text.
+  const tile = "w-16 aspect-[9/16] shrink-0 rounded-card-lg";
   if (src) return <img src={src} alt="" aria-hidden data-testid="collection-art" className={cx(tile, "object-cover")} />;
   const m = monogram(name);
   return (

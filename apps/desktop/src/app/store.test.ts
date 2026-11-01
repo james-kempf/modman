@@ -32,11 +32,13 @@ describe("notices (T16 F5)", () => {
     expect(texts()).toEqual([]);
   });
 
-  it("keeps errors and deploy notices until dismissed", () => {
+  it("closes errors and deploy notices after their timeout too", () => {
     useUi.getState().notify("error", "boom");
     useUi.getState().notify("warn", "deploy?", "g");
-    vi.advanceTimersByTime(60_000);
+    vi.advanceTimersByTime(9_999);
     expect(texts()).toEqual(["boom", "deploy?"]);
+    vi.advanceTimersByTime(1);
+    expect(texts()).toEqual([]);
   });
 
   // Fails when the replaced duplicate's timer dismisses the new one early.

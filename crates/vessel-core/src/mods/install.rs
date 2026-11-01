@@ -54,6 +54,9 @@ pub struct InstallMeta {
 pub struct InstallHooks<'a> {
     pub choose_variant: Option<VariantChooser<'a>>,
     pub fomod: Option<&'a mut dyn FomodResolver>,
+    /// Loaders to check the archive against (built-in definitions when
+    /// unset). A match ends the install with [`ModsError::LoaderArchive`].
+    pub loaders: Option<&'a crate::loaders::LoaderRegistry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,6 +96,60 @@ pub fn find_fomod(root: &Path) -> Option<PathBuf> {
         })
         .min_by_key(|e| e.depth())
         .and_then(|e| e.path().parent()?.parent().map(Path::to_path_buf))
+}
+
+/// Key of the loader that claims the extracted archive at `ext`, if any.
+fn loader_match(
+    game: &GameConfig,
+    ext: &Path,
+    meta: &InstallMeta,
+    registry: Option<&crate::loaders::LoaderRegistry>,
+) -> Option<String> {
+    use crate::loaders::{ArchiveProbe, GameCtx, LoaderRegistry};
+    let built;
+    let registry = match registry {
+        Some(r) => r,
+        None => {
+            let defs = crate::games::definitions::builtin_definitions();
+            let def = game
+                .definition
+                .as_deref()
+                .and_then(|d| crate::games::definitions::find_definition(&defs, d));
+            built = LoaderRegistry::for_game(def, game.definition.as_deref()).ok()?;
+            &built
+        }
+    };
+    let probe = ArchiveProbe {
+        file_name: String::new(),
+        nexus_mod_id: meta.nexus_mod_id,
+        nexus_file_id: meta.nexus_file_id,
+        entries: walkdir::WalkDir::new(ext)
+            .min_depth(1)
+            .follow_links(false)
+            .into_iter()
+            .flatten()
+            .filter_map(|e| {
+                e.path()
+                    .strip_prefix(ext)
+                    .ok()
+                    .and_then(Path::to_str)
+                    .map(str::to_string)
+            })
+            .collect(),
+    };
+    let ctx = GameCtx {
+        game_id: game.id.clone(),
+        nexus_domain: game.nexus_domain.clone(),
+        game_dir: game.folder.clone().unwrap_or_default(),
+        steam_appid: game.appid,
+        occupied: Vec::new(),
+    };
+    match registry.match_archive(&ctx, &probe) {
+        Ok(m) => m.map(|(p, _)| p.key().to_string()),
+        // Two loaders claim it: still not a mod.
+        Err(crate::loaders::LoaderError::AmbiguousMatch(a, _)) => Some(a),
+        Err(_) => None,
+    }
 }
 
 /// Removes the work folder however the install ends.
@@ -157,11 +214,17 @@ pub fn install_archive(
     let ext = work.0.join("x");
     let out = work.0.join("out");
     archive::extract(archive_path, &ext)?;
+    // Loader archives never become mods (staging them under Mods/ is how
+    // SMAPI's installer ended up as a broken "mod").
+    if let Some(loader_key) = loader_match(game, &ext, meta, hooks.loaders) {
+        return Err(ModsError::LoaderArchive { loader_key });
+    }
     let froot = find_fomod(&ext);
     let fomod_found = froot.is_some();
     let InstallHooks {
         choose_variant,
         fomod: resolver,
+        ..
     } = hooks;
     let mut fomod_run = None;
     let mut src = ext.clone();
@@ -604,6 +667,7 @@ mod tests {
         let hooks = InstallHooks {
             choose_variant: None,
             fomod: r,
+            loaders: None,
         };
         install_archive(&mut t.store, &t.game, &data, p, &meta, hooks)
     }

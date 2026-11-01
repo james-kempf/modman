@@ -205,7 +205,7 @@ pub struct Revision {
 }
 
 impl Revision {
-    fn from_value(game: &str, slug: &str, raw: Value) -> R<Self> {
+    pub(crate) fn from_value(game: &str, slug: &str, raw: Value) -> R<Self> {
         let number = num(raw.get("revisionNumber"))
             .ok_or_else(|| CollectionError::NotFound(slug.to_string()))?;
         let c = raw.get("collection").cloned().unwrap_or(Value::Null);

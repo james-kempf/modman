@@ -11,7 +11,6 @@ use std::process::{Command, Stdio};
 use anyhow::{bail, Result};
 use clap::Args;
 use vessel_core::app::nexus as nx;
-use vessel_core::games::{self, steam};
 
 use crate::context::Ctx;
 
@@ -90,31 +89,6 @@ pub fn login(ctx: &mut Ctx, args: LoginArgs) -> Result<()> {
     drop(raw);
     for m in nx::login_msgs(&r) {
         out.say(&m);
-    }
-
-    if games::list_games(ctx.store.conn())?.is_empty() && ctx.is_interactive() {
-        println!();
-        println!("{}", out.bold("Game Setup"));
-        let defs = ctx.definitions()?;
-        let libs = steam::steam_libraries(&ctx.paths.home);
-        let detected: Vec<&str> = defs
-            .iter()
-            .filter(|d| {
-                d.steam_appid
-                    .is_some_and(|id| steam::find_app(&libs, id).is_some())
-            })
-            .map(|d| d.domain.as_str())
-            .collect();
-        if !detected.is_empty() {
-            out.info(&format!("Detected in Steam: {}", detected.join(" ")));
-        }
-        let domain = ctx.ask(
-            "Game domain on Nexus (e.g. cyberpunk2077, skyrimspecialedition)",
-            detected.first().copied().unwrap_or(""),
-        );
-        if !domain.is_empty() {
-            super::game::add(ctx, &domain, None, None, None)?;
-        }
     }
     Ok(())
 }

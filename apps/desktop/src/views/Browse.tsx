@@ -5,27 +5,33 @@
 // wizard dialog), the nxm paste box (Game Mode has no browser handoff) and
 // the download queue.
 
-import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode, type Ref } from "react";
 import { errMsg } from "../app/bridge";
 import { useActiveGame } from "../app/queries";
 import { useBusy, useRun } from "../app/run";
-import { useUi } from "../app/store";
+import { browseDefaults, useUi, type BrowseSession } from "../app/store";
+import { CollectionDetailsDialog, ModDetailsDialog } from "../components/dialogs/BrowseDetails";
 import { readClipboard } from "../components/shell/Osk";
 import {
   ArrowClockwiseIcon,
+  CaretLeftIcon,
+  CaretRightIcon,
   CheckIcon,
   ClipboardTextIcon,
   DownloadSimpleIcon,
+  HardDrivesIcon,
   LinkIcon,
   MagnifyingGlassIcon,
   PackageIcon,
   ThumbsUpIcon,
+  TrashIcon,
   XIcon,
 } from "@phosphor-icons/react";
 import {
   Badge,
   Button,
+  CARD_TILE,
   Card,
   CardSection,
   Empty,
@@ -39,10 +45,12 @@ import {
   ViewFrame,
   ViewHeader,
   bytes,
+  cx,
 } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import type { BrowseKind, BrowsePeriod, BrowseSort, BrowseView, CollectionHit, InstallResult, SearchHit } from "../ipc/types";
-import { collectionText, collectionTone } from "./Collections";
+import { collectionText, collectionTone, removedText } from "./Collections";
+import { uninstalledText } from "./Mods";
 import { installKey } from "./Requirements";
 import { NoGame } from "../components/shell/NoGame";
 
@@ -119,7 +127,6 @@ export function Browse() {
       <ViewHeader
         title="Browse"
         eyebrow={game?.name}
-        description="The top mods and collections on Nexus Mods, of all time or lately, or search them. Install by ID or link, or paste a Mod Manager Download link, further down."
       />
       {isLoading ? null : !game ? (
         // Every install goes into the active game.
@@ -232,7 +239,7 @@ function NxmCard() {
   return (
     <Card title="Mod Manager Download link">
       <CardSection>
-        <p className="mb-5 text-[14px] leading-relaxed text-zinc-400">
+        <p className="mb-5 text-body leading-relaxed text-zinc-400">
           From the "Mod Manager Download" button on Nexus. Links clicked in a browser arrive here by themselves.
         </p>
         <form
@@ -282,51 +289,102 @@ function NxmCard() {
   );
 }
 
+/** Items per browse page (the backend's page size). */
+export const PAGE_SIZE = 24;
+
 /** Items in one browse page. */
 const pageItems = (p: BrowseView) => (p.kind === "mods" ? p.mods.length : p.collections.length);
 
+/** Marks a Browse control whose focus is remembered for the session (value: a stable key). */
+const FOCUS_ATTR = "data-browse-focus";
+
+/** The scrolling view container (App's <main>). */
+const scroller = () => document.querySelector("main");
+
+/** The game's Browse session (defaults for a game without one) and a setter that writes through to the store. */
+function useBrowseSession(game: string) {
+  const stored = useUi((s) => s.browse);
+  const saveBrowse = useUi((s) => s.saveBrowse);
+  const session = stored?.game === game ? stored : browseDefaults(game);
+  return [session, (patch: Partial<Omit<BrowseSession, "game">>) => saveBrowse(game, patch)] as const;
+}
+
 /**
- * The tiles of every loaded page. A ranking that shifts between page loads
- * can list an item again on a later page; it is shown once.
+ * Remembers <main>'s scroll and the focused Browse control while Browse is
+ * shown, saves them when it is left, and puts them back once the listing is
+ * rendered again. Focus is restored only when nothing outside the view (the
+ * tab rail) holds it, so entering Browse from the rail does not steal focus.
  */
-function tiles(pages: BrowseView[], game: string): ReactNode[] {
-  const seen = new Set<string>();
-  const once = (key: string) => !seen.has(key) && !!seen.add(key);
-  return pages.flatMap((p, n) =>
-    p.kind === "mods"
-      ? p.mods
-          .map((m, i) => ({ m, key: m.modId !== null ? `m${m.modId}` : `p${n}-${i}` }))
-          .filter(({ key }) => once(key))
-          .map(({ m, key }) => <ModTile key={key} game={game} m={m} />)
-      : p.collections.filter((c) => once(c.slug)).map((c) => <CollectionTile key={c.slug} game={game} c={c} />),
-  );
+function useBrowsePosition(game: string, ready: boolean) {
+  const saveBrowse = useUi((s) => s.saveBrowse);
+  const pos = useRef({ scroll: 0, focus: null as string | null });
+  const restored = useRef(false);
+
+  // Layout effect: its cleanup runs before the next view's content replaces Browse's (and clamps the scroll).
+  useLayoutEffect(() => {
+    const saved = useUi.getState().browse;
+    if (saved?.game === game) pos.current = { scroll: saved.scroll, focus: saved.focus };
+    const main = scroller();
+    const onScroll = () => {
+      if (restored.current && main) pos.current.scroll = main.scrollTop;
+    };
+    main?.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      main?.removeEventListener("scroll", onScroll);
+      saveBrowse(game, restored.current ? { ...pos.current, scroll: main?.scrollTop ?? pos.current.scroll } : pos.current);
+    };
+  }, [game, saveBrowse]);
+
+  useEffect(() => {
+    if (!ready || restored.current) return;
+    restored.current = true;
+    const main = scroller();
+    const { scroll, focus } = pos.current;
+    if (focus) {
+      const a = document.activeElement;
+      const free = !a || a === document.body || !!main?.contains(a);
+      const el = document.querySelector<HTMLElement>(`[${FOCUS_ATTR}="${focus.replace(/["\\]/g, "\\$&")}"]`);
+      if (free && el) el.focus({ preventScroll: true });
+    }
+    if (main && scroll) main.scrollTop = scroll;
+  }, [ready]);
+
+  /** onFocus for the Browse card: remember the focused control's key. */
+  return (e: FocusEvent) => {
+    const key = (e.target as HTMLElement).closest(`[${FOCUS_ATTR}]`)?.getAttribute(FOCUS_ATTR);
+    if (key) pos.current.focus = key;
+  };
 }
 
 function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
-  const [kind, setKind] = useState<BrowseKind>("mods");
-  const [period, setPeriod] = useState<BrowsePeriod>("all");
-  const [sort, setSort] = useState<BrowseSort>("endorsements");
-  const [draft, setDraft] = useState("");
-  const [text, setText] = useState("");
-  const q = useInfiniteQuery({
-    queryKey: ["browse", game, kind, period, sort, text],
-    queryFn: ({ pageParam }) => ipc.browse({ kind, period, sort, text, offset: pageParam }),
-    initialPageParam: 0,
-    getNextPageParam: (last, pages) => {
-      const shown = pages.reduce((n, p) => n + pageItems(p), 0);
-      return pageItems(last) > 0 && shown < last.total ? shown : undefined;
-    },
+  const [s, save] = useBrowseSession(game);
+  const { kind, period, sort, draft, text, page } = s;
+  // Any change to what is listed starts again at the first page.
+  const refine = (patch: Partial<Omit<BrowseSession, "game">>) => save({ ...patch, page: 0 });
+  const q = useQuery({
+    queryKey: ["browse", game, kind, period, sort, text, page],
+    queryFn: () => ipc.browse({ kind, period, sort, text, offset: page * PAGE_SIZE }),
     enabled: linked,
     staleTime: 5 * 60_000,
+    // The previous page stays up while the next one loads: the pager (and its focus) does not jump away.
+    placeholderData: keepPreviousData,
   });
-  const pages = q.data?.pages ?? [];
-  const total = pages[0]?.total ?? 0;
-  const shown = pages.reduce((n, p) => n + pageItems(p), 0);
+  const onFocus = useBrowsePosition(game, q.isSuccess || !linked);
+  const data = q.data;
+  const total = data?.total ?? 0;
+  const shown = data ? pageItems(data) : 0;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  // The listing shrank under a remembered page (e.g. fewer matches now): go to its last page.
+  useEffect(() => {
+    if (q.isSuccess && !q.isPlaceholderData && page > 0 && shown === 0) save({ page: Math.min(page, pages) - 1 });
+  }, [q.isSuccess, q.isPlaceholderData, page, shown, pages]); // `save` is a fresh closure each render
   const noun = kind === "mods" ? "mods" : "collections";
   const counted = `${total.toLocaleString()} ${total === 1 ? noun.slice(0, -1) : noun}`;
   const sortLabel = SORTS.find((o) => o.value === sort)!.label.toLowerCase();
+  const first = page * PAGE_SIZE;
   return (
     <Card
+      onFocus={onFocus}
       title={kind === "mods" ? "Mods on Nexus" : "Collections on Nexus"}
       intro={
         q.isSuccess
@@ -336,21 +394,21 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
     >
       <CardSection className="grid gap-5">
         <div className="flex flex-wrap items-end gap-x-6 gap-y-4">
-          <Segmented label="Show" value={kind} options={KINDS} onChange={setKind} />
-          <Segmented label="Created" value={period} options={PERIODS} onChange={setPeriod} />
-          <Select label="Sort" value={sort} options={SORTS} onChange={setSort} />
+          <Segmented label="Show" value={kind} options={KINDS} onChange={(v) => refine({ kind: v })} />
+          <Segmented label="Created" value={period} options={PERIODS} onChange={(v) => refine({ period: v })} />
+          <Select label="Sort" value={sort} options={SORTS} onChange={(v) => refine({ sort: v })} />
         </div>
         <form
           className="flex flex-wrap items-end gap-3"
           onSubmit={(e) => {
             e.preventDefault();
-            setText(draft.trim());
+            refine({ text: draft.trim() });
           }}
         >
           <TextField
             label="Search"
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => save({ draft: e.target.value })}
             className="min-w-0 flex-[1_1_18rem]"
             placeholder={kind === "mods" ? "Search mod names" : "Search collections"}
           />
@@ -358,14 +416,7 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
             Search
           </Button>
           {text && (
-            <Button
-              tone="ghost"
-              icon={<XIcon aria-hidden size={16} />}
-              onClick={() => {
-                setDraft("");
-                setText("");
-              }}
-            >
+            <Button tone="ghost" icon={<XIcon aria-hidden size={16} />} onClick={() => refine({ draft: "", text: "" })}>
               Clear
             </Button>
           )}
@@ -391,19 +442,42 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
           </Empty>
         ) : (
           <>
-            <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-label={kind === "mods" ? "Mods" : "Collections"}>
-              {tiles(pages, game)}
+            <ul
+              className={cx("@container grid gap-4 sm:grid-cols-2", kind === "mods" && "xl:grid-cols-3")}
+              aria-label={kind === "mods" ? "Mods" : "Collections"}
+              aria-busy={q.isPlaceholderData || undefined}
+            >
+              {data!.kind === "mods"
+                ? data!.mods.map((m, i) => <ModTile key={m.modId !== null ? `m${m.modId}` : `i${i}`} game={game} m={m} />)
+                : data!.collections.map((c) => <CollectionTile key={c.slug} game={game} c={c} />)}
             </ul>
-            <div className="mt-5 flex flex-wrap items-center gap-4">
-              <span className="font-mono text-caption text-dim">
-                {shown.toLocaleString()} of {total.toLocaleString()}
+            <nav className="mt-5 flex flex-wrap items-center gap-4" aria-label={`${kind === "mods" ? "Mods" : "Collections"} pages`}>
+              {/* inactive, not disabled: focus stays on the button at the first/last page. */}
+              <Button
+                size="sm"
+                {...{ [FOCUS_ATTR]: "page:prev" }}
+                inactive={page === 0}
+                busy={q.isPlaceholderData && q.isFetching}
+                icon={<CaretLeftIcon aria-hidden size={15} />}
+                onClick={() => save({ page: page - 1 })}
+              >
+                Previous
+              </Button>
+              <span className="font-mono text-caption text-dim" aria-live="polite">
+                Page {page + 1} of {pages.toLocaleString()} · {(first + 1).toLocaleString()}–
+                {(first + shown).toLocaleString()} of {total.toLocaleString()}
               </span>
-              {q.hasNextPage && (
-                <Button busy={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>
-                  Load more
-                </Button>
-              )}
-            </div>
+              <Button
+                size="sm"
+                {...{ [FOCUS_ATTR]: "page:next" }}
+                inactive={page + 1 >= pages}
+                busy={q.isPlaceholderData && q.isFetching}
+                onClick={() => save({ page: page + 1 })}
+              >
+                Next
+                <CaretRightIcon aria-hidden size={15} />
+              </Button>
+            </nav>
           </>
         )}
       </CardSection>
@@ -411,70 +485,222 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
   );
 }
 
-/** One browse result: picture, name and byline, summary, stats, the install action. */
+/**
+ * One browse result: a single focusable card (picture, name and byline,
+ * summary, stats, status badges) styled and highlighted like the Games tiles.
+ * Activating it opens the item's details dialog, which holds its actions.
+ */
 function Tile({
   picture,
   name,
   byline,
   summary,
   stats,
-  action,
+  badges,
+  focusKey,
+  onOpen,
+  cardRef,
+  dialog,
+  horizontal = false,
 }: {
+  horizontal?: boolean;
   picture: ReactNode;
   name: string;
   byline: string;
   summary: string | null;
   stats: ReactNode;
-  action: ReactNode;
+  /** Non-interactive status badges (Installed, ...). */
+  badges: ReactNode;
+  /** The card's session focus key ([data-browse-focus]). */
+  focusKey: string;
+  onOpen: () => void;
+  cardRef: Ref<HTMLButtonElement>;
+  /** The open details dialog (portalled), if any. */
+  dialog: ReactNode;
 }) {
-  return (
-    <li className="flex min-w-0 flex-col gap-3 rounded-card-lg border border-hairline bg-ink p-2.5 pb-3.5">
-      {picture}
-      <div className="flex min-w-0 flex-1 flex-col px-1.5">
-        <span className="block truncate text-[15.5px] font-medium text-zinc-100" title={name}>
-          {name}
+  const statusId = useId();
+  const text = (
+    <>
+      <span className="block shrink-0 truncate text-[15.5px] font-medium text-zinc-100" title={name}>
+        {name}
+      </span>
+      <span className="block shrink-0 truncate font-mono text-[11.5px] text-dim">{byline}</span>
+      {summary && (
+        <span
+          data-testid="tile-summary"
+          className={cx(
+            "mt-2 block min-h-0 overflow-hidden text-ellipsis text-label leading-relaxed text-zinc-400",
+            horizontal ? "line-clamp-4 shrink" : "line-clamp-2",
+          )}
+        >
+          {summary}
         </span>
-        <span className="block truncate font-mono text-[11.5px] text-dim">{byline}</span>
-        {summary && <p className="mt-2 line-clamp-2 text-[13px] leading-relaxed text-zinc-400">{summary}</p>}
-        <div className="mt-auto flex flex-wrap items-center gap-x-4 gap-y-2 pt-3">
-          {stats}
-          <span className="ml-auto">{action}</span>
-        </div>
-      </div>
+      )}
+      <span className="mt-auto flex min-w-0 shrink-0 flex-wrap items-center gap-x-4 gap-y-2 pt-3">
+        {stats}
+        <span id={statusId} className={cx("flex flex-wrap items-center gap-1.5 empty:hidden", !horizontal && "ml-auto")}>
+          {badges}
+        </span>
+      </span>
+    </>
+  );
+  return (
+    <li className="min-w-0">
+      <button
+        ref={cardRef}
+        type="button"
+        aria-label={name}
+        aria-describedby={statusId}
+        aria-haspopup="dialog"
+        {...{ [FOCUS_ATTR]: focusKey }}
+        onClick={onOpen}
+        className={cx(CARD_TILE, "border-hairline bg-ink", horizontal ? "flex-row" : "flex-col pb-3.5")}
+      >
+        {picture}
+        {horizontal ? (
+          // Collections: the picture alone sets the card's height. The text sits absolutely in the column beside
+          // it, so a long summary never makes the card taller; it shrinks (clipped, ellipsis) between the fixed
+          // title/byline and the stats/badges row.
+          <span className="relative min-w-0 flex-1 self-stretch">
+            <span className="absolute inset-0 flex flex-col overflow-hidden px-1.5 py-1">{text}</span>
+          </span>
+        ) : (
+          <span className="flex min-w-0 flex-1 flex-col self-stretch px-1.5">{text}</span>
+        )}
+      </button>
+      {dialog}
     </li>
   );
 }
 
 function Stat({ icon, value, label }: { icon: ReactNode; value: string; label: string }) {
   return (
-    <span className="flex items-center gap-1.5 font-mono text-[11.5px] text-dim">
-      {icon}
-      {value}
+    <span className="flex min-w-0 items-center justify-start gap-1.5 font-mono text-[11.5px] text-dim">
+      <span className="shrink-0">{icon}</span>
+      <span className="truncate">{value}</span>
       <span className="sr-only">{label}</span>
     </span>
   );
 }
 
-function InstalledMark({ children = "Installed" }: { children?: ReactNode }) {
+function InstalledBadge() {
   return (
-    <span className="flex min-h-11 items-center gap-1.5 px-2 text-[13px] text-accent-300">
-      <CheckIcon aria-hidden size={14} weight="bold" /> {children}
-    </span>
+    <Badge tone="accent">
+      <CheckIcon aria-hidden size={12} weight="bold" />
+      Installed
+    </Badge>
   );
 }
 
-const PICTURE = "aspect-video w-full rounded-card";
+/** Shown on a card while its install/remove runs (the dialog may be closed by then). */
+function WorkingBadge() {
+  return <Badge>Working…</Badge>;
+}
+
+/**
+ * What an installed item's Remove takes away. Routed by kind in `useRemove`
+ * (a loader-installed item gets its own kind and route).
+ */
+export type Removable =
+  | { kind: "mod"; nexusId: number; name: string }
+  | { kind: "loader"; loaderKey: string; nexusId: number; name: string }
+  | { kind: "collection"; slug: string; name: string };
+
+/** The run label/busy key of removing an item (shared with its install where the views share one). */
+const removeKey = (r: Removable) => (r.kind === "collection" ? `Collection ${r.slug}` : installKey(String(r.nexusId)));
+
+/** Remove an installed browse item; the backend asks for confirmation (the app's confirm prompt). */
+function useRemove(game: string) {
+  const run = useRun();
+  const qc = useQueryClient();
+  const notify = useUi((s) => s.notify);
+  const openConsent = useUi((s) => s.openLoaderConsent);
+  return async (r: Removable) => {
+    const key = removeKey(r);
+    switch (r.kind) {
+      case "loader": {
+        // A loader has no mods row: uninstall it through its consent flow (the consent refreshes every view).
+        const preview = await run("Uninstall", () => ipc.loaderPreview({ op: "uninstall", loaderKey: r.loaderKey }, game), { key });
+        if (preview) openConsent({ game, preview });
+        return;
+      }
+      case "mod": {
+        // A bare Nexus id resolves to the installed mod.
+        const res = await run("Uninstall", () => ipc.modsUninstall([String(r.nexusId)], false), { key });
+        if (!res) return;
+        notify(res.done ? "success" : "info", uninstalledText(res, r.name));
+        break;
+      }
+      case "collection": {
+        const res = await run("Remove collection", () => ipc.collectionRemove(r.slug, false), { key });
+        if (!res) return;
+        notify(res.removed ? "success" : "info", removedText(r.slug, res));
+        void qc.invalidateQueries({ queryKey: ["collections", game] });
+        break;
+      }
+    }
+    void qc.invalidateQueries({ queryKey: ["browse", game] });
+  };
+}
+
+/** The details dialog's Remove: the backend (or the loader consent) confirms. */
+function RemoveButton({ game, item }: { game: string; item: Removable }) {
+  const remove = useRemove(game);
+  const busy = useBusy(removeKey(item));
+  return (
+    <Button
+      tone="danger"
+      busy={busy}
+      aria-label={`Remove ${item.name}`}
+      icon={<TrashIcon aria-hidden size={16} />}
+      onClick={() => void remove(item)}
+    >
+      Remove
+    </Button>
+  );
+}
+
+/** Open/close state of a card's details dialog, and the card it returns focus to. */
+function useDetails() {
+  const [open, setOpen] = useState(false);
+  const card = useRef<HTMLButtonElement>(null);
+  return { open, card, show: () => setOpen(true), hide: () => setOpen(false) };
+}
+
+// Mod pictures fill the tile's width at 16:9 (Nexus tile art). Collection pictures are 4:5 portrait, left of the
+// text, and their width is a mod picture's height. The results <ul> is the container
+// (100cqw), and the mod tile's picture width is its column (mods: 1 / sm 2 / xl 3, gap-4 = 1rem) less the tile's
+// p-2.5 and 1px border (1.25rem + 2px); times 9/16 is that picture's height. Keep in step with the grid and Tile.
+// The monogram fallback takes the same box, so a picture arriving never shifts the grid.
+// self-start: the horizontal tile's row stretches its items to the text column's (or grid row's) height, and a
+// stretched cross size overrides aspect-ratio when the width is fixed, so the picture would grow past 4:5.
+const MOD_PICTURE = "aspect-video w-full shrink-0 rounded-card";
+const COLLECTION_PICTURE = cx(
+  "aspect-[4/5] shrink-0 self-start rounded-card",
+  "w-[calc((100cqw-1.25rem-2px)*9/16)]",
+  "sm:w-[calc(((100cqw-1rem)/2-1.25rem-2px)*9/16)]",
+  "xl:w-[calc(((100cqw-2rem)/3-1.25rem-2px)*9/16)]",
+);
 
 function ModTile({ game, m }: { game: string; m: SearchHit }) {
   const run = useRun();
   const qc = useQueryClient();
   const notify = useUi((s) => s.notify);
   const installing = useUi((s) => s.busy);
+  const details = useDetails();
   const name = m.name ?? `Mod ${m.modId ?? "?"}`;
   const key = installKey(String(m.modId));
+  const busy = (installing[key] ?? 0) > 0;
+  const installed = m.installed && m.modId !== null;
+  const install = async () => {
+    const r = await run("Install", () => ipc.install({ target: String(m.modId), fomod: "ask" }), { key });
+    if (!r) return;
+    notify("success", installedText(r));
+    void qc.invalidateQueries({ queryKey: ["browse", game] });
+  };
   return (
     <Tile
-      picture={<Picture url={m.thumbnailUrl} name={name} className={PICTURE} />}
+      picture={<Picture url={m.thumbnailUrl} name={name} className={MOD_PICTURE} />}
       name={name}
       byline={[m.version ? `v${m.version.replace(/^v/i, "")}` : null, m.author, m.category].filter(Boolean).join(" · ")}
       summary={m.summary}
@@ -484,25 +710,41 @@ function ModTile({ game, m }: { game: string; m: SearchHit }) {
           <Stat icon={<ThumbsUpIcon aria-hidden size={13} />} value={compact(m.endorsements)} label="endorsements" />
         </>
       }
-      action={
-        m.installed ? (
-          <InstalledMark />
-        ) : (
-          <Button
-            size="sm"
-            tone="primary"
-            disabled={m.modId === null}
-            busy={(installing[key] ?? 0) > 0}
-            aria-label={`Install ${name}`}
-            onClick={async () => {
-              const r = await run("Install", () => ipc.install({ target: String(m.modId), fomod: "ask" }), { key });
-              if (!r) return;
-              notify("success", installedText(r));
-              void qc.invalidateQueries({ queryKey: ["browse", game] });
-            }}
-          >
-            Install
-          </Button>
+      badges={
+        <>
+          {busy && <WorkingBadge />}
+          {installed && <InstalledBadge />}
+        </>
+      }
+      focusKey={`m${m.modId ?? name}`}
+      onOpen={details.show}
+      cardRef={details.card}
+      dialog={
+        details.open && (
+          <ModDetailsDialog
+            m={m}
+            onClose={details.hide}
+            returnFocus={details.card.current}
+            actions={
+              installed ? (
+                <RemoveButton
+                  game={game}
+                  item={m.loader ? { kind: "loader", loaderKey: m.loader, nexusId: m.modId!, name } : { kind: "mod", nexusId: m.modId!, name }}
+                />
+              ) : (
+                <Button
+                  tone="primary"
+                  disabled={m.modId === null}
+                  busy={busy}
+                  aria-label={`Install ${name}`}
+                  icon={<DownloadSimpleIcon aria-hidden size={16} />}
+                  onClick={() => void install()}
+                >
+                  Install
+                </Button>
+              )
+            }
+          />
         )
       }
     />
@@ -514,9 +756,12 @@ function CollectionTile({ game, c }: { game: string; c: CollectionHit }) {
   const qc = useQueryClient();
   const notify = useUi((s) => s.notify);
   const installing = useUi((s) => s.busy);
+  const details = useDetails();
   // The same key as the Collections view's actions on this collection.
   const key = `Collection ${c.slug}`;
-  const behind = c.installed_revision !== null && c.revision !== null && c.installed_revision < c.revision;
+  const busy = (installing[key] ?? 0) > 0;
+  const installed = c.installed_revision !== null;
+  const behind = installed && c.revision !== null && c.installed_revision! < c.revision;
   const act = async (update: boolean) => {
     const r = await run(
       update ? "Update collection" : "Install collection",
@@ -530,32 +775,60 @@ function CollectionTile({ game, c }: { game: string; c: CollectionHit }) {
   };
   return (
     <Tile
-      picture={<Picture url={c.image_url} name={c.name} className={PICTURE} />}
+      horizontal
+      picture={<Picture url={c.image_url} name={c.name} className={COLLECTION_PICTURE} />}
       name={c.name}
       byline={[c.author, c.category, c.revision !== null ? `revision ${c.revision}` : null].filter(Boolean).join(" · ")}
       summary={c.summary}
       stats={
-        <>
-          {c.mod_count !== null && (
-            <Stat icon={<PackageIcon aria-hidden size={13} />} value={`${c.mod_count} · ${bytes(c.total_size)}`} label="mods, size" />
-          )}
-          <Stat icon={<DownloadSimpleIcon aria-hidden size={13} />} value={compact(c.downloads)} label="downloads" />
+        // 2x2, row by row: likes, installs / size, mods.
+        <span className="grid min-w-0 flex-1 grid-cols-2 gap-x-4 gap-y-1">
           <Stat icon={<ThumbsUpIcon aria-hidden size={13} />} value={compact(c.endorsements)} label="endorsements" />
+          <Stat icon={<DownloadSimpleIcon aria-hidden size={13} />} value={compact(c.downloads)} label="downloads" />
+          <Stat icon={<HardDrivesIcon aria-hidden size={13} />} value={bytes(c.total_size)} label="size" />
+          <Stat icon={<PackageIcon aria-hidden size={13} />} value={c.mod_count !== null ? String(c.mod_count) : "?"} label="mods" />
+        </span>
+      }
+      badges={
+        <>
+          {busy && <WorkingBadge />}
+          {installed && <InstalledBadge />}
+          {behind && <Badge tone="amber">Update</Badge>}
         </>
       }
-      action={
-        c.installed_revision !== null && !behind ? (
-          <InstalledMark />
-        ) : (
-          <Button
-            size="sm"
-            tone="primary"
-            busy={(installing[key] ?? 0) > 0}
-            aria-label={`${behind ? "Update" : "Install"} ${c.name}`}
-            onClick={() => void act(behind)}
-          >
-            {behind ? `Update to ${c.revision}` : "Install"}
-          </Button>
+      focusKey={`c${c.slug}`}
+      onOpen={details.show}
+      cardRef={details.card}
+      dialog={
+        details.open && (
+          <CollectionDetailsDialog
+            game={game}
+            c={c}
+            onClose={details.hide}
+            returnFocus={details.card.current}
+            actions={
+              installed ? (
+                <>
+                  {behind && (
+                    <Button tone="primary" busy={busy} aria-label={`Update ${c.name}`} onClick={() => void act(true)}>
+                      Update to {c.revision}
+                    </Button>
+                  )}
+                  <RemoveButton game={game} item={{ kind: "collection", slug: c.slug, name: c.name }} />
+                </>
+              ) : (
+                <Button
+                  tone="primary"
+                  busy={busy}
+                  aria-label={`Install ${c.name}`}
+                  icon={<DownloadSimpleIcon aria-hidden size={16} />}
+                  onClick={() => void act(false)}
+                >
+                  Install
+                </Button>
+              )
+            }
+          />
         )
       }
     />

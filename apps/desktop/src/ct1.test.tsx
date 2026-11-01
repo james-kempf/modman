@@ -35,7 +35,7 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("CT1 D01 Overview long names", () => {
   // Fails when an Overview grid track is `1fr`/`auto` (min-content): an unbroken mod name widens <main>.
-  it("every Overview grid uses minmax(0, ...) tracks", async () => {
+  it("every Overview grid uses min-0 tracks (minmax(0, ...) or numeric grid-cols-N)", async () => {
     await open("overview", {
       mods_list: () => ({ mods: [mod({ name: "x".repeat(140) })], changed_since_deploy: false }),
     });
@@ -44,11 +44,18 @@ describe("CT1 D01 Overview long names", () => {
     // The page grid, the hero row and the summary-card row.
     const grids = [root, ...root.querySelectorAll<HTMLElement>(":scope > .stagger")];
     expect(grids).toHaveLength(3);
+    // Numeric `grid-cols-N` compiles to repeat(N, minmax(0, 1fr)), so it is as safe as an explicit minmax(0, ...).
+    const minTrack = /^(?:minmax\(0,[^()]+\)|repeat\(\d+,minmax\(0,[^()]+\)\))$/;
+    const safe = (value: string) =>
+      /^\d+$/.test(value) || (/^\[.+\]$/.test(value) && value.slice(1, -1).split("_").every((t) => minTrack.test(t)));
     for (const g of grids) {
       expect(g.className).toMatch(/(?:^|\s)grid-cols-\[minmax\(0,1fr\)\]/);
-      expect(g.className).not.toMatch(/(?:^|\s)(?:md:|lg:|xl:)?grid-cols-[23](?:\s|$)/);
-      expect(g.className).not.toMatch(/grid-cols-\[1\.35fr/);
+      const values = g.className.split(/\s+/).flatMap((c) => c.match(/^(?:[\w-]+:)*grid-cols-(.+)$/)?.slice(1) ?? []);
+      expect(values.length).toBeGreaterThan(0);
+      for (const v of values) expect(safe(v), `unsafe grid-cols-${v}`).toBe(true);
     }
+    // Guard the guard: bare 1fr/auto tracks must still be rejected.
+    for (const bad of ["[1fr]", "[1.35fr_1fr]", "[auto_1fr]", "[repeat(2,1fr)]", "none"]) expect(safe(bad), bad).toBe(false);
     expect(screen.getByRole("region", { name: "Skyrim Special Edition" }).className).toMatch(/minmax\(0,1\.35fr\)/);
   });
 });

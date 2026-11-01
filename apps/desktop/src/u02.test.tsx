@@ -295,12 +295,42 @@ describe("Collections art", () => {
     expect(art).toHaveAttribute("src", JPEG);
     expect(art.closest("li")).toHaveTextContent("Coll abc");
     await waitFor(() => expect(screen.getByTestId("collection-monogram").closest("li")).toHaveTextContent("Coll noart"));
+    // Portrait 9:16, sized by width so the row does not grow; the fallback matches so nothing shifts.
+    for (const el of [art, screen.getByTestId("collection-monogram")]) {
+      expect(el.className).toMatch(/\baspect-\[9\/16\]/);
+      expect(el.className).toMatch(/\bw-16\b/);
+      expect(el.className).not.toMatch(/\bsize-/);
+    }
+    expect(art.className).toMatch(/\bobject-cover\b/);
     expect(t.callsOf("collection_art")).toEqual(
       expect.arrayContaining([
         { game: "skyrimspecialedition", slug: "abc" },
         { game: "skyrimspecialedition", slug: "noart" },
       ]),
     );
+  });
+});
+
+describe("Mods thumbnails", () => {
+  // Fails when a mod picture is square/stretched again, or the monogram fallback has a different box (layout shift).
+  it("are 16:9 landscape and cropped, image or monogram", async () => {
+    await open("mods", {
+      mods_list: () => ({
+        mods: [mod({ name: "SkyUI", nexus_mod_id: 12604, position: 1 }), mod({ name: "Local", position: 2 })],
+        changed_since_deploy: false,
+      }),
+      thumbnail: () => JPEG,
+    });
+    const list = await screen.findByRole("list", { name: "Load order" });
+    await waitFor(() => expect(within(list).getAllByTestId("mod-thumb")[0].tagName).toBe("IMG"));
+    const [img, mono] = within(list).getAllByTestId("mod-thumb");
+    expect(mono.tagName).toBe("SPAN");
+    for (const el of [img, mono]) {
+      expect(el.className).toMatch(/\baspect-video\b/);
+      expect(el.className).toMatch(/\bh-thumb\b/);
+      expect(el.className).not.toMatch(/\bsize-thumb\b/);
+    }
+    expect(img.className).toMatch(/\bobject-cover\b/);
   });
 });
 

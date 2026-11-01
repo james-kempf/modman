@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::Serialize;
 
+use vessel_core::app::loaders::Recovered;
 use vessel_core::app::nxm::{self as appnxm, Accepted};
 use vessel_core::app::{chain, AppError, Cx, R};
 use vessel_core::autoupdate::StartupCheck;
@@ -20,24 +21,35 @@ use crate::events::{self, JobState, Sink};
 use crate::gui_ui::GuiUi;
 use crate::prompt::Prompts;
 
-/// Error returned to the webview: a message only (never a key, never a
-/// query string; core errors redact both).
+/// Error returned to the webview: a message (never a key, never a query
+/// string; core errors redact both) and, for typed errors, a stable `code`
+/// the UI maps to a title and an action (`ipc/loaderErrors.ts`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CmdError {
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<&'static str>,
 }
 
 impl CmdError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            code: None,
         }
     }
 }
 
 impl From<AppError> for CmdError {
     fn from(e: AppError) -> Self {
-        Self::new(chain(&e))
+        let code = match &e {
+            AppError::Core(c) => c.code(),
+            _ => None,
+        };
+        Self {
+            message: chain(&e),
+            code,
+        }
     }
 }
 
@@ -56,6 +68,8 @@ pub struct Inner {
     next_job: AtomicU64,
     /// The one auto-update check at start.
     pub startup: OnceLock<Option<StartupCheck>>,
+    /// Loader runs startup recovery finished (a rollback may be offered).
+    pub loader_recovered: OnceLock<Vec<Recovered>>,
     nxm: Mutex<NxmQueue>,
 }
 
@@ -70,6 +84,7 @@ impl AppState {
             prompts: Prompts::default(),
             next_job: AtomicU64::new(0),
             startup: OnceLock::new(),
+            loader_recovered: OnceLock::new(),
             nxm: Mutex::new(NxmQueue::default()),
         }))
     }
@@ -173,9 +188,12 @@ impl Inner {
                 for a in rx {
                     let still_queued = me.open_store().is_ok_and(|s| appnxm::is_queued(&s, a.row));
                     if still_queued {
-                        let _ = me.job(sink.clone(), "nxm", None, true, |cx| {
+                        let r = me.job(sink.clone(), "nxm", None, true, |cx| {
                             appnxm::process(cx, &a)
                         });
+                        if let Ok(p) = &r {
+                            events::emit_loader_pending(&*sink, p);
+                        }
                     }
                 }
             })
@@ -209,5 +227,18 @@ mod tests {
         assert_eq!(jobs[1]["state"], "failed");
         assert_eq!(jobs[1]["kind"], "deploy");
         assert_eq!(jobs[0]["id"], jobs[1]["id"]);
+    }
+
+    /// Catches: a loader error reaching the webview without its code, and
+    /// plain errors growing a `code: null` field.
+    #[test]
+    fn loader_errors_serialize_their_code() {
+        use vessel_core::loaders::LoaderError;
+        let e = CmdError::from(AppError::from(LoaderError::GameRunning { pid: 7 }));
+        let v = serde_json::to_value(&e).unwrap();
+        assert_eq!(v["code"], "loader_game_running");
+        assert!(v["message"].as_str().unwrap().contains("pid 7"));
+        let plain = serde_json::to_value(CmdError::new("x")).unwrap();
+        assert!(plain.get("code").is_none(), "{plain}");
     }
 }

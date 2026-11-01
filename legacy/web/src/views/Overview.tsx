@@ -77,7 +77,7 @@ export function Overview() {
         <motion.div custom={1} variants={rise} className="flex flex-col justify-between gap-8 rounded-[2rem] border border-white/[0.06] bg-ink-2 p-7 md:p-9">
           <div>
             <div className="eyebrow">Deployment</div>
-            <p className="mt-3 max-w-[40ch] text-[15px] leading-relaxed text-zinc-400">
+            <p className="mt-3 max-w-[40ch] text-lead leading-relaxed text-zinc-400">
               {game.changedSinceDeploy
                 ? 'You changed mods since the last deploy. Deploy to apply them to the game folder.'
                 : game.deployed
@@ -120,11 +120,11 @@ export function Overview() {
             <>
               <div className="mt-5 flex items-baseline gap-2">
                 <span className="font-mono text-4xl font-medium tracking-tight text-amber-300">{problems.length}</span>
-                <span className="text-[14px] text-zinc-400">need attention</span>
+                <span className="text-body text-zinc-400">need attention</span>
               </div>
               <ul className="mt-5 grid gap-2.5">
                 {problems.slice(0, 3).map((p) => (
-                  <li key={p.key} className="flex items-center gap-2.5 text-[14px] text-zinc-300">
+                  <li key={p.key} className="flex items-center gap-2.5 text-body text-zinc-300">
                     <WarningIcon size={14} className={p.status === 'missing' ? 'text-rose-300' : 'text-amber-300'} />
                     <span className="truncate">{p.name}</span>
                     <span className="ml-auto font-mono text-[11px] text-zinc-500">{p.by.length} mods</span>
@@ -135,10 +135,10 @@ export function Overview() {
           ) : (
             <div className="mt-5">
               <span className="font-mono text-4xl font-medium tracking-tight text-accent-300">{deps.filter((d) => d.status === 'ok').length}</span>
-              <p className="mt-2 text-[14px] text-zinc-400">requirements present. Nothing missing.</p>
+              <p className="mt-2 text-body text-zinc-400">requirements present. Nothing missing.</p>
             </div>
           )}
-          <span className="mt-auto flex items-center gap-1.5 pt-6 text-[13px] text-zinc-500 transition-colors group-hover:text-zinc-300">
+          <span className="mt-auto flex items-center gap-1.5 pt-6 text-label text-zinc-500 transition-colors group-hover:text-zinc-300">
             Open requirements <ArrowRightIcon size={13} />
           </span>
         </motion.button>
@@ -153,7 +153,7 @@ export function Overview() {
             <span className="text-[17px] font-medium text-zinc-100">{state.autoupdate.scheduler ? 'On' : 'Off'}</span>
             {state.autoupdate.scheduler && <Chip>{state.autoupdate.scheduler}</Chip>}
           </div>
-          <p className="mt-3 text-[14px] leading-relaxed text-zinc-400">
+          <p className="mt-3 text-body leading-relaxed text-zinc-400">
             {state.autoupdate.scheduler
               ? <>Updates mods and redeploys after system or Steam updates. Last run {ago(game.autoupdate.lastOk)}{game.autoupdate.failed && <span className="text-rose-300"> (failed)</span>}.</>
               : 'Turn it on to keep mods updated and redeployed after system or game updates.'}
@@ -172,7 +172,7 @@ export function Overview() {
           <span className="eyebrow">Enabled</span>
           <div className="mt-5 flex items-baseline gap-2">
             <span className="font-mono text-4xl font-medium tracking-tight text-zinc-50">{enabledPct}</span>
-            <span className="text-[14px] text-zinc-400">% of mods enabled</span>
+            <span className="text-body text-zinc-400">% of mods enabled</span>
           </div>
           <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/[0.05]">
             <motion.div
@@ -182,7 +182,7 @@ export function Overview() {
               transition={{ ...snappy, delay: 0.05 }}
             />
           </div>
-          <p className="mt-4 text-[14px] text-zinc-400">
+          <p className="mt-4 text-body text-zinc-400">
             {game.mods - game.enabled > 0 ? `${game.mods - game.enabled} disabled mods stay staged but are not deployed.` : 'Every installed mod is enabled.'}
           </p>
         </motion.div>
@@ -190,7 +190,7 @@ export function Overview() {
         <motion.div custom={5} variants={rise} className="surface p-7 md:col-span-6 lg:col-span-8">
           <div className="flex items-center justify-between">
             <span className="eyebrow">Recently installed</span>
-            <button onClick={() => go('mods')} className="flex items-center gap-1.5 text-[13px] text-zinc-500 hover:text-zinc-300">All mods <ArrowRightIcon size={13} /></button>
+            <button onClick={() => go('mods')} className="flex items-center gap-1.5 text-label text-zinc-500 hover:text-zinc-300">All mods <ArrowRightIcon size={13} /></button>
           </div>
           {recent.length ? (
             <ul className="mt-4 divide-y divide-white/[0.05]">
@@ -206,7 +206,7 @@ export function Overview() {
               ))}
             </ul>
           ) : (
-            <p className="mt-4 text-[14px] text-zinc-500">No mods yet. <button onClick={() => go('install')} className="text-accent-300 hover:text-accent-200">Get some</button>.</p>
+            <p className="mt-4 text-body text-zinc-500">No mods yet. <button onClick={() => go('install')} className="text-accent-300 hover:text-accent-200">Get some</button>.</p>
           )}
         </motion.div>
 
@@ -222,7 +222,7 @@ export function Overview() {
               ))}
             </ul>
           ) : (
-            <p className="mt-4 text-[14px] leading-relaxed text-zinc-500">No collections. Install one from a Nexus collection URL.</p>
+            <p className="mt-4 text-body leading-relaxed text-zinc-500">No collections. Install one from a Nexus collection URL.</p>
           )}
           <Button size="sm" variant="ghost" className={cx('mt-auto self-start', state.collections.length ? 'translate-y-2' : '')} onClick={() => go('collections')}>
             Manage <ArrowRightIcon size={13} />

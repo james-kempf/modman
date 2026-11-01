@@ -66,8 +66,8 @@ export function Requirements() {
             <section key={g.title}>
               <div className="mb-4 flex items-baseline gap-3 border-b border-white/[0.05] pb-3">
                 <h2 className="text-[17px] font-medium tracking-tight text-zinc-100">{g.title}</h2>
-                <span className="font-mono text-[12px] text-zinc-500">{g.items.length}</span>
-                {g.blurb && <p className="ml-auto hidden max-w-[52ch] text-right text-[13px] text-zinc-500 md:block">{g.blurb}</p>}
+                <span className="font-mono text-caption text-zinc-500">{g.items.length}</span>
+                {g.blurb && <p className="ml-auto hidden max-w-[52ch] text-right text-label text-zinc-500 md:block">{g.blurb}</p>}
               </div>
               <ul className={cx('grid gap-3', g.items.length > 1 && 'lg:grid-cols-2')}>
                 {g.items.map((d, i) => (
@@ -110,9 +110,9 @@ function RequirementCard({ dep, busy, run }: { dep: Requirement; busy: boolean; 
             {dep.key.startsWith('tool:') && <Chip>loader</Chip>}
             {dep.acked && <Chip tone="accent">marked installed</Chip>}
           </div>
-          {dep.detail && <p className="mt-1 text-[13px] text-zinc-500">{dep.detail}</p>}
+          {dep.detail && <p className="mt-1 text-label text-zinc-500">{dep.detail}</p>}
           {dep.by.length > 0 && (
-            <p className="mt-2 text-[13px] leading-relaxed text-zinc-400">
+            <p className="mt-2 text-label leading-relaxed text-zinc-400">
               Needed by {by.join(', ')}
               {dep.by.length > 3 && !showAll && (
                 <button onClick={() => setShowAll(true)} className="ml-1 text-zinc-300 underline decoration-white/20 underline-offset-2 hover:decoration-white/60">+{dep.by.length - 3} more</button>
@@ -130,7 +130,7 @@ function RequirementCard({ dep, busy, run }: { dep: Requirement; busy: boolean; 
                 <Button size="sm" variant="primary" disabled={busy} onClick={() => run(['enable', target], { label: `Enable ${dep.name}` })}>Enable</Button>
               )}
               {dep.urls.map((u) => (
-                <a key={u} href={u} target="_blank" rel="noreferrer" className="inline-flex h-9 max-w-full items-center gap-1.5 rounded-xl bg-white/[0.06] px-3 text-[13px] text-zinc-200 hover:bg-white/[0.1]">
+                <a key={u} href={u} target="_blank" rel="noreferrer" className="inline-flex h-9 max-w-full items-center gap-1.5 rounded-xl bg-white/[0.06] px-3 text-label text-zinc-200 hover:bg-white/[0.1]">
                   <ArrowSquareOutIcon size={14} className="shrink-0" /><span className="truncate">{u.replace(/^https?:\/\/(www\.)?/, '')}</span>
                 </a>
               ))}

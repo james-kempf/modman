@@ -77,6 +77,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "game_identity",
         sql: include_str!("../migrations/0006_game_identity.sql"),
     },
+    Migration {
+        version: 7,
+        name: "loaders",
+        sql: include_str!("../migrations/0007_loaders.sql"),
+    },
 ];
 
 /// Highest schema version this binary knows.
@@ -275,6 +280,10 @@ mod tests {
         "deps_ack",
         "autoupdate_state",
         "autoupdate_runs",
+        "loader_installs",
+        "loader_files",
+        "loader_runs",
+        "loader_run_backups",
     ];
 
     fn tables(store: &Store) -> Vec<String> {

@@ -70,13 +70,15 @@ pub fn parse(url: &str) -> R<NxmLink> {
 pub struct Processed {
     /// Game id (the link's Nexus domain when no game was resolved).
     pub game: String,
-    /// `mod` or `collection`.
+    /// `mod`, `loader` or `collection`.
     pub kind: String,
     /// Mod id or collection slug.
     pub what: String,
     /// Installed (`false`: declined, cancelled or download only).
     pub installed: bool,
     pub installed_mod: Option<super::install::InstalledMod>,
+    /// The link named a mod loader: a pending preview, nothing ran.
+    pub loader: Option<super::install::LoaderPending>,
     pub collection: Option<super::collection::CollectionResult>,
 }
 
@@ -96,6 +98,7 @@ pub fn process(cx: &mut Cx<'_>, accepted: &Accepted) -> R<Processed> {
                 what: slug.clone(),
                 installed: !r.cancelled && !r.download_only,
                 installed_mod: None,
+                loader: None,
                 collection: Some(r),
             })
         }
@@ -115,15 +118,20 @@ pub fn process(cx: &mut Cx<'_>, accepted: &Accepted) -> R<Processed> {
                         ..Default::default()
                     },
                 )?;
-                if done.is_some() {
+                let installed_mod = done.as_ref().and_then(|d| d.as_mod()).map(Into::into);
+                // A loader only gets a pending preview: never deployed or run
+                // from a link, even with auto-deploy on.
+                let loader = done.as_ref().and_then(|d| d.loader()).cloned();
+                if installed_mod.is_some() {
                     super::deploy::after_change(cx, &game)?;
                 }
                 Ok(Processed {
                     game: game.id.clone(),
-                    kind: "mod".into(),
+                    kind: if loader.is_some() { "loader" } else { "mod" }.into(),
                     what: m.mod_id.to_string(),
-                    installed: done.is_some(),
-                    installed_mod: done.as_ref().map(Into::into),
+                    installed: installed_mod.is_some(),
+                    installed_mod,
+                    loader,
                     collection: None,
                 })
             })();

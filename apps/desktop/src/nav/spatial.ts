@@ -196,7 +196,11 @@ export function recoverFocus(doc: Document = document): void {
       }
     }
   }
-  (best ?? doc.querySelector<HTMLElement>("[data-tab][aria-current='page']") ?? all[0])?.focus();
+  const target = best ?? doc.querySelector<HTMLElement>("[data-tab][aria-current='page']") ?? all[0];
+  if (!target) return;
+  // A plain focus() scrolls the target into view (often far): pointer users must keep their scroll position.
+  target.focus({ preventScroll: true });
+  if (doc.documentElement.dataset.input !== "pointer") target.scrollIntoView?.({ block: "nearest", inline: "nearest" });
 }
 
 /**
@@ -207,11 +211,14 @@ export function recoverFocus(doc: Document = document): void {
 export function installFocusRecovery(doc: Document = document): () => void {
   const onOut = (e: FocusEvent) => {
     if (e.relatedTarget || !(e.target instanceof HTMLElement) || e.target.closest("[data-nav-scope]")) return;
-    // Clicking away from a text field is meant to leave it: do not pull focus back to a neighbour.
-    if (doc.documentElement.dataset.input === "pointer" && e.target.matches("input, textarea")) return;
-    lastLost = box(e.target);
+    const lost = e.target;
+    lastLost = box(lost);
     requestAnimationFrame(() => {
-      if (doc.activeElement === doc.body && doc.hasFocus()) recoverFocus(doc);
+      // A pointer click on a non-actionable area is meant to leave the control: only recover when
+      // the control itself went away (unmounted or disabled), never pull focus (and scroll) back.
+      // Checked after the frame because unmount/disable may land after the focusout event.
+      const left = doc.documentElement.dataset.input === "pointer" && lost.isConnected && !lost.matches(":disabled");
+      if (!left && doc.activeElement === doc.body && doc.hasFocus()) recoverFocus(doc);
     });
   };
   doc.addEventListener("focusout", onOut, true);

@@ -39,7 +39,7 @@ function Jobs() {
     <Card title="Jobs">
       <CardSection>
         {prompts > 0 && (
-          <p className="mb-3 flex items-center gap-2 text-[14px] text-amber-300">
+          <p className="mb-3 flex items-center gap-2 text-body text-amber-300">
             <StatusDot tone="amber" live />
             {prompts} question(s) waiting for an answer.
           </p>
@@ -59,13 +59,13 @@ function Jobs() {
                 <li key={j.id} className="flex flex-wrap items-center gap-3 rounded-control px-3 py-2.5">
                   <StatusDot tone={o === "running" ? "accent" : o === "failed" ? "rose" : "zinc"} live={o === "running"} />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[14px] text-zinc-200">{jobLabel(j.kind)}</span>
-                    <span className="block font-mono text-[11px] text-dim">
+                    <span className="block truncate text-body text-zinc-200">{jobLabel(j.kind)}</span>
+                    <span className="block font-mono text-micro text-dim">
                       #{j.id} · {o}
                     </span>
                   </span>
                   {/* A cancel is the user's choice: no error text. */}
-                  {j.error && o === "failed" && <span className="w-full pl-5 text-[13px] wrap-anywhere text-rose-300">{j.error}</span>}
+                  {j.error && o === "failed" && <span className="w-full pl-5 text-label wrap-anywhere text-rose-300">{j.error}</span>}
                 </li>
               );
             })}
@@ -74,7 +74,7 @@ function Jobs() {
         {nxm.length > 0 && (
           <>
             <h3 className="eyebrow mt-5 mb-2 px-3">nxm links</h3>
-            <ul className="grid gap-1 px-3 font-mono text-[12px]">
+            <ul className="grid gap-1 px-3 font-mono text-caption">
               {nxm.slice(0, 10).map((n, i) => (
                 <li key={i} className={n.status === "rejected" ? "text-rose-300" : "text-zinc-300"}>
                   {n.status}: {n.link ?? n.error}
@@ -141,7 +141,7 @@ function LogTail() {
         <pre
           tabIndex={0}
           aria-label="Log"
-          className="max-h-[min(32rem,60vh)] overflow-auto rounded-card bg-ink p-4 font-mono text-[12px] leading-[1.7] text-zinc-400"
+          className="max-h-[min(32rem,60vh)] overflow-auto rounded-card bg-ink p-4 font-mono text-caption leading-[1.7] text-zinc-400"
         >
           {q.data?.join("\n") || "(empty)"}
         </pre>

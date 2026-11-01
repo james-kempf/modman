@@ -46,7 +46,7 @@ function Section({ id, title, children, intro }: { id: string; title: string; in
   return (
     <section id={id} className="scroll-mt-8">
       <h2 className="text-[19px] font-medium tracking-tight text-zinc-50">{title}</h2>
-      {intro && <p className="mt-1.5 max-w-[65ch] text-[14px] leading-relaxed text-zinc-500">{intro}</p>}
+      {intro && <p className="mt-1.5 max-w-[65ch] text-body leading-relaxed text-zinc-500">{intro}</p>}
       <div className="mt-5 divide-y divide-white/[0.05] rounded-3xl border border-white/[0.05] bg-ink-2">{children}</div>
     </section>
   )
@@ -57,7 +57,7 @@ function Row({ title, desc, children }: { title: string; desc?: ReactNode; child
     <div className="grid gap-4 px-6 py-5 md:grid-cols-[1fr_minmax(0,320px)] md:items-center">
       <div className="min-w-0">
         <div className="text-[14.5px] text-zinc-100">{title}</div>
-        {desc && <div className="mt-1 text-[13px] leading-relaxed text-zinc-500">{desc}</div>}
+        {desc && <div className="mt-1 text-label leading-relaxed text-zinc-500">{desc}</div>}
       </div>
       <div className="flex min-w-0 items-center gap-2 md:justify-end">{children}</div>
     </div>
@@ -182,7 +182,7 @@ export function AddGame() {
             : <Button size="sm" variant="primary" disabled={busy} icon={<PlusIcon size={14} />} onClick={() => add(g.domain)}>Add</Button>}
         </Row>
       )) : (
-        <div className="flex items-center gap-3 px-6 py-5 text-[14px] text-zinc-500"><GameControllerIcon size={18} /> No supported Steam games found.</div>
+        <div className="flex items-center gap-3 px-6 py-5 text-body text-zinc-500"><GameControllerIcon size={18} /> No supported Steam games found.</div>
       )}
       <div className="grid gap-4 px-6 py-5 md:grid-cols-[1fr_1.5fr_auto] md:items-end">
         <Field label="Nexus game domain" error={err}>
@@ -271,7 +271,7 @@ function Integration({ busy }: { busy: boolean }) {
       <Row title="Application menu" desc="Adds modman to your launcher. On a Steam Deck, add it to Steam from Desktop Mode to open it in Game Mode.">
         <Button size="sm" disabled={busy} onClick={() => run(['ui', 'desktop'], { label: 'Add to application menu', game: null })}>Add shortcut</Button>
       </Row>
-      <div className={cx('px-6 py-5 font-mono text-[12px] leading-relaxed text-zinc-500')}>
+      <div className={cx('px-6 py-5 font-mono text-caption leading-relaxed text-zinc-500')}>
         modman {state.version} · config {state.configDir} · data {state.dataDir}
       </div>
     </Section>

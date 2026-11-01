@@ -12,6 +12,13 @@ import type {
   AfterChange,
   Answer,
   AppInfo,
+  ApplyOutcome,
+  LaunchState,
+  LoaderCard,
+  LoaderJunk,
+  LoaderOp,
+  Preview,
+  RunReport,
   ShortcutStatus,
   ArtKind,
   AutoupdateStatus,
@@ -134,6 +141,19 @@ export const COMMANDS = [
   "quarantines_list",
   "quarantine_restore",
   "restage",
+  "loader_status",
+  "loader_preview",
+  "loader_preview_reopen",
+  "loader_run",
+  "loader_rollback",
+  "loader_decline_rollback",
+  "game_runtime_set",
+  "launch_options_get",
+  "launch_options_ack",
+  "launch_options_apply",
+  "loader_junk_scan",
+  "loader_junk_remove",
+  "loader_log_get",
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
 
@@ -426,3 +446,46 @@ export const restage = (opts: { ids?: number[]; all?: boolean; ignorePoisoned?: 
     all: opts.all ?? false,
     ignore_poisoned: opts.ignorePoisoned ?? false,
   });
+
+// ── loaders ─────────────────────────────────────────────────
+
+/** The game's loaders (SMAPI, ...) with status, runtime and launch options. */
+export const loaderStatus = (game?: Game) => call<LoaderCard[]>("loader_status", { game: game ?? null });
+/** Preview a loader op; nothing runs. archive: a local loader archive (install/upgrade/adopt); repair/uninstall use the cached one. */
+export const loaderPreview = (
+  a: { op: LoaderOp; loaderKey: string; archive?: string | null; unverifiedAck?: boolean },
+  game?: Game,
+) =>
+  call<Preview>("loader_preview", {
+    game: game ?? null,
+    op: a.op,
+    loader_key: a.loaderKey,
+    archive: a.archive ?? null,
+    unverified_ack: a.unverifiedAck ?? false,
+  });
+/** A pending preview in full, re-previewed with unverifiedAck (a new preview_id/plan_hash; the old one is dropped). */
+export const loaderPreviewReopen = (previewId: string, unverifiedAck: boolean) =>
+  call<Preview>("loader_preview_reopen", { preview_id: previewId, unverified_ack: unverifiedAck });
+/** Job: run a confirmed preview (streams vessel:loader-log). */
+export const loaderRun = (previewId: string, planHash: string) =>
+  call<RunReport>("loader_run", { preview_id: previewId, plan_hash: planHash });
+/** Job: undo every tracked change of an install. Returns what could not be restored. */
+export const loaderRollback = (installId: number) => call<string[]>("loader_rollback", { install_id: installId });
+/** Keep an interrupted install's files as they are. */
+export const loaderDeclineRollback = (installId: number) =>
+  call<null>("loader_decline_rollback", { install_id: installId });
+/** runtime: native | proton | null (detect again). */
+export const gameRuntimeSet = (runtime: "native" | "proton" | null, game?: Game) =>
+  call<null>("game_runtime_set", { game: game ?? null, runtime });
+export const launchOptionsGet = (game?: Game) => call<LaunchState>("launch_options_get", { game: game ?? null });
+/** The user set the launch options by hand. */
+export const launchOptionsAck = (game?: Game) => call<string | null>("launch_options_ack", { game: game ?? null });
+/** Write the launch options to Steam (refused while Steam runs). No account + several = choose_account. */
+export const launchOptionsApply = (account: number | null, game?: Game) =>
+  call<ApplyOutcome>("launch_options_apply", { game: game ?? null, account });
+export const loaderJunkScan = (game?: Game) => call<LoaderJunk[]>("loader_junk_scan", { game: game ?? null });
+/** Job: remove loader archives installed as mods (purge, delete, redeploy). */
+export const loaderJunkRemove = (modIds: number[], game?: Game) =>
+  call<number>("loader_junk_remove", { game: game ?? null, mod_ids: modIds });
+/** A run's installer output, redacted. */
+export const loaderLogGet = (runId: number) => call<string>("loader_log_get", { run_id: runId });

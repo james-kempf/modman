@@ -86,11 +86,11 @@ function GameCards({ game }: { game: GameView }) {
       </section>
       <div
         className={cx(
-          "stagger grid grid-cols-[minmax(0,1fr)] gap-6 md:grid-cols-[repeat(2,minmax(0,1fr))]",
+          "stagger grid grid-cols-[minmax(0,1fr)] gap-6 md:grid-cols-2",
           // Three cards in a row from xl; with Plugins, two rows of two until there is room for four.
           bethesda
-            ? "2xl:grid-cols-[repeat(4,minmax(0,1fr))]"
-            : "xl:grid-cols-[repeat(3,minmax(0,1fr))]",
+            ? "2xl:grid-cols-4"
+            : "xl:grid-cols-3",
         )}
       >
         <ModsCard
@@ -172,7 +172,7 @@ function PlayCard({ game, outOfSync }: { game: GameView; outOfSync: boolean }) {
             <RemoveGame game={game} />
           </div>
           {(game.appid === null || outOfSync) && (
-            <p className="text-[13px] leading-relaxed text-dim">
+            <p className="text-label leading-relaxed text-dim">
               {game.appid === null
                 ? "No Steam app id is set for this game, so it cannot be started from here (vessel game set appid <id>)."
                 : "Your mod changes are not deployed yet: Play asks to deploy them first."}
@@ -258,7 +258,7 @@ function DeploymentCard({
       <CardSection className="flex flex-1 flex-col justify-between gap-7">
         <div>
           {(outOfSync || !d.active) && (
-            <p className="max-w-[44ch] text-[15px] leading-relaxed text-zinc-400">
+            <p className="max-w-[44ch] text-lead leading-relaxed text-zinc-400">
               {outOfSync
                 ? "You changed mods since the last deploy. Deploy to apply them to the game folder."
                 : "Link every enabled mod into the game folder. Original files are backed up first."}
@@ -363,11 +363,11 @@ function DeployTracker({
           max={100}
           value={t.pct}
         />
-        <span className="w-12 text-right font-mono text-[13px] text-zinc-200">
+        <span className="w-12 text-right font-mono text-label text-zinc-200">
           {t.pct}%
         </span>
       </div>
-      <p className="font-mono text-[12px] text-zinc-400">
+      <p className="font-mono text-caption text-zinc-400">
         {t.deployed} of {t.enabled} enabled {t.enabled === 1 ? "mod" : "mods"}{" "}
         deployed
       </p>
@@ -395,7 +395,7 @@ function VerifyResult({ r }: { r: VerifyReport }) {
     <div role="status" className="grid gap-2 pt-1">
       <p
         className={cx(
-          "flex items-center gap-2 text-[14px]",
+          "flex items-center gap-2 text-body",
           bad ? "text-amber-300" : "text-accent-300",
         )}
       >
@@ -403,7 +403,7 @@ function VerifyResult({ r }: { r: VerifyReport }) {
         {r.intact} files intact, {r.issues.length} issues
       </p>
       {bad && (
-        <ul className="grid max-h-48 gap-1 overflow-y-auto font-mono text-[12px] break-all text-zinc-400">
+        <ul className="grid max-h-48 gap-1 overflow-y-auto font-mono text-caption break-all text-zinc-400">
           {r.issues.slice(0, 50).map((i) => (
             <li key={i.target + i.rel_path}>
               {i.kind}: {i.rel_path}
@@ -427,7 +427,7 @@ function Stat({
   return (
     <div className="min-w-0" title={title}>
       <dt className="eyebrow">{label}</dt>
-      <dd className="mt-2 font-mono text-lg font-medium tracking-tight break-words text-zinc-50">
+      <dd className="mt-2 font-mono text-lg font-medium tracking-tight wrap-break-word text-zinc-50">
         {value}
       </dd>
     </div>
@@ -485,7 +485,7 @@ function Count({
       >
         {n}
       </div>
-      <div className="mt-1 text-[13px] text-dim">{label}</div>
+      <div className="mt-1 text-label text-dim">{label}</div>
     </div>
   );
 }
@@ -536,7 +536,7 @@ function CollectionsCard({ game }: { game: string }) {
       {q.isError ? (
         <ErrorNote>{errMsg(q.error)}</ErrorNote>
       ) : q.isPending ? (
-        <p className="text-[14px] text-zinc-400">Reading collections…</p>
+        <p className="text-body text-zinc-400">Reading collections…</p>
       ) : (
         <>
           <div className="grid grid-cols-2 gap-4">
@@ -557,11 +557,11 @@ function CollectionsCard({ game }: { game: string }) {
                     max={members || 1}
                     value={enabled}
                   />
-                  <span className="w-12 text-right font-mono text-[13px] text-zinc-200">
+                  <span className="w-12 text-right font-mono text-label text-zinc-200">
                     {members ? Math.floor((enabled / members) * 100) : 0}%
                   </span>
                 </div>
-                <p className="font-mono text-[12px] text-zinc-400">
+                <p className="font-mono text-caption text-zinc-400">
                   {enabled} of {members} collection{" "}
                   {members === 1 ? "mod" : "mods"} enabled
                 </p>
@@ -609,7 +609,7 @@ function RequirementsCard({ game }: { game: string }) {
       {q.isError ? (
         <ErrorNote>{errMsg(q.error)}</ErrorNote>
       ) : q.isPending ? (
-        <p className="text-[14px] text-zinc-400">Checking requirements…</p>
+        <p className="text-body text-zinc-400">Checking requirements…</p>
       ) : (
         <>
           <div className="grid grid-cols-2 gap-4">
@@ -646,9 +646,9 @@ function PluginsCard({ game }: { game: string }) {
       {q.isError ? (
         <ErrorNote>{errMsg(q.error)}</ErrorNote>
       ) : q.isPending ? (
-        <p className="text-[14px] text-zinc-400">Reading plugins.txt…</p>
+        <p className="text-body text-zinc-400">Reading plugins.txt…</p>
       ) : q.data === null ? (
-        <p className="text-[14px] text-zinc-400">
+        <p className="text-body text-zinc-400">
           No plugins.txt yet. Deploy mods, or start the game once.
         </p>
       ) : (
@@ -725,7 +725,7 @@ function StartupCheckCard() {
     >
       <CardSection>
         {check.system_busy && (
-          <p className="mb-3 flex items-center gap-2 text-[14px] text-amber-300">
+          <p className="mb-3 flex items-center gap-2 text-body text-amber-300">
             <StatusDot tone="amber" live />
             {check.system_busy.kind === "already_running"
               ? "An auto-update run is in progress."
@@ -734,7 +734,7 @@ function StartupCheckCard() {
         )}
         <ul className="rows">
           {check.pending.map((p) => (
-            <li key={p.game} className="py-3 text-[14px] text-zinc-400">
+            <li key={p.game} className="py-3 text-body text-zinc-400">
               <span className="text-zinc-100">{p.name}</span>:{" "}
               {p.reasons.join(", ")}
               {p.blocked

@@ -1,0 +1,133 @@
+plan_id: 20261031-browse-games-ux
+status: completed
+tldr: |
+  4 waves, 5 tasks. W1: diagnose scroll-to-top + plugin-installed detection (debugger) || Games unmanaged grid (implementer).
+  W2: Browse UI (remove-on-focus, details dialog, persisted state, pagination) || app-wide scroll fix.
+  W3: plugin/loader-installed flag in Browse + Mods (backend + Mods.tsx). Each task runs full validation.
+created_at: "2026-10-31"
+created_by: gem-planner
+revision: 1
+replan_count: 0
+planner_revision_used: false
+
+decisions:
+  - "Browse-5 and Browse-6 root causes unknown -> one gem-debugger task (coalesced: same agent, no ordering, read-only) before fixes."
+  - "Browse-1..4 coalesced into one implementer task: all own Browse.tsx/store.ts; splitting would serialize anyway."
+  - "Browse-6 fix in W3 (not W2) because it shares ipc/types.ts, mock/demo.ts with the Browse UI task."
+  - "Scroll fix runs parallel with Browse UI but is forbidden from editing Browse.tsx/store.ts; Browse-specific remnants handed to browse-ui via debugger findings."
+  - "No dedicated tester task: every task carries frontend+cargo validation commands; reviewer independence handled by orchestrator."
+  - "Games-1 reuses existing games_detect IPC + AddGameDialog add flow (reuse rung); no backend change expected."
+
+assumptions:
+  - "Remove on installed tag uses existing mods_uninstall / collection_remove commands with the app's existing confirm pattern."
+  - "Browse state persistence is in-memory (store.ts) for the session."
+  - "Unmanaged games = gamesDetect() results minus managed games; clicking one adds it via existing add-game path."
+  - "Browse installed flag comes from crates/vessel-core/src/app/views.rs:198 (list_mods mod_id set); loaders like SMAPI are tracked in loaders/plugins and not in that set."
+  - "Working tree uncommitted changes are the baseline; no reverts, no commits."
+
+shared_context:
+  validation:
+    - "Frontend: cd apps/desktop && npm run typecheck && npm test"
+    - "Rust: cargo test --workspace (repo root /home/jkempf/Repositories/modman)"
+    - "Put new tests in new or task-owned test files to avoid parallel edits to views.test.tsx."
+
+tasks:
+  - id: T1-diagnose
+    title: Diagnose click-scroll-to-top and plugin-installed detection
+    description: "Root-cause analysis only, no code edits. (a) Browse-5: why clicking non-actionable areas scrolls the view to top (suspects: apps/desktop/src/nav/spatial.ts focus/scrollIntoView, nav/actions.ts, App.tsx:93 tab refocus, ErrorBoundary/main focus, tabindex on containers, Collections.tsx:90). (b) Browse-6: why a mod installed as a loader/plugin (SMAPI) is not flagged installed in Browse (views.rs:198-208) nor shown in Mods view; identify data source for loader-installed nexus mod ids (app/loaders*, plugins.rs, install.rs)."
+    wave: 1
+    depends_on: []
+    agent: gem-debugger
+    status: completed
+    retries_used: 0
+    acceptance_criteria:
+      - "Browse-5 root cause identified with file:line, reproduction steps, and a minimal app-wide fix proposal; lists any part requiring Browse.tsx/store.ts change."
+      - "Browse-6 root cause identified with file:line for both Browse flag and Mods view listing; proposed fix names exact functions/types to change."
+      - "No source files modified."
+    handoff:
+      constraints: ["Read-only", "Return structured findings consumed verbatim by T4 and T5"]
+      relevant_context:
+        - "apps/desktop/src/nav/spatial.ts:167-168 focus()+scrollIntoView"
+        - "apps/desktop/src/app/App.tsx:93 tab focus"
+        - "crates/vessel-core/src/app/views.rs:105,198-208 installed flag"
+
+  - id: T2-games-unmanaged
+    title: Replace add-game card with unmanaged games grid
+    description: "Reuse rung: existing ipc.gamesDetect (AddGameDialog.tsx:38 useQuery ['detect']) and existing add-game flow. Remove the 'add game' card in views/Games.tsx; render a second grid (same card grid style/components) below managed games listing detected-but-unmanaged games; activating a card adds/manages that game. Keep manual add path reachable if AddGameDialog supports custom paths (e.g. header button) only if it already exists elsewhere; otherwise keep it accessible from the unmanaged section."
+    wave: 1
+    depends_on: []
+    agent: gem-implementer
+    status: completed
+    retries_used: 0
+    context_cluster: validation
+    acceptance_criteria:
+      - "Games view has no 'add game' card in the managed grid."
+      - "Grid below lists detected games not already managed, same card style; empty state when none."
+      - "Activating an unmanaged card (click/Enter/controller) adds the game; it moves to managed grid after query invalidation."
+      - "Cards are spatial-nav focusable; mock/demo mode supplies detected games."
+      - "New tests in a new file (e.g. apps/desktop/src/views/games.test.tsx) cover listing + add; typecheck, vitest, cargo test pass."
+    handoff:
+      constraints:
+        - "Owned files: apps/desktop/src/views/Games.tsx, apps/desktop/src/components/dialogs/AddGameDialog.tsx, new games test file, apps/desktop/src/mock/demo.ts (detect data only, if needed)"
+        - "Do not touch Browse.tsx, store.ts, nav/*, App.tsx"
+      relevant_context: ["apps/desktop/src/ipc/commands.ts:189 gamesDetect"]
+
+  - id: T3-browse-ui
+    title: Browse installed-remove, details dialog, state persistence, pagination
+    description: "Covers Browse-1..4. Reuse rung: existing uninstall/collection_remove commands, Dialog.tsx, store.ts. (1) Installed tag on mod (Browse.tsx ~523) and collection (~583) cards becomes a focusable button: shows 'Installed', on focus/hover shows 'Remove', activation uninstalls with existing confirm pattern. (2) Details button on mod and collection cards opens a Dialog with full info (summary/description, author, version, endorsements/downloads, category, updated date, installed state, collection revision/mod list as available); fetch extra detail via existing nexus IPC if present, add a backend command only if no existing source. (3) Persist tab, query, filters, page, and focused item/scroll in store.ts; restore on re-entering Browse. (4) Replace 'Load more' (Browse.tsx:408) with page controls (prev/next + page indicator) for mods and collections, controller-navigable."
+    wave: 2
+    depends_on: [T1-diagnose]
+    agent: gem-implementer
+    status: completed
+    retries_used: 0
+    context_cluster: validation
+    acceptance_criteria:
+      - "Browse-1: installed tag is keyboard/controller focusable; focused it renders 'Remove' and activation uninstalls mod/collection; test covers it."
+      - "Browse-2: Details button on mod and collection cards opens dialog with full info; dialog closes and returns focus to the trigger."
+      - "Browse-3: leaving Browse and returning restores tab, query/filters, page, and scroll/focus position; test covers state restore."
+      - "Browse-4: no 'Load more'; pagination controls for mods and collections; page change fetches the correct offset."
+      - "Any Browse-specific scroll remnant from T1 findings fixed."
+      - "Tests in new file (e.g. apps/desktop/src/views/browse.test.tsx); typecheck, vitest, cargo test pass."
+    handoff:
+      constraints:
+        - "Owned files: views/Browse.tsx, app/store.ts, ipc/commands.ts, ipc/types.ts, ipc/events.ts, mock/demo.ts, new components/dialogs/*Details*.tsx, new browse test file; backend (crates/vessel-core/src/app/nexus.rs, collection.rs, src-tauri commands.rs/command_names.rs/capabilities) only if details require a new command"
+        - "Do not touch nav/*, App.tsx, index.css, Collections.tsx, Games.tsx, Mods.tsx (owned by T4/T2/T5)"
+      relevant_context: ["Browse.tsx:408 Load more", "Browse.tsx:523 mod installed", "Browse.tsx:554-583 collection installed_revision"]
+
+  - id: T4-scroll-fix
+    title: Fix click-induced scroll-to-top app-wide
+    description: "Apply T1's Browse-5 root-cause fix at the shared layer (nav/spatial.ts, nav/actions.ts, nav/modality.ts, App.tsx, shell components, index.css) so clicking non-actionable areas never changes scroll position, while keyboard/controller focus scrolling still works."
+    wave: 2
+    depends_on: [T1-diagnose]
+    agent: gem-implementer
+    status: completed
+    retries_used: 0
+    context_cluster: validation
+    acceptance_criteria:
+      - "Clicking non-actionable areas in Collections, Browse, Mods, Games views does not change scroll position."
+      - "Keyboard/controller navigation still scrolls focused item into view (existing nav tests pass)."
+      - "Regression test in a new file (e.g. apps/desktop/src/nav/scroll.test.tsx) fails before fix and passes after."
+      - "typecheck, vitest, cargo test pass."
+    handoff:
+      constraints:
+        - "Owned files: apps/desktop/src/nav/*, app/App.tsx, components/shell/*, index.css, views/Collections.tsx, new scroll test file"
+        - "Must not edit Browse.tsx or store.ts (T3 parallel); report needed Browse changes instead"
+
+  - id: T5-plugin-installed
+    title: Show loader/plugin-installed mods as installed in Browse and Mods
+    description: "Apply T1's Browse-6 fix: include loader/plugin-installed nexus mod ids (e.g. SMAPI) in the Browse installed set (crates/vessel-core/src/app/views.rs) and surface them in the Mods view listing/state. Reuse existing loader records; no new persistence."
+    wave: 3
+    depends_on: [T1-diagnose, T3-browse-ui]
+    agent: gem-implementer
+    status: completed
+    retries_used: 0
+    context_cluster: validation
+    acceptance_criteria:
+      - "Browse-6: a mod installed as a loader/plugin (SMAPI fixture) reports installed=true in Browse results; cargo unit test covers it."
+      - "Mods view shows the loader-installed mod as installed; frontend test covers it."
+      - "Browse Remove (T3) on such an item routes to the correct uninstall path (loader uninstall vs mods_uninstall) or is disabled with reason."
+      - "typecheck, vitest, cargo test --workspace pass."
+    handoff:
+      constraints:
+        - "Owned files: crates/vessel-core/src/app/{views,loaders,plugins,mods}.rs (+loaders/*), apps/desktop/src-tauri/src/* if types change, views/Mods.tsx, ipc/types.ts, mock/demo.ts, Browse.tsx (remove routing only)"
+      relevant_context: ["crates/vessel-core/src/app/views.rs:198-208"]

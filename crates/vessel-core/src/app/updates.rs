@@ -158,6 +158,7 @@ pub fn requirements_after_install(cx: &Cx<'_>, game: &GameConfig, mod_row: i64) 
         &Scope {
             mods: Some(vec![m.id]),
         },
+        Some(&cx.paths.definitions_dir()),
     ) {
         say_all(cx.ui, report_msgs(&rows, false, "Requirements"));
     }
@@ -185,6 +186,7 @@ pub fn requirements_after_collection(cx: &Cx<'_>, game: &GameConfig, ids: &[i64]
         &Scope {
             mods: Some(ids.to_vec()),
         },
+        Some(&cx.paths.definitions_dir()),
     ) {
         say_all(
             cx.ui,
@@ -217,6 +219,7 @@ pub fn deps_rows(
             &Scope {
                 mods: Some(vec![m.id]),
             },
+            Some(&cx.paths.definitions_dir()),
         )?);
     }
     let ids: Vec<u64> = all
@@ -227,7 +230,12 @@ pub fn deps_rows(
     if !ids.is_empty() {
         refresh_deps(cx, game, &ids, refresh, true);
     }
-    Ok(requirements::analyze(cx.store, game, &Scope::default())?)
+    Ok(requirements::analyze(
+        cx.store,
+        game,
+        &Scope::default(),
+        Some(&cx.paths.definitions_dir()),
+    )?)
 }
 
 /// `deps ack|unack <name>`: marks an external requirement as installed (or
@@ -248,7 +256,12 @@ pub fn set_ack(
     if !ids.is_empty() {
         refresh_deps(cx, game, &ids, refresh, true);
     }
-    let rows = requirements::analyze(cx.store, game, &Scope::default())?;
+    let rows = requirements::analyze(
+        cx.store,
+        game,
+        &Scope::default(),
+        Some(&cx.paths.definitions_dir()),
+    )?;
     let row = match requirements::find_ack_target(&rows, reference, !ack) {
         Ok(r) => r.clone(),
         Err(0) => fail!("No requirement matches '{reference}'. See: vessel deps"),
@@ -430,14 +443,32 @@ pub fn install(
             fomod_mode: FomodMode::Reuse,
             fomod_choices: mods::recorded_fomod_choices(cx.store.conn(), m.id)?,
         };
+        // Downloaded by Vessel from Nexus.
+        let origin = crate::loaders::DownloadOrigin::Nexus {
+            domain: game.nexus_domain.clone().unwrap_or_default(),
+            mod_id: mid,
+            file_id: f.file_id,
+        };
         let lock = staging_lock(cx.paths)?;
-        let r = super::install::install_archive(cx, game, &data_dir, &archive, &meta, false);
+        let r = super::install::install_archive(
+            cx,
+            game,
+            &data_dir,
+            &archive,
+            &meta,
+            false,
+            Some(&origin),
+        );
         drop(lock);
         match r {
-            Ok(o) => {
+            Ok(super::install::Installed::Mod(o)) => {
                 cx.ui.success(&format!("Updated → {}", o.uid));
                 done += 1;
             }
+            Ok(super::install::Installed::Loader(l)) => cx.ui.info(&format!(
+                "{} is a mod loader: its update waits for your confirmation in Requirements.",
+                l.loader_key
+            )),
             Err(e) => cx
                 .ui
                 .error(&format!("Update of {} failed: {}", m.name, chain(&e))),

@@ -17,10 +17,10 @@
 //! - Deploy and purge refuse while the game runs ([`GameProbe`]) or while
 //!   another process holds the deploy lock.
 
-mod backup;
+pub(crate) mod backup;
 pub(crate) mod confine;
 mod engine;
-mod place;
+pub(crate) mod place;
 mod plan;
 mod probe;
 mod provenance;
@@ -343,6 +343,8 @@ pub struct DeployReport {
     pub recovered: Option<RecoveryReport>,
     /// plugins.txt stage after a successful deploy (`None` on a dry run).
     pub plugins: Option<crate::loadorder::PluginStage>,
+    /// Mod files not placed because an installed loader owns that path.
+    pub loader_owned: Vec<String>,
 }
 
 /// Result of [`purge`] (legacy summary: removed, restored, missing, changed,

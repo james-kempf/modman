@@ -1,0 +1,44 @@
+== npm run typecheck
+npm notice run vessel-desktop@0.1.0 typecheck
+npm notice run tsc --noEmit
+exit=0
+== npm test
+     × paints the highlight with the one solid white token, no outline 5ms
+     × PageDown/PageUp switch tabs; arrows enter the view; Escape returns to the tab 1084ms
+ FAIL  src/style.test.ts > focus and hover highlight > paints the highlight with the one solid white token, no outline
+ FAIL  src/app/App.test.tsx > keyboard-only navigation > PageDown/PageUp switch tabs; arrows enter the view; Escape returns to the tab
+ Test Files  2 failed | 30 passed (32)
+      Tests  2 failed | 403 passed (405)
+== cargo test --workspace
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+test result: ok. 482 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 1.70s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+test result: ok. 37 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.60s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+== rustfmt --check (changed files)
+ok
+== rerun after collection-card height clamp: typecheck + npm test
+typecheck ok
+ FAIL  src/style.test.ts > focus and hover highlight > paints the highlight with the one solid white token, no outline
+ FAIL  src/app/App.test.tsx > keyboard-only navigation > PageDown/PageUp switch tabs; arrows enter the view; Escape returns to the tab
+ Test Files  2 failed | 30 passed (32)
+      Tests  2 failed | 404 passed (406)

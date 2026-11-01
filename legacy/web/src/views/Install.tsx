@@ -65,7 +65,7 @@ export function Install() {
           <div className="grid gap-4">
             <Field label="Mod reference" error={refErr} helper="Examples: 2237 · nexusmods.com/palworld/mods/2237 · /home/you/Downloads/Mod.zip">
               {(id) => (
-                <input id={id} className="input font-mono text-[14px]" placeholder="Nexus ID, link, or archive path"
+                <input id={id} className="input font-mono text-body" placeholder="Nexus ID, link, or archive path"
                   value={ref} onChange={(e) => setRef(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && install()} />
               )}
             </Field>
@@ -115,13 +115,13 @@ export function Install() {
                       <div className="truncate font-mono text-[11.5px] text-zinc-500">v{m.version.replace(/^v/i, '')} · {m.author} · {m.category}</div>
                     </div>
                   </div>
-                  <p className="mt-2 line-clamp-2 text-[13px] leading-relaxed text-zinc-400">{m.summary}</p>
+                  <p className="mt-2 line-clamp-2 text-label leading-relaxed text-zinc-400">{m.summary}</p>
                   <div className="mt-auto flex items-center gap-4 pt-3">
                     <span className="flex items-center gap-1.5 font-mono text-[11.5px] text-zinc-500"><DownloadSimpleIcon size={13} />{compact(m.downloads)}</span>
                     <span className="flex items-center gap-1.5 font-mono text-[11.5px] text-zinc-500"><ThumbsUpIcon size={13} />{compact(m.endorsements)}</span>
                     <span className="ml-auto">
                       {m.installed ? (
-                        <span className="flex h-9 items-center gap-1.5 px-2 text-[13px] text-accent-300"><CheckIcon size={14} weight="bold" /> Installed</span>
+                        <span className="flex h-9 items-center gap-1.5 px-2 text-label text-accent-300"><CheckIcon size={14} weight="bold" /> Installed</span>
                       ) : (
                         <Button size="sm" variant="primary" disabled={installing[m.modId]} onClick={() => installResult(m)}>
                           {installing[m.modId] ? 'Installing…' : 'Install'}
