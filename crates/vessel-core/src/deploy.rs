@@ -338,8 +338,12 @@ pub struct DeployReport {
     /// Folders created (or that would be).
     pub new_dirs: usize,
     pub by_method: BTreeMap<Method, usize>,
-    /// The previous deployment removed before this one.
+    /// Placements of the previous deployment that were undone before this one
+    /// (all of them after a full purge, only the changed ones otherwise).
     pub purged: Option<PurgeReport>,
+    /// Placements of the previous deployment left in place because the new
+    /// plan still wants them as they are.
+    pub unchanged: usize,
     pub recovered: Option<RecoveryReport>,
     /// plugins.txt stage after a successful deploy (`None` on a dry run).
     pub plugins: Option<crate::loadorder::PluginStage>,

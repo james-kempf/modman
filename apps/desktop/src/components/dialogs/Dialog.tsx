@@ -58,6 +58,7 @@ export function Dialog({
   onBack,
   children,
   wide,
+  fixedHeight,
   returnFocus,
 }: {
   title: ReactNode;
@@ -65,6 +66,8 @@ export function Dialog({
   onBack: () => void;
   children: ReactNode;
   wide?: boolean;
+  /** Always the full available height (not only at most), so the size holds while its content changes. */
+  fixedHeight?: boolean;
   /** Where focus goes on close (default: what had focus when the dialog opened). */
   returnFocus?: HTMLElement | null;
 }) {
@@ -118,6 +121,8 @@ export function Dialog({
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key !== "Tab") return;
+    // A dialog opened from inside this one (a React child) must not reach this trap through the React tree.
+    e.stopPropagation();
     const all = focusables(ref.current!);
     if (!all.length) return;
     const i = all.indexOf(document.activeElement as HTMLElement);
@@ -140,7 +145,10 @@ export function Dialog({
         data-nav-scope
         onKeyDown={onKeyDown}
         className={cx(
-          "glass max-h-[calc(100vh-2rem)] w-full animate-pop overflow-y-auto overscroll-contain rounded-card p-5 sm:max-h-[calc(100vh-3rem)] sm:p-7",
+          "glass w-full animate-pop overflow-y-auto overscroll-contain rounded-card p-5 sm:p-7",
+          fixedHeight
+            ? "h-[calc(100vh-2rem)] sm:h-[calc(100vh-3rem)]"
+            : "max-h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-3rem)]",
           wide ? "max-w-5xl" : "max-w-2xl",
         )}
       >

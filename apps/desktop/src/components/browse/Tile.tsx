@@ -2,8 +2,31 @@
 // The browse result card and its grid, shared by Browse's listing and a
 // collection's Mods tab in its details dialog.
 
-import { useId, type ReactNode, type Ref } from "react";
-import { CARD_TILE, cx } from "../ui";
+import { CheckIcon } from "@phosphor-icons/react";
+import { useId, useRef, useState, type ReactNode, type Ref } from "react";
+import { Badge, CARD_TILE, cx } from "../ui";
+
+/** Installed status badge (accent). */
+export function InstalledBadge() {
+  return (
+    <Badge tone="accent">
+      <CheckIcon aria-hidden size={12} weight="bold" />
+      Installed
+    </Badge>
+  );
+}
+
+/** Shown on a card while its install/remove runs (the dialog may be closed by then). */
+export function WorkingBadge() {
+  return <Badge>Working…</Badge>;
+}
+
+/** Open/close state of a card's details dialog, and the card it returns focus to. */
+export function useDetails() {
+  const [open, setOpen] = useState(false);
+  const card = useRef<HTMLButtonElement>(null);
+  return { open, card, show: () => setOpen(true), hide: () => setOpen(false) };
+}
 
 /** 12345 -> "12.3K" (legacy `compact`). */
 export function compact(n: number | null): string {

@@ -11,13 +11,12 @@ import { errMsg } from "../app/bridge";
 import { useActiveGame } from "../app/queries";
 import { useBusy, useRun } from "../app/run";
 import { browseDefaults, useUi, type BrowseSession } from "../app/store";
-import { CollectionDetailsDialog, ModDetailsDialog } from "../components/dialogs/BrowseDetails";
+import { CollectionDetailsDialog, ModTile } from "../components/dialogs/BrowseDetails";
 import { readClipboard } from "../components/shell/Osk";
 import {
   ArrowClockwiseIcon,
   CaretLeftIcon,
   CaretRightIcon,
-  CheckIcon,
   ClipboardTextIcon,
   DownloadSimpleIcon,
   HardDrivesIcon,
@@ -51,7 +50,7 @@ import { collectionText, collectionTone, removedText } from "./Collections";
 import { uninstalledText } from "./Mods";
 import { installKey } from "./Requirements";
 import { NoGame } from "../components/shell/NoGame";
-import { FOCUS_ATTR, MOD_GRID, MOD_PICTURE, RESULTS_GRID, Stat, Tile, compact } from "../components/browse/Tile";
+import { FOCUS_ATTR, InstalledBadge, MOD_GRID, RESULTS_GRID, Stat, Tile, WorkingBadge, compact, useDetails } from "../components/browse/Tile";
 
 const FOMOD = [
   { value: "ask", label: "Ask (wizard)" },
@@ -358,7 +357,7 @@ function BrowseSearch({ game }: { game: string }) {
       name="browse-search"
       data-osk-submit="Search"
       value={s.draft}
-      placeholder={s.kind === "mods" ? "Search mod names" : "Search collections"}
+      placeholder={s.kind === "mods" ? "Search mods" : "Search collections"}
       onChange={(e) => {
         const draft = e.target.value;
         save(!draft.trim() && s.text ? { draft, text: "", page: 0 } : { draft });
@@ -437,7 +436,7 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
               aria-busy={q.isPlaceholderData || undefined}
             >
               {data!.kind === "mods"
-                ? data!.mods.map((m, i) => <ModTile key={m.modId !== null ? `m${m.modId}` : `i${i}`} game={game} m={m} />)
+                ? data!.mods.map((m, i) => <BrowseModTile key={m.modId !== null ? `m${m.modId}` : `i${i}`} game={game} m={m} />)
                 : data!.collections.map((c) => <CollectionTile key={c.slug} game={game} c={c} />)}
             </ul>
             <nav className="mt-5 flex flex-wrap items-center gap-4" aria-label={`${kind === "mods" ? "Mods" : "Collections"} pages`}>
@@ -472,20 +471,6 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
       </CardSection>
     </Card>
   );
-}
-
-function InstalledBadge() {
-  return (
-    <Badge tone="accent">
-      <CheckIcon aria-hidden size={12} weight="bold" />
-      Installed
-    </Badge>
-  );
-}
-
-/** Shown on a card while its install/remove runs (the dialog may be closed by then). */
-function WorkingBadge() {
-  return <Badge>Working…</Badge>;
 }
 
 /**
@@ -551,13 +536,6 @@ function RemoveButton({ game, item }: { game: string; item: Removable }) {
   );
 }
 
-/** Open/close state of a card's details dialog, and the card it returns focus to. */
-function useDetails() {
-  const [open, setOpen] = useState(false);
-  const card = useRef<HTMLButtonElement>(null);
-  return { open, card, show: () => setOpen(true), hide: () => setOpen(false) };
-}
-
 // Mod pictures fill the tile's width at 16:9 (MOD_PICTURE). Collection pictures are 4:5 portrait, left of the
 // text, and their width is a mod picture's height. The results <ul> is the container
 // (100cqw), and the mod tile's picture width is its column (mods: 1 / sm 2 / xl 3, gap-4 = 1rem) less the tile's
@@ -572,12 +550,12 @@ const COLLECTION_PICTURE = cx(
   "xl:w-[calc(((100cqw-2rem)/3-1.25rem-2px)*9/16)]",
 );
 
-function ModTile({ game, m }: { game: string; m: SearchHit }) {
+/** A Browse result's card (the shared mod card) with this view's Install / Remove. */
+function BrowseModTile({ game, m }: { game: string; m: SearchHit }) {
   const run = useRun();
   const qc = useQueryClient();
   const notify = useUi((s) => s.notify);
   const installing = useUi((s) => s.busy);
-  const details = useDetails();
   const name = m.name ?? `Mod ${m.modId ?? "?"}`;
   const key = installKey(String(m.modId));
   const busy = (installing[key] ?? 0) > 0;
@@ -589,53 +567,28 @@ function ModTile({ game, m }: { game: string; m: SearchHit }) {
     void qc.invalidateQueries({ queryKey: ["browse", game] });
   };
   return (
-    <Tile
-      picture={<Picture url={m.thumbnailUrl} name={name} className={MOD_PICTURE} />}
-      name={name}
-      byline={[m.version ? `v${m.version.replace(/^v/i, "")}` : null, m.author, m.category].filter(Boolean).join(" · ")}
-      summary={m.summary}
-      stats={
-        <>
-          <Stat icon={<DownloadSimpleIcon aria-hidden size={13} />} value={compact(m.downloads)} label="downloads" />
-          <Stat icon={<ThumbsUpIcon aria-hidden size={13} />} value={compact(m.endorsements)} label="endorsements" />
-        </>
-      }
-      badges={
-        <>
-          {busy && <WorkingBadge />}
-          {installed && <InstalledBadge />}
-        </>
-      }
+    <ModTile
+      game={game}
+      m={m}
       focusKey={`m${m.modId ?? name}`}
-      onOpen={details.show}
-      cardRef={details.card}
-      dialog={
-        details.open && (
-          <ModDetailsDialog
+      busy={busy}
+      actions={
+        installed ? (
+          <RemoveButton
             game={game}
-            m={m}
-            onClose={details.hide}
-            returnFocus={details.card.current}
-            actions={
-              installed ? (
-                <RemoveButton
-                  game={game}
-                  item={m.loader ? { kind: "loader", loaderKey: m.loader, nexusId: m.modId!, name } : { kind: "mod", nexusId: m.modId!, name }}
-                />
-              ) : (
-                <Button
-                  tone="primary"
-                  disabled={m.modId === null}
-                  busy={busy}
-                  aria-label={`Install ${name}`}
-                  icon={<DownloadSimpleIcon aria-hidden size={16} />}
-                  onClick={() => void install()}
-                >
-                  Install
-                </Button>
-              )
-            }
+            item={m.loader ? { kind: "loader", loaderKey: m.loader, nexusId: m.modId!, name } : { kind: "mod", nexusId: m.modId!, name }}
           />
+        ) : (
+          <Button
+            tone="primary"
+            disabled={m.modId === null}
+            busy={busy}
+            aria-label={`Install ${name}`}
+            icon={<DownloadSimpleIcon aria-hidden size={16} />}
+            onClick={() => void install()}
+          >
+            Install
+          </Button>
         )
       }
     />

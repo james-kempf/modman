@@ -11,7 +11,7 @@
 //! placement (rollback). An interrupted purge is simply run again (resume):
 //! each entry is removed from `deployments` only after its file was handled.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::os::unix::fs::MetadataExt;
@@ -26,7 +26,8 @@ use super::plan::{build_plan, CaseResolver, Plan};
 use super::provenance::{placed_by_vessel, untracked_placements};
 use super::{
     io_err, target_root, DeployEnv, DeployError, DeployOptions, DeployReport, DeployStatus, Method,
-    Progress, PurgeReport, RecoveryOutcome, RecoveryReport, VerifyIssue, VerifyKind, VerifyReport,
+    MethodChoice, Progress, PurgeReport, RecoveryOutcome, RecoveryReport, VerifyIssue, VerifyKind,
+    VerifyReport,
 };
 use crate::games::{self, GameConfig, Target};
 use crate::store::{now, DeployLock, Store, StoreError};
@@ -93,7 +94,13 @@ pub fn deploy(
     report.loader_owned = exclude_loader_owned(store.conn(), game, &mut plan)?;
     fill_plan_info(&mut report, &plan);
     if games::deployment_active(store.conn(), &game.id)? {
-        report.purged = Some(purge_locked(store, game, env)?);
+        // Placements the new plan keeps as they are stay in place. Shared
+        // files (merged mods.txt) are only reverted by a full purge.
+        if plan.shared.is_empty() && !merges_in_effect(store.conn(), game)? {
+            undo_stale(store, game, env, &root, &mut plan, opts.method, &mut report)?;
+        } else {
+            report.purged = Some(purge_locked(store, game, env)?);
+        }
     }
     if plan.items.is_empty() {
         report.plugins = Some(plugin_stage(store, game, env, true));
@@ -452,6 +459,204 @@ fn run_deploy(
     )?;
     report.placed = placed;
     Ok(())
+}
+
+/// What an active deployment keeps of the new plan.
+#[derive(Default)]
+struct Diff {
+    /// `deployments` rows still wanted as they are: left in place.
+    kept: HashSet<i64>,
+    /// Backups held by kept rows: not restored by the partial undo.
+    kept_backups: HashSet<i64>,
+    /// Lower-cased paths of kept rows: their plan items are not placed again.
+    kept_rels: HashSet<String>,
+    /// Rows to undo.
+    stale: usize,
+}
+
+/// Compares each recorded placement with `plan`. A row is kept when the plan
+/// still has the same mod and staged bytes at that path, the method is one
+/// the choice allows, and the file on disk is still the one vessel placed.
+fn diff_deployment(
+    conn: &Connection,
+    game: &GameConfig,
+    root: &Path,
+    plan: &Plan,
+    choice: MethodChoice,
+) -> Result<Diff, DeployError> {
+    let chain = choice.chain();
+    // Lower-cased path -> (mod id, source, sha256) the plan places there.
+    let mut wanted: HashMap<String, (i64, String, Option<String>)> = HashMap::new();
+    {
+        let mut sha =
+            conn.prepare("SELECT sha256 FROM mod_files WHERE mod_id = ?1 AND path = ?2")?;
+        for it in &plan.items {
+            let mod_id = plan.mods[it.winner].id;
+            let s: Option<Option<String>> = sha
+                .query_row(params![mod_id, it.staged_path], |r| r.get(0))
+                .optional()?;
+            wanted.insert(
+                it.rel_path.to_lowercase(),
+                (
+                    mod_id,
+                    it.source.to_string_lossy().into_owned(),
+                    s.flatten(),
+                ),
+            );
+        }
+    }
+    type Row = (
+        i64,
+        String,
+        String,
+        Option<i64>,
+        Option<String>,
+        String,
+        Option<String>,
+        Option<i64>,
+        Option<i64>,
+        Option<i64>,
+        Option<i64>,
+    );
+    let rows: Vec<Row> = {
+        let mut stmt = conn.prepare(
+            "SELECT id, target, rel_path, mod_id, method, source, sha256, inode, size, mtime_ns, backup_id
+             FROM deployments WHERE game = ?1 ORDER BY id",
+        )?;
+        let rows = stmt.query_map([&game.id], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+                r.get(6)?,
+                r.get(7)?,
+                r.get(8)?,
+                r.get(9)?,
+                r.get(10)?,
+            ))
+        })?;
+        rows.collect::<Result<_, _>>()?
+    };
+    let mut diff = Diff::default();
+    for (id, target, rel, mod_id, method, source, sha, inode, size, mtime, backup) in rows {
+        let key = rel.to_lowercase();
+        let method = method.as_deref().and_then(Method::parse);
+        let same_plan = target == plan.target.as_str()
+            && !diff.kept_rels.contains(&key)
+            && wanted
+                .get(&key)
+                .is_some_and(|(m, src, s)| Some(*m) == mod_id && *src == source && *s == sha)
+            && method.is_some_and(|m| chain.contains(&m));
+        let placed_here = same_plan && {
+            let abs = root.join(&rel);
+            fs::symlink_metadata(&abs).is_ok_and(|meta| {
+                is_ours(
+                    &Placed {
+                        method,
+                        source: Path::new(&source),
+                        inode,
+                        size,
+                        mtime_ns: mtime,
+                    },
+                    &abs,
+                    &meta,
+                )
+            })
+        };
+        if placed_here {
+            diff.kept.insert(id);
+            diff.kept_rels.insert(key);
+            diff.kept_backups.extend(backup);
+        } else {
+            diff.stale += 1;
+        }
+    }
+    Ok(diff)
+}
+
+/// Incremental redeploy: undoes only the placements of an active deployment
+/// that the new plan does not keep (journaled like a purge), then drops the
+/// kept items from `plan`. Kept files, their backups and their folders stay.
+fn undo_stale(
+    store: &mut Store,
+    game: &GameConfig,
+    env: &DeployEnv,
+    root: &Path,
+    plan: &mut Plan,
+    choice: MethodChoice,
+    report: &mut DeployReport,
+) -> Result<(), DeployError> {
+    let diff = diff_deployment(store.conn(), game, root, plan, choice)?;
+    let mut undone = PurgeReport::default();
+    store.conn().execute(
+        "INSERT INTO deploy_journal (game, op, started_at) VALUES (?1, 'purge', ?2)",
+        params![game.id, now()],
+    )?;
+    let journal = store.conn().last_insert_rowid();
+    undo_rows(
+        store,
+        game,
+        env,
+        &mut undone,
+        &|id| !diff.kept.contains(&id),
+        env.faults.crash_after_files,
+    )?;
+    undo_held(store, game, env, &mut undone, &diff.kept_backups)?;
+    prune_dirs(store, game)?;
+    store.conn().execute(
+        "UPDATE deploy_journal SET state = 'committed', finished_at = ?2 WHERE id = ?1",
+        params![journal, now()],
+    )?;
+    if diff.stale > 0 {
+        report.purged = Some(undone);
+    }
+    report.unchanged = diff.kept.len();
+    plan.items
+        .retain(|it| !diff.kept_rels.contains(&it.rel_path.to_lowercase()));
+    Ok(())
+}
+
+/// Removes created folders that are empty now, deepest first. A folder that
+/// still holds kept files stays, and stays recorded.
+fn prune_dirs(store: &mut Store, game: &GameConfig) -> Result<(), DeployError> {
+    let dirs: Vec<(String, String)> = {
+        let mut stmt = store.conn().prepare(
+            "SELECT target, rel_path FROM deployment_dirs WHERE game = ?1 ORDER BY rel_path DESC",
+        )?;
+        let rows = stmt.query_map([&game.id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<Result<_, _>>()?
+    };
+    for (target, rel) in dirs {
+        let Ok(root) = target_root(game, target_of(&target)) else {
+            continue;
+        };
+        let _ = confine(&root, &rel, false).and_then(|c| fs::remove_dir(&c.path));
+        if matches!(fs::symlink_metadata(root.join(&rel)), Err(e) if e.kind() == io::ErrorKind::NotFound)
+        {
+            store.conn().execute(
+                "DELETE FROM deployment_dirs WHERE game = ?1 AND target = ?2 AND rel_path = ?3",
+                params![game.id, target, rel],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// True when a shared file (UE4SS `mods.txt`) is merged by a deploy that no
+/// purge has reverted since: only a full purge can revert it.
+fn merges_in_effect(conn: &Connection, game: &GameConfig) -> Result<bool, DeployError> {
+    Ok(conn.query_row(
+        "SELECT EXISTS (
+             SELECT 1 FROM deploy_journal_steps s JOIN deploy_journal j ON j.id = s.journal_id
+             WHERE j.game = ?1 AND s.action = 'merge'
+               AND j.id > COALESCE((SELECT MAX(u.id) FROM deploy_journal u
+                                    WHERE u.game = ?1 AND u.op = 'purge' AND u.state = 'committed'), 0))",
+        [&game.id],
+        |r| r.get(0),
+    )?)
 }
 
 /// Removes the deployment of `game` and restores the original files
@@ -846,13 +1051,14 @@ fn undo_entry(
     Ok(())
 }
 
-/// Undoes every recorded placement (newest first), restores remaining held
-/// backups whose path is free, and removes created folders deepest first.
-fn undo_all(
+/// Undoes the recorded placements that `select` accepts (newest first); see
+/// [`undo_entry`].
+fn undo_rows(
     store: &mut Store,
     game: &GameConfig,
     env: &DeployEnv,
     report: &mut PurgeReport,
+    select: &dyn Fn(i64) -> bool,
     crash_after: Option<usize>,
 ) -> Result<(), DeployError> {
     type Row = (
@@ -893,6 +1099,9 @@ fn undo_all(
         if crash_after == Some(n) {
             return Err(DeployError::InjectedCrash);
         }
+        if !select(id) {
+            continue;
+        }
         // A loader now owns this path: its file stays, only our record goes.
         if target == Target::GameDir.as_str() && owned.contains(&rel.to_lowercase()) {
             store
@@ -918,8 +1127,18 @@ fn undo_all(
         };
         undo_entry(store, game, env, &entry, report)?;
     }
+    Ok(())
+}
 
-    // Held backups with no deployment row left (legacy backup.list pass).
+/// Restores the held backups with no deployment row left (legacy backup.list
+/// pass), except the ids in `keep`.
+fn undo_held(
+    store: &mut Store,
+    game: &GameConfig,
+    env: &DeployEnv,
+    report: &mut PurgeReport,
+    keep: &HashSet<i64>,
+) -> Result<(), DeployError> {
     let held: Vec<(i64, String, String)> = {
         let mut stmt = store.conn().prepare(
             "SELECT id, target, rel_path FROM backups WHERE game = ?1 AND restored_at IS NULL ORDER BY id",
@@ -931,6 +1150,9 @@ fn undo_all(
         root: &env.backup_dir,
     };
     for (id, target, rel) in held {
+        if keep.contains(&id) {
+            continue;
+        }
         let Some((_, b)) = load_backup(store.conn(), id)? else {
             continue;
         };
@@ -963,6 +1185,20 @@ fn undo_all(
         release_blob(store.conn(), &b)?;
     }
 
+    Ok(())
+}
+
+/// Undoes every recorded placement (newest first), restores remaining held
+/// backups whose path is free, and removes created folders deepest first.
+fn undo_all(
+    store: &mut Store,
+    game: &GameConfig,
+    env: &DeployEnv,
+    report: &mut PurgeReport,
+    crash_after: Option<usize>,
+) -> Result<(), DeployError> {
+    undo_rows(store, game, env, report, &|_| true, crash_after)?;
+    undo_held(store, game, env, report, &HashSet::new())?;
     // Shared files (UE4SS mods.txt) before the folders: one vessel created
     // is removed, so its folder can go too.
     if let Ok(root) = target_root(game, game.target) {

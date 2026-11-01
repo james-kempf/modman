@@ -10,7 +10,9 @@ export type NavAction =
   | { type: "select" }
   | { type: "back" }
   | { type: "tab"; delta: 1 | -1 }
-  | { type: "search" };
+  | { type: "search" }
+  /** Right stick: scroll the open dialog, else the view, by `dy` pixels (negative = up). */
+  | { type: "scroll"; dy: number };
 
 /** Dispatched on the topmost nav scope (a dialog) for "back"; dialogs close on it. */
 export const BACK_EVENT = "vessel:back";
@@ -31,10 +33,23 @@ export function openView(view: ViewId, doc: Document = document): void {
   useUi.getState().setView(view);
 }
 
+/**
+ * What the right stick scrolls: the open dialog itself (it scrolls inside), else the
+ * view's scroll pane (<main>), else the page.
+ */
+export function scrollTarget(doc: Document = document): HTMLElement | null {
+  const scope = navScope(doc);
+  if (scope !== doc.body) return scope;
+  return doc.querySelector<HTMLElement>("main") ?? (doc.scrollingElement as HTMLElement | null);
+}
+
 export function performNav(action: NavAction, doc: Document = document): void {
   switch (action.type) {
     case "move":
       moveFocus(action.dir, doc);
+      return;
+    case "scroll":
+      scrollTarget(doc)?.scrollBy({ top: action.dy });
       return;
     case "select": {
       const el = doc.activeElement;

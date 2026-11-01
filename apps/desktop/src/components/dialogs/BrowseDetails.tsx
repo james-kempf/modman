@@ -2,20 +2,21 @@
 // Browse details dialogs, opened by activating a browse card: everything known
 // about a Nexus mod or collection from its card (Details tab), its Nexus
 // description (About tab), plus the collection's revision from collection_info
-// and its mods as a card grid (Mods tab; a listed mod opens its own details
-// over the collection), and the item's actions (Install / Remove, passed in by
-// Browse). Tabs switch with LB/RB (PageUp/PageDown) or a click. Focus returns
-// to the card on close.
+// and its mods as the same mod cards Browse lists (Mods tab; a listed mod opens
+// its own details dialog inside the collection), and the item's actions
+// (Install / Remove, passed in by Browse). Tabs switch with LB/RB
+// (PageUp/PageDown) or a click. The dialogs keep their full height across tabs.
+// Focus returns to the card on close.
 
 import { useQuery } from "@tanstack/react-query";
 import { errMsg } from "../../app/bridge";
 import * as ipc from "../../ipc/commands";
 import type { CollectionHit, RevisionMod, SearchHit } from "../../ipc/types";
-import { HardDrivesIcon } from "@phosphor-icons/react";
+import { DownloadSimpleIcon, HardDrivesIcon, ThumbsUpIcon } from "@phosphor-icons/react";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { TAB_EVENT, type TabEventDetail } from "../../nav/actions";
 import { focusables } from "../../nav/spatial";
-import { MOD_GRID, MOD_PICTURE, Stat, Tile } from "../browse/Tile";
+import { InstalledBadge, MOD_GRID, MOD_PICTURE, Stat, Tile, WorkingBadge, compact, useDetails } from "../browse/Tile";
 import { About } from "../rich/About";
 import { Badge, Button, ErrorNote, Fact, Picture, bytes } from "../ui";
 import { Dialog } from "./Dialog";
@@ -57,30 +58,74 @@ const revisionHit = (m: RevisionMod): SearchHit => ({
 });
 
 /**
- * A collection's mods as browse cards. A mod with a Nexus id opens its details; one without (an external
- * download) is a dimmed, non-interactive card saying so.
+ * A mod card, the same one the Browse list shows: its details dialog, with the
+ * item's actions passed in (Browse's Install / Remove). A collection's mod has no
+ * installed state or actions (`statusUnknown`), and one without a Nexus id is a
+ * dimmed card (`inert`). `extraStats` and `extraBadges` add what only a collection lists.
  */
-function ModGrid({ mods, onOpen }: { mods: RevisionMod[]; onOpen: (m: RevisionMod, card: HTMLElement) => void }) {
+export function ModTile({
+  game,
+  m,
+  focusKey,
+  busy,
+  actions,
+  statusUnknown,
+  inert,
+  extraStats,
+  extraBadges,
+}: {
+  game: string;
+  m: SearchHit;
+  /** The card's session focus key (Browse remembers it). */
+  focusKey?: string;
+  /** An install or remove is running for this mod. */
+  busy?: boolean;
+  /** Install / Remove, before the dialog's Close. */
+  actions?: ReactNode;
+  statusUnknown?: boolean;
+  inert?: boolean;
+  extraStats?: ReactNode;
+  extraBadges?: ReactNode;
+}) {
+  const details = useDetails();
+  const name = m.name ?? `Mod ${m.modId ?? "?"}`;
+  const installed = !statusUnknown && m.installed && m.modId !== null;
   return (
-    <ul aria-label="Collection mods" className={MOD_GRID}>
-      {mods.map((m, i) => (
-        <Tile
-          key={`${m.mod_id ?? "x"}-${i}`}
-          picture={<Picture url={null} name={m.name} className={MOD_PICTURE} />}
-          name={m.name}
-          byline={[m.version ? `v${m.version.replace(/^v/i, "")}` : null, m.author].filter(Boolean).join(" · ")}
-          summary={null}
-          stats={m.size ? <Stat icon={<HardDrivesIcon aria-hidden size={13} />} value={bytes(m.size)} label="size" /> : null}
-          badges={
-            <>
-              {m.optional && <Badge>Optional</Badge>}
-              {m.mod_id === null && <Badge>Not on Nexus</Badge>}
-            </>
-          }
-          onOpen={m.mod_id !== null ? (card) => onOpen(m, card) : undefined}
-        />
-      ))}
-    </ul>
+    <Tile
+      picture={<Picture url={m.thumbnailUrl} name={name} className={MOD_PICTURE} />}
+      name={name}
+      byline={[m.version ? `v${m.version.replace(/^v/i, "")}` : null, m.author, m.category].filter(Boolean).join(" · ")}
+      summary={m.summary}
+      stats={
+        <>
+          {m.downloads !== null && <Stat icon={<DownloadSimpleIcon aria-hidden size={13} />} value={compact(m.downloads)} label="downloads" />}
+          {m.endorsements !== null && <Stat icon={<ThumbsUpIcon aria-hidden size={13} />} value={compact(m.endorsements)} label="endorsements" />}
+          {extraStats}
+        </>
+      }
+      badges={
+        <>
+          {busy && <WorkingBadge />}
+          {installed && <InstalledBadge />}
+          {extraBadges}
+        </>
+      }
+      focusKey={focusKey}
+      onOpen={inert ? undefined : details.show}
+      cardRef={details.card}
+      dialog={
+        details.open && (
+          <ModDetailsDialog
+            game={game}
+            m={m}
+            statusUnknown={statusUnknown}
+            onClose={details.hide}
+            returnFocus={details.card.current}
+            actions={actions}
+          />
+        )
+      }
+    />
   );
 }
 
@@ -202,7 +247,7 @@ export function ModDetailsDialog({
   const name = m.name ?? `Mod ${m.modId ?? "?"}`;
   const [tab, setTab] = useState<ModTab>("details");
   return (
-    <Dialog title={name} subtitle={m.author ? `by ${m.author}` : undefined} onBack={onClose} returnFocus={returnFocus} wide>
+    <Dialog title={name} subtitle={m.author ? `by ${m.author}` : undefined} onBack={onClose} returnFocus={returnFocus} wide fixedHeight>
       <DialogTabs label="Mod" tabs={MOD_TABS} value={tab} onChange={setTab}>
         {tab === "details" ? (
           <>
@@ -239,58 +284,66 @@ export function CollectionDetailsDialog({ game, c, onClose, actions, returnFocus
   const installed = q.data ? (q.data.installed?.revision ?? null) : c.installed_revision;
   const mods = r?.mods ?? [];
   const [tab, setTab] = useState<CollectionTab>("details");
-  // The collection mod whose details are open over this dialog, and its card (focus returns there on Back).
-  const [opened, setOpened] = useState<{
-    m: RevisionMod;
-    row: HTMLElement;
-  } | null>(null);
   const tabs = [
     ...MOD_TABS,
     { value: "mods", label: r ? `Mods (${r.mod_count})` : c.mod_count !== null ? `Mods (${c.mod_count})` : "Mods" },
   ] as const;
   return (
-    <>
-      <Dialog title={c.name} subtitle={c.author ? `by ${c.author}` : undefined} onBack={onClose} returnFocus={returnFocus} wide>
-        <DialogTabs label="Collection" tabs={tabs} value={tab} onChange={setTab}>
-          {tab === "details" ? (
-            <>
-              {/* Picture left, facts right; stacked below sm. */}
-              <div className="flex flex-col gap-6 sm:flex-row sm:items-start">
-                <Picture url={c.image_url} name={c.name} className="aspect-[4/5] w-40 shrink-0 rounded-card" />
-                <dl className="grid min-w-0 flex-1 grid-cols-2 gap-x-6 gap-y-4 lg:grid-cols-3">
-                  <Fact k="Author" v={r?.author ?? c.author ?? "?"} />
-                  <Fact k="Category" v={c.category ?? "?"} />
-                  <Fact k="Latest revision" v={latest ?? "?"} />
-                  <Fact k="Status" v={installed === null ? "Not installed" : `Installed, revision ${installed}`} />
-                  <Fact k="Mods" v={r ? `${r.mod_count}${r.optional_count ? ` (${r.optional_count} optional)` : ""}` : num(c.mod_count)} />
-                  <Fact k="Size" v={bytes(r?.total_size ?? c.total_size)} />
-                  <Fact k="Endorsements" v={num(c.endorsements)} />
-                  <Fact k="Downloads" v={num(c.downloads)} />
-                  <Fact k="Slug" v={c.slug} />
-                  {r && <Fact k="Revision status" v={r.status} />}
-                  {q.data?.update_available != null && <Fact k="Update" v={`Revision ${q.data.update_available} available`} />}
-                </dl>
-              </div>
-              <Summary text={r?.summary || c.summary} />
-            </>
-          ) : tab === "about" ? (
-            <About game={game} target={{ kind: "collection", slug: c.slug }} summary={r?.summary || c.summary} />
-          ) : mods.length > 0 ? (
-            <ModGrid mods={mods} onOpen={(m, row) => setOpened({ m, row })} />
-          ) : (
-            !q.isPending && !q.isError && <p className="text-label text-zinc-400">No mods listed for this revision.</p>
-          )}
-        </DialogTabs>
-        {q.isPending && <p className="mt-4 text-label text-zinc-400">Loading revision details…</p>}
-        {q.isError && (
-          <div className="mt-4">
-            <ErrorNote>Could not load revision details: {errMsg(q.error)}</ErrorNote>
-          </div>
+    <Dialog title={c.name} subtitle={c.author ? `by ${c.author}` : undefined} onBack={onClose} returnFocus={returnFocus} wide fixedHeight>
+      <DialogTabs label="Collection" tabs={tabs} value={tab} onChange={setTab}>
+        {tab === "details" ? (
+          <>
+            {/* Picture left, facts right; stacked below sm. */}
+            <div className="flex flex-col gap-6 sm:flex-row sm:items-start">
+              <Picture url={c.image_url} name={c.name} className="aspect-[4/5] w-40 shrink-0 rounded-card" />
+              <dl className="grid min-w-0 flex-1 grid-cols-2 gap-x-6 gap-y-4 lg:grid-cols-3">
+                <Fact k="Author" v={r?.author ?? c.author ?? "?"} />
+                <Fact k="Category" v={c.category ?? "?"} />
+                <Fact k="Latest revision" v={latest ?? "?"} />
+                <Fact k="Status" v={installed === null ? "Not installed" : `Installed, revision ${installed}`} />
+                <Fact k="Mods" v={r ? `${r.mod_count}${r.optional_count ? ` (${r.optional_count} optional)` : ""}` : num(c.mod_count)} />
+                <Fact k="Size" v={bytes(r?.total_size ?? c.total_size)} />
+                <Fact k="Endorsements" v={num(c.endorsements)} />
+                <Fact k="Downloads" v={num(c.downloads)} />
+                <Fact k="Slug" v={c.slug} />
+                {r && <Fact k="Revision status" v={r.status} />}
+                {q.data?.update_available != null && <Fact k="Update" v={`Revision ${q.data.update_available} available`} />}
+              </dl>
+            </div>
+            <Summary text={r?.summary || c.summary} />
+          </>
+        ) : tab === "about" ? (
+          <About game={game} target={{ kind: "collection", slug: c.slug }} summary={r?.summary || c.summary} />
+        ) : mods.length > 0 ? (
+          <ul aria-label="Collection mods" className={MOD_GRID}>
+            {mods.map((m, i) => (
+              <ModTile
+                key={`${m.mod_id ?? "x"}-${i}`}
+                game={game}
+                m={revisionHit(m)}
+                statusUnknown
+                inert={m.mod_id === null}
+                extraStats={m.size ? <Stat icon={<HardDrivesIcon aria-hidden size={13} />} value={bytes(m.size)} label="size" /> : null}
+                extraBadges={
+                  <>
+                    {m.optional && <Badge>Optional</Badge>}
+                    {m.mod_id === null && <Badge>Not on Nexus</Badge>}
+                  </>
+                }
+              />
+            ))}
+          </ul>
+        ) : (
+          !q.isPending && !q.isError && <p className="text-label text-zinc-400">No mods listed for this revision.</p>
         )}
-        <ActionRow actions={actions} onClose={onClose} />
-      </Dialog>
-      {/* A sibling, not a child: React events bubble through portals, so the collection's Tab trap would see its keys. */}
-      {opened && <ModDetailsDialog game={game} m={revisionHit(opened.m)} statusUnknown onClose={() => setOpened(null)} returnFocus={opened.row} />}
-    </>
+      </DialogTabs>
+      {q.isPending && <p className="mt-4 text-label text-zinc-400">Loading revision details…</p>}
+      {q.isError && (
+        <div className="mt-4">
+          <ErrorNote>Could not load revision details: {errMsg(q.error)}</ErrorNote>
+        </div>
+      )}
+      <ActionRow actions={actions} onClose={onClose} />
+    </Dialog>
   );
 }

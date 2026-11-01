@@ -91,15 +91,17 @@ pub fn deploy_msgs(game: &GameConfig, r: &DeployReport) -> Vec<Msg> {
     }
     if let Some(p) = &r.purged {
         v.push(Msg::info(format!(
-            "Removed the previous deployment ({} files, {} originals restored).",
+            "Removed {} file(s) no longer deployed ({} original(s) restored).",
             p.removed, p.restored
         )));
     }
     if r.placed == 0 {
         v.extend(plugin_stage_msgs(r.plugins.as_ref()));
-        v.push(Msg::info(
-            "Nothing to deploy (no enabled mods with staged files).",
-        ));
+        v.push(Msg::info(if r.unchanged > 0 {
+            format!("Up to date: {} file(s) unchanged.", r.unchanged)
+        } else {
+            "Nothing to deploy (no enabled mods with staged files).".to_string()
+        }));
         return v;
     }
     if !r.conflicts.is_empty() {
@@ -120,12 +122,17 @@ pub fn deploy_msgs(game: &GameConfig, r: &DeployReport) -> Vec<Msg> {
         return v;
     }
     v.push(Msg::success(format!(
-        "Deployed {} file(s) from {} mod(s) to {} ({}); backed up {} original(s).",
+        "Deployed {} file(s) from {} mod(s) to {} ({}); backed up {} original(s){}.",
         r.placed,
         r.mods,
         game.name,
         methods_summary(&r.by_method),
-        r.backed_up
+        r.backed_up,
+        if r.unchanged > 0 {
+            format!("; {} unchanged file(s) left in place", r.unchanged)
+        } else {
+            String::new()
+        }
     )));
     v.extend(plugin_stage_msgs(r.plugins.as_ref()));
     v

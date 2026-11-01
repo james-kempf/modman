@@ -1083,3 +1083,69 @@ fn recovery_sweeps_orphaned_backup_blobs_but_keeps_held_ones() {
     assert!(!incoming.exists());
     assert!(held.exists());
 }
+
+fn inode_of(p: &Path) -> u64 {
+    std::fs::symlink_metadata(p).unwrap().ino()
+}
+
+#[test]
+fn redeploy_with_no_changes_touches_no_file() {
+    let mut fx = Fx::new();
+    fx.add_mod("a", 0, &[("x.txt", "a"), ("sub/y.txt", "a-y")]);
+    fx.add_mod("b", 1, &[("z.txt", "b")]);
+    fx.deploy().unwrap();
+    let x = inode_of(&fx.game_dir().join("x.txt"));
+    let rows = fx.count("SELECT COUNT(*) FROM deployments");
+    let r = fx.deploy().unwrap();
+    assert_eq!(r.placed, 0);
+    assert_eq!(r.backed_up, 0);
+    assert!(r.purged.is_none(), "nothing to undo");
+    assert_eq!(r.unchanged as i64, rows);
+    assert_eq!(inode_of(&fx.game_dir().join("x.txt")), x);
+    assert_eq!(fx.count("SELECT COUNT(*) FROM deployments"), rows);
+    fx.purge().unwrap();
+}
+
+#[test]
+fn redeploy_after_disable_undoes_only_that_mods_files() {
+    let mut fx = Fx::new();
+    fx.add_mod("a", 0, &[("keep.txt", "a-keep")]);
+    fx.add_mod("b", 1, &[("gone.txt", "b-gone")]);
+    fx.deploy().unwrap();
+    let keep = inode_of(&fx.game_dir().join("keep.txt"));
+    fx.store
+        .conn()
+        .execute("UPDATE mods SET enabled = 0 WHERE uid = 'b'", [])
+        .unwrap();
+    let r = fx.deploy().unwrap();
+    assert!(
+        !fx.game_dir().join("gone.txt").exists(),
+        "disabled mod's file removed"
+    );
+    assert_eq!(r.purged.as_ref().map(|p| p.removed), Some(1));
+    assert_eq!(r.placed, 0);
+    assert_eq!(r.unchanged, 1);
+    assert_eq!(inode_of(&fx.game_dir().join("keep.txt")), keep);
+    fx.purge().unwrap();
+    assert!(!fx.game_dir().join("keep.txt").exists());
+}
+
+#[test]
+fn redeploy_replaces_only_files_whose_winner_changed() {
+    let mut fx = Fx::new();
+    fx.add_mod("a", 0, &[("x.txt", "a"), ("only-a.txt", "a")]);
+    fx.add_mod("b", 1, &[("x.txt", "b")]);
+    fx.deploy().unwrap();
+    assert_eq!(fx.read("x.txt"), "b");
+    // Swap the priorities: a now wins x.txt.
+    fx.store
+        .conn()
+        .execute("UPDATE mods SET priority = 1 - priority", [])
+        .unwrap();
+    let r = fx.deploy().unwrap();
+    assert_eq!(fx.read("x.txt"), "a");
+    assert_eq!(r.placed, 1, "only x.txt is placed again");
+    assert_eq!(r.unchanged, 1, "only-a.txt stays");
+    fx.purge().unwrap();
+    assert!(!fx.game_dir().join("x.txt").exists());
+}

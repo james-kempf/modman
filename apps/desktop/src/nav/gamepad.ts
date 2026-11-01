@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Gamepad API polling -> navigation actions (standard mapping):
 // A select, B back, Y focus the view's search, LB/RB previous/next tab
-// (a dialog's tabs while one is open), D-pad or left stick move.
+// (a dialog's tabs while one is open), D-pad or left stick move, right stick
+// scrolls (smoothly, every frame, in proportion to the deflection).
 // Directions repeat while held; buttons fire once per press.
 
 import type { NavAction } from "./actions";
@@ -10,6 +11,13 @@ import { setModality } from "./modality";
 import type { Dir } from "./spatial";
 
 export const BUTTON = { A: 0, B: 1, Y: 3, LB: 4, RB: 5, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 } as const;
+
+/** Right stick deflection below this scrolls nothing. */
+const SCROLL_DEADZONE = 0.15;
+/** Scroll speed at full deflection, in px per ms (1 = 1000 px/s). */
+const SCROLL_PX_PER_MS = 1;
+/** A frame gap longer than this (a throttled or paused loop) scrolls at most this much. */
+const MAX_FRAME_MS = 50;
 
 export interface GamepadNavOptions {
   /** Stick deflection that counts as a direction. */
@@ -40,6 +48,9 @@ export class GamepadNav {
   private dir: Dir | null = null;
   private dirSince = 0;
   private lastRepeat = 0;
+  /** Fractional scroll pixels not yet applied (scrollTop takes whole pixels). */
+  private scrollRem = 0;
+  private lastPoll: number | null = null;
   private readonly deadzone: number;
   private readonly repeatDelay: number;
   private readonly repeatEvery: number;
@@ -64,9 +75,11 @@ export class GamepadNav {
     const down = new Map<NavInput, Set<number>>();
     const hold = (k: NavInput, i: number) => down.set(k, (down.get(k) ?? new Set()).add(i));
     let dir: Dir | null = null;
+    let stick = 0;
     for (const [i, p] of Array.from(this.getPads()).entries()) {
       if (!p?.connected) continue;
       for (const b of ["A", "B", "Y", "LB", "RB"] as const) if (pressed(p, BUTTON[b])) hold(b, i);
+      if (!stick) stick = rightStickY(p);
       if (dir) continue;
       dir = this.direction(p);
       if (dir) hold(dir, i);
@@ -110,7 +123,27 @@ export class GamepadNav {
       this.arbiter.notePad(dir, now);
       out.push({ type: "move", dir });
     }
+    const dy = this.scrollStep(stick, now);
+    if (dy) out.push({ type: "scroll", dy });
     return out;
+  }
+
+  /**
+   * Whole pixels to scroll this frame for the right stick at `v` (-1..1, up is
+   * negative): quadratic response for fine control near the centre, time-based
+   * so the speed does not depend on the frame rate, remainder carried over.
+   */
+  private scrollStep(v: number, now: number): number {
+    const dt = this.lastPoll === null ? 0 : Math.min(now - this.lastPoll, MAX_FRAME_MS);
+    this.lastPoll = now;
+    if (!v) {
+      this.scrollRem = 0;
+      return 0;
+    }
+    this.scrollRem += Math.sign(v) * v * v * SCROLL_PX_PER_MS * dt;
+    const whole = Math.trunc(this.scrollRem);
+    this.scrollRem -= whole;
+    return whole;
   }
 
   private direction(p: PadLike): Dir | null {
@@ -118,12 +151,26 @@ export class GamepadNav {
     if (pressed(p, BUTTON.DOWN)) return "down";
     if (pressed(p, BUTTON.LEFT)) return "left";
     if (pressed(p, BUTTON.RIGHT)) return "right";
+    // Some pads report the d-pad as a hat axis pair (6, 7) instead of buttons.
+    const hx = p.axes[6] ?? 0;
+    const hy = p.axes[7] ?? 0;
+    if (Math.max(Math.abs(hx), Math.abs(hy)) >= 0.5) {
+      if (Math.abs(hx) > Math.abs(hy)) return hx > 0 ? "right" : "left";
+      return hy > 0 ? "down" : "up";
+    }
     const x = p.axes[0] ?? 0;
     const y = p.axes[1] ?? 0;
     if (Math.max(Math.abs(x), Math.abs(y)) < this.deadzone) return null;
     if (Math.abs(x) > Math.abs(y)) return x > 0 ? "right" : "left";
     return y > 0 ? "down" : "up";
   }
+}
+
+/** The right stick's vertical deflection past the deadzone, rescaled to -1..1 (0 when inside it). */
+function rightStickY(p: PadLike): number {
+  const y = p.axes[3] ?? 0;
+  if (Math.abs(y) < SCROLL_DEADZONE) return 0;
+  return (y - Math.sign(y) * SCROLL_DEADZONE) / (1 - SCROLL_DEADZONE);
 }
 
 /**
@@ -140,8 +187,8 @@ export function startGamepadLoop(
   let running = false;
   const tick = () => {
     const actions = nav.poll(win.performance.now());
-    // Gamepad input fires no key event: switch the focus ring on here.
-    if (actions.length) setModality("nav", win.document);
+    // Gamepad input fires no key event: switch the focus ring on here (scrolling alone does not).
+    if (actions.some((a) => a.type !== "scroll")) setModality("nav", win.document);
     actions.forEach(dispatch);
     frame = win.requestAnimationFrame(tick);
   };
