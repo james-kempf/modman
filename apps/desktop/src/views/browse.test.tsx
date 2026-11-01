@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Browse: single-control cards, their details dialogs (Install / Remove, a
-// collection's mods), the session-restored
-// listing (filters, page, scroll, focus) and Previous/Next paging.
+// Browse: single-control cards, their details dialogs (Details / About / Mods
+// tabs switched by LB/RB or a click, Install / Remove, a collection's mod
+// grid), the header search (gamepad Y), the session-restored listing
+// (filters, page, scroll, focus) and Previous/Next paging.
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { useUi, type ViewId } from "../app/store";
+import { MOD_GRID } from "../components/browse/Tile";
 import { bytes } from "../components/ui";
 import type { Handler } from "../mock/fake";
 import { game } from "../mock/fixtures";
+import { performNav } from "../nav/actions";
+import { focusables } from "../nav/spatial";
 import { setup } from "../test/harness";
 
 async function open(view: ViewId, handlers: Record<string, Handler> = {}) {
@@ -60,6 +64,9 @@ const paged: Handler = (a) => {
     : { kind: "collections", total: 30, collections: ids.map((i) => coll(`s${i}`)) };
 };
 const lastReq = (t: { callsOf(c: string): unknown[] }) => reqOf(t.callsOf("browse").at(-1));
+/** Open a dialog's tab by clicking it (the tabs are no focus stops). */
+const clickTab = (user: ReturnType<typeof userEvent.setup>, dlg: HTMLElement, name: string | RegExp) =>
+  user.click(within(dlg).getByRole("tab", { name }));
 const showCollections = async (user: ReturnType<typeof userEvent.setup>) =>
   user.click(within(await screen.findByRole("group", { name: "Show" })).getByRole("button", { name: "Collections" }));
 
@@ -209,10 +216,12 @@ describe("Browse details (Browse-2)", () => {
     expect(t.callsOf("collection_info")).toEqual([{ game: null, reference: "abc" }]);
     expect(dlg).toHaveTextContent("2 (1 optional)");
     expect(dlg).toHaveTextContent("Revision 3 available");
+    await user.click(within(dlg).getByRole("tab", { name: "Mods (2)" }));
     const rows = within(within(dlg).getByRole("list", { name: "Collection mods" })).getAllByRole("listitem");
     expect(rows).toHaveLength(2);
     expect(rows[0]).toHaveTextContent("SkyUI");
-    expect(rows[0]).toHaveTextContent(`v5.2 · schlangster · ${bytes(2048)}`);
+    expect(rows[0]).toHaveTextContent("v5.2 · schlangster");
+    expect(rows[0]).toHaveTextContent(bytes(2048));
     expect(rows[0]).not.toHaveTextContent("Optional");
     expect(rows[1]).toHaveTextContent("Extra Bits");
     expect(rows[1]).toHaveTextContent("Optional");
@@ -225,6 +234,217 @@ describe("Browse details (Browse-2)", () => {
   });
 });
 
+const infoWith = (mods: Record<string, unknown>[]) => () => ({
+  game: "skyrimspecialedition",
+  slug: "abc",
+  revision: {
+    name: "Coll abc", author: "c", game_name: "Skyrim SE", number: 3, status: "published", latest: 3, mod_count: mods.length, optional_count: 0, total_size: 100, summary: "About text.", url: "",
+    mods,
+  },
+  installed: null,
+  update_available: null,
+});
+const collOnly: Handler = (a) =>
+  reqOf(a).kind === "mods" ? { kind: "mods", total: 0, mods: [] } : { kind: "collections", total: 1, collections: [coll("abc")] };
+
+describe("Browse toolbar and collection details layout (T3)", () => {
+  // B1. Fails when the Sort label goes back above the dropdown (stacked grid, text-label) instead of inline-left
+  // with the Segmented labels' eyebrow style, or the dropdown loses its "Sort" name.
+  it("the Sort label sits left of the dropdown with the Segmented label style", async () => {
+    await open("browse", { browse: collOnly });
+    const sort = await screen.findByRole("button", { name: /^Sort/ });
+    const label = screen.getByText("Sort", { selector: "span" });
+    const showLabel = within(screen.getByRole("group", { name: "Show" })).getByText("Show");
+    expect(label.className.split(" ")).toContain("eyebrow");
+    expect(showLabel.className.split(" ")).toContain("eyebrow");
+    expect(label.parentElement).toBe(sort.parentElement);
+    expect(label.parentElement!.className.split(" ")).toEqual(expect.arrayContaining(["flex", "items-center"]));
+    expect(label.parentElement!.className.split(" ")).not.toContain("grid");
+    expect(label.compareDocumentPosition(sort) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  // A1/A2. Fails when the mod grid shows by default, the description stays on Details instead of its own About tab,
+  // the summary leaves Details, the tabs lose their order or Mods count, go back to the Segmented pill look or do not
+  // stretch across the dialog, or the picture and facts are not side by side (stacking only when narrow).
+  it("collection details: Details (picture, facts, summary) | About (description) | Mods tabs, full width", async () => {
+    const { t, user } = await open("browse", {
+      browse: (a) =>
+        (a as { request: { about?: unknown } }).request.about ? { kind: "about", description: "Long **description**." } : collOnly(a),
+      collection_info: infoWith([
+        { name: "SkyUI", version: "5.2", author: "s", mod_id: 12604, size: 2048, optional: false },
+        { name: "Manual", version: null, author: null, mod_id: null, size: 0, optional: false },
+      ]),
+    });
+    await showCollections(user);
+    await user.click(await screen.findByRole("button", { name: "Coll abc" }));
+    const dlg = await screen.findByRole("dialog", { name: "Coll abc" });
+    expect(await within(dlg).findByText("About text.")).toBeInTheDocument();
+    const tablist = within(dlg).getByRole("tablist", { name: "Collection" });
+    expect(within(tablist).getAllByRole("tab").map((x) => x.textContent)).toEqual(["Details", "About", "Mods (2)"]);
+    expect(within(tablist).getByRole("tab", { name: "Details" })).toHaveAttribute("aria-selected", "true");
+    expect(within(dlg).getByRole("tabpanel")).toHaveAccessibleName("Details");
+    expect(within(dlg).queryByRole("region", { name: "About" })).toBeNull();
+    expect(within(dlg).queryByRole("list", { name: "Collection mods" })).toBeNull();
+    // Tab look: an underlined strip across the dialog, equal-width tabs.
+    expect(tablist.className.split(" ")).toEqual(expect.arrayContaining(["flex", "w-full", "border-b"]));
+    for (const tab of within(tablist).getAllByRole("tab")) {
+      expect(tab.className.split(" ")).toEqual(expect.arrayContaining(["flex-1", "border-b-2", "aria-selected:border-accent-400"]));
+      expect(tab).not.toHaveAttribute("aria-pressed");
+    }
+    // Picture and facts share a row from sm up, stacked below; the facts column can shrink (no horizontal scroll).
+    const facts = within(dlg).getByText("Latest revision").closest("dl")!;
+    const row = facts.parentElement!;
+    for (const c of ["flex", "flex-col", "sm:flex-row"]) expect(row.className.split(" ")).toContain(c);
+    expect(row.firstElementChild).not.toBe(facts);
+    expect(facts.className.split(" ")).toEqual(expect.arrayContaining(["min-w-0", "flex-1"]));
+    for (const k of ["Author", "Category", "Latest revision", "Status", "Mods", "Revision status"]) expect(facts).toHaveTextContent(k);
+
+    await clickTab(user, dlg, "About");
+    expect(within(dlg).getByRole("tabpanel")).toHaveAccessibleName("About");
+    const about = within(dlg).getByRole("region", { name: "About" });
+    expect(await within(about).findByText("description")).toHaveProperty("tagName", "STRONG");
+    expect(within(dlg).queryByText("Latest revision")).toBeNull();
+    expect(t.callsOf("browse").filter((a) => (a as { request: { about?: unknown } }).request.about)).toHaveLength(1);
+  });
+
+  // A1. Fails when the mod dialog has no Details | About tabs, or the description renders on Details.
+  it("mod details: Details (picture, facts, summary) | About (description)", async () => {
+    const { user } = await open("browse", {
+      browse: (a) =>
+        (a as { request: { about?: unknown } }).request.about
+          ? { kind: "about", description: "[b]Full text[/b]" }
+          : { kind: "mods", total: 1, mods: [hit(7, { summary: "Short summary." })] },
+    });
+    await user.click(await screen.findByRole("button", { name: "Mod 7" }));
+    const dlg = await screen.findByRole("dialog", { name: "Mod 7" });
+    const tablist = within(dlg).getByRole("tablist", { name: "Mod" });
+    expect(within(tablist).getAllByRole("tab").map((x) => x.textContent)).toEqual(["Details", "About"]);
+    expect(within(dlg).getByRole("tabpanel")).toHaveTextContent("Short summary.");
+    expect(within(dlg).getByRole("tabpanel")).toHaveTextContent("Nexus id");
+    expect(within(dlg).queryByRole("region", { name: "About" })).toBeNull();
+    await clickTab(user, dlg, "About");
+    expect(await within(within(dlg).getByRole("region", { name: "About" })).findByText("Full text")).toBeInTheDocument();
+    expect(within(dlg).queryByText("Nexus id")).toBeNull();
+  });
+
+  // A3. Fails when the tabs are focus stops (Tab or spatial nav), LB/RB (PageDown/PageUp under Steam Input) do not
+  // switch them or do not wrap, the app's view tabs switch too, or focus is stranded when its panel goes away.
+  it("dialog tabs switch with LB/RB, wrap, are no focus stops, and leave the app's views alone", async () => {
+    const { user } = await open("browse", {
+      browse: collOnly,
+      collection_info: infoWith([{ name: "SkyUI", version: "5.2", author: "s", mod_id: 12604, size: 2048, optional: false }]),
+    });
+    await showCollections(user);
+    await user.click(await screen.findByRole("button", { name: "Coll abc" }));
+    const dlg = await screen.findByRole("dialog", { name: "Coll abc" });
+    await within(dlg).findByText("About text.");
+    const tabs = within(dlg).getAllByRole("tab");
+    for (const tab of tabs) {
+      expect(tab).toHaveAttribute("tabindex", "-1");
+      expect(focusables(dlg)).not.toContain(tab);
+    }
+    const selected = () => within(dlg).getAllByRole("tab").find((x) => x.getAttribute("aria-selected") === "true")!.textContent;
+    await user.keyboard("{PageDown}");
+    expect(selected()).toBe("About");
+    act(() => performNav({ type: "tab", delta: 1 }));
+    expect(selected()).toBe("Mods (1)");
+    await user.keyboard("{PageDown}");
+    expect(selected()).toBe("Details");
+    await user.keyboard("{PageUp}");
+    expect(selected()).toBe("Mods (1)");
+    expect(useUi.getState().view).toBe("browse");
+    // Focus on a mod card, then LB: the card goes with its panel and focus lands on the dialog's Close.
+    act(() => within(dlg).getByRole("button", { name: "SkyUI" }).focus());
+    act(() => performNav({ type: "tab", delta: -1 }));
+    expect(selected()).toBe("About");
+    await waitFor(() => expect(document.activeElement).toBe(within(dlg).getByRole("button", { name: "Close" })));
+    // Clicking a tab switches without focusing it.
+    await clickTab(user, dlg, "Details");
+    expect(selected()).toBe("Details");
+    expect(document.activeElement).not.toHaveAttribute("role", "tab");
+  });
+
+  // A4. Fails when the Mods tab is not the Browse results grid of cards, or a mod without a Nexus id looks or acts
+  // like an activatable card.
+  it("the Mods tab is a grid of browse cards; mods without a Nexus id are dimmed, non-activatable cards", async () => {
+    const { user } = await open("browse", {
+      browse: collOnly,
+      collection_info: infoWith([
+        { name: "SkyUI", version: "5.2", author: "s", mod_id: 12604, size: 2048, optional: true },
+        { name: "Manual", version: null, author: null, mod_id: null, size: 0, optional: false },
+      ]),
+    });
+    await showCollections(user);
+    await user.click(await screen.findByRole("button", { name: "Coll abc" }));
+    const dlg = await screen.findByRole("dialog", { name: "Coll abc" });
+    await clickTab(user, dlg, "Mods (2)");
+    const list = await within(dlg).findByRole("list", { name: "Collection mods" });
+    expect(list.className).toBe(MOD_GRID);
+    const sky = within(list).getByRole("button", { name: "SkyUI" });
+    expect(sky).toHaveAttribute("aria-haspopup", "dialog");
+    expect(sky.closest("li")).toHaveTextContent("Optional");
+    const manual = within(list).getByText("Manual").closest("li")!;
+    expect(within(manual).queryByRole("button")).toBeNull();
+    expect(manual).toHaveTextContent("Not on Nexus");
+    const card = manual.firstElementChild!;
+    expect(card).toHaveAttribute("aria-disabled", "true");
+    expect(card.className.split(" ")).toContain("opacity-60");
+    expect(focusables(dlg)).not.toContain(card);
+  });
+
+  // B2. Fails when a listed mod does not open its details over the collection, or Back loses the Mods tab or
+  // strands focus instead of returning it to the mod's row.
+  it("a listed mod opens its details; Back returns to the Mods tab with focus on the card", async () => {
+    const { user } = await open("browse", {
+      browse: collOnly,
+      collection_info: infoWith([{ name: "SkyUI", version: "5.2", author: "schlangster", mod_id: 12604, size: 2048, optional: false }]),
+    });
+    await showCollections(user);
+    await user.click(await screen.findByRole("button", { name: "Coll abc" }));
+    let dlg = await screen.findByRole("dialog", { name: "Coll abc" });
+    await user.click(await within(dlg).findByRole("tab", { name: "Mods (1)" }));
+    const row = within(dlg).getByRole("button", { name: "SkyUI" });
+    // Controller: A on the focused card opens it.
+    act(() => row.focus());
+    act(() => performNav({ type: "select" }));
+    const mod = await screen.findByRole("dialog", { name: "SkyUI" });
+    expect(mod).toHaveTextContent("12604");
+    expect(mod).toHaveTextContent("schlangster");
+    // RB in the mod's dialog switches its tabs only, not the collection's underneath.
+    act(() => performNav({ type: "tab", delta: 1 }));
+    expect(within(mod).getByRole("tab", { name: "About" })).toHaveAttribute("aria-selected", "true");
+    expect(within(dlg).getByRole("tab", { name: "Mods (1)" })).toHaveAttribute("aria-selected", "true");
+    act(() => performNav({ type: "back" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "SkyUI" })).toBeNull());
+    dlg = screen.getByRole("dialog", { name: "Coll abc" });
+    expect(within(dlg).getByRole("tab", { name: "Mods (1)" })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(document.activeElement).toBe(row));
+  });
+});
+
+describe("Browse search (A5/A6)", () => {
+  // Fails when the search goes back into the listing card instead of the header's top right (as in Games), loses
+  // the shared wide search box, gamepad Y does not focus it, Enter does not search, or emptying it keeps the filter.
+  it("sits top right in the header, Y focuses it, Enter searches, emptying it lists all again", async () => {
+    const { t, user } = await open("browse", { browse: paged });
+    await screen.findByText("Mod 1");
+    const box = screen.getByRole("searchbox", { name: "Search" });
+    const header = box.closest("header")!;
+    expect(header).toContainElement(screen.getByRole("heading", { level: 1, name: "Browse" }));
+    expect(screen.getByRole("search", { name: "Search Nexus" }).className.split(" ")).toEqual(expect.arrayContaining(["w-96", "max-w-full"]));
+    expect(screen.queryByRole("button", { name: "Search" })).toBeNull();
+    act(() => performNav({ type: "search" }));
+    expect(document.activeElement).toBe(box);
+    await user.type(box, "sky{Enter}");
+    await waitFor(() => expect(lastReq(t)).toMatchObject({ text: "sky", offset: 0 }));
+    expect(await screen.findByText(/matching “sky”/)).toBeInTheDocument();
+    await user.clear(box);
+    // The unfiltered listing comes back (from cache: no new request needed).
+    await waitFor(() => expect(screen.queryByText(/matching “sky”/)).toBeNull());
+    expect(screen.getByText(/^30 mods, most endorsed/)).toBeInTheDocument();
+  });
+});
+
 describe("Browse session restore (Browse-3)", () => {
   // Fails when leaving Browse forgets the tab, period, sort, search words, page, scroll or focused tile.
   it("restores tab, filters, search, page, scroll and focus on returning", async () => {
@@ -232,8 +452,7 @@ describe("Browse session restore (Browse-3)", () => {
     await screen.findByText("Mod 1");
     await showCollections(user);
     await user.click(screen.getByRole("button", { name: "Month" }));
-    await user.type(screen.getByLabelText("Search"), "lore");
-    await user.click(screen.getByRole("button", { name: "Search" }));
+    await user.type(screen.getByLabelText("Search"), "lore{Enter}");
     await user.click(await screen.findByRole("button", { name: /^Next/ }));
     const card = await screen.findByRole("button", { name: "Coll s27" });
     act(() => card.focus());
@@ -293,5 +512,111 @@ describe("Browse paging (Browse-4)", () => {
     await user.click(within(screen.getByRole("navigation", { name: "Collections pages" })).getByRole("button", { name: /Next/ }));
     expect(await screen.findByText("Coll s25")).toBeInTheDocument();
     expect(lastReq(t)).toMatchObject({ kind: "collections", offset: 24 });
+  });
+});
+
+describe("Browse details About (T5)", () => {
+  type About = { kind: "mod"; mod_id: number } | { kind: "collection"; slug: string };
+  const aboutOf = (a: unknown) => (a as { request: { about?: About } }).request.about;
+  /** Pages for listings; `describe` answers about requests. */
+  const withAbout =
+    (page: Handler, describe: (about: About) => unknown): Handler =>
+    (a) => {
+      const about = aboutOf(a);
+      return about ? describe(about) : page(a);
+    };
+  const oneMod: Handler = () => ({ kind: "mods", total: 1, mods: [hit(7, { summary: "Short summary." })] });
+
+  // Fails when the description is fetched with the listing (not on open), the about request does not name the
+  // mod, or the BBCode shows as raw markup instead of formatted content in the About section.
+  it("mod details fetch the description on open and render its BBCode", async () => {
+    const { t, user } = await open("browse", {
+      browse: withAbout(oneMod, () => ({ kind: "about", description: "[b]Bold intro[/b]\n<br />[list][*]Feature[/list]" })),
+    });
+    const card = await screen.findByRole("button", { name: "Mod 7" });
+    expect(t.callsOf("browse").filter((a) => aboutOf(a))).toHaveLength(0);
+    await user.click(card);
+    const dlg = await screen.findByRole("dialog", { name: "Mod 7" });
+    // Fetched when About opens, not with the Details tab.
+    expect(t.callsOf("browse").filter((a) => aboutOf(a))).toHaveLength(0);
+    await clickTab(user, dlg, "About");
+    const about = within(dlg).getByRole("region", { name: "About" });
+    expect(await within(about).findByText("Bold intro")).toHaveProperty("tagName", "STRONG");
+    expect(within(about).getByRole("listitem")).toHaveTextContent("Feature");
+    expect(about).not.toHaveTextContent("[b]");
+    expect(about).not.toHaveTextContent("Short summary.");
+    expect(t.callsOf("browse").map(aboutOf).filter(Boolean)).toEqual([{ kind: "mod", mod_id: 7 }]);
+  });
+
+  // Fails when a link in the description navigates the webview or skips the backend open_url command.
+  it("description links open through open_url", async () => {
+    const { t, user } = await open("browse", {
+      browse: withAbout(oneMod, () => ({ kind: "about", description: "[url=https://smapi.io]SMAPI[/url]" })),
+      open_url: (a) => (a as { url: string }).url,
+    });
+    await user.click(await screen.findByRole("button", { name: "Mod 7" }));
+    const dlg = await screen.findByRole("dialog", { name: "Mod 7" });
+    await clickTab(user, dlg, "About");
+    const link = await within(dlg).findByRole("link", { name: "SMAPI" });
+    await user.click(link);
+    await waitFor(() => expect(t.callsOf("open_url")).toEqual([{ url: "https://smapi.io/" }]));
+  });
+
+  // Fails when an empty description or a failed fetch leaves About blank (no summary fallback) or hides the error.
+  it("falls back to the summary when the description is empty", async () => {
+    const { user } = await open("browse", { browse: withAbout(oneMod, () => ({ kind: "about", description: null })) });
+    await user.click(await screen.findByRole("button", { name: "Mod 7" }));
+    const dlg = await screen.findByRole("dialog", { name: "Mod 7" });
+    await clickTab(user, dlg, "About");
+    const about = within(dlg).getByRole("region", { name: "About" });
+    expect(await within(about).findByText("Short summary.")).toBeInTheDocument();
+    expect(within(dlg).queryByText("Loading description…")).toBeNull();
+  });
+
+  it("shows the error and the summary when the description fails to load", async () => {
+    const { user } = await open("browse", {
+      browse: withAbout(oneMod, () => {
+        throw { message: "Nexus down" };
+      }),
+    });
+    await user.click(await screen.findByRole("button", { name: "Mod 7" }));
+    const dlg = await screen.findByRole("dialog", { name: "Mod 7" });
+    await clickTab(user, dlg, "About");
+    const about = within(dlg).getByRole("region", { name: "About" });
+    expect(await within(about).findByText(/Could not load the description: Nexus down/)).toBeInTheDocument();
+    expect(within(about).getByText("Short summary.")).toBeInTheDocument();
+  });
+
+  // Fails when the loading state is missing while the description is on its way.
+  it("shows a loading state while fetching", async () => {
+    let release!: (v: unknown) => void;
+    const { user } = await open("browse", {
+      browse: withAbout(oneMod, () => new Promise((r) => (release = r))),
+    });
+    await user.click(await screen.findByRole("button", { name: "Mod 7" }));
+    const dlg = await screen.findByRole("dialog", { name: "Mod 7" });
+    await clickTab(user, dlg, "About");
+    expect(await within(dlg).findByText("Loading description…")).toBeInTheDocument();
+    act(() => release({ kind: "about", description: "Ready text" }));
+    expect(await within(dlg).findByText("Ready text")).toBeInTheDocument();
+    expect(within(dlg).queryByText("Loading description…")).toBeNull();
+  });
+
+  // Fails when collection details do not ask for the collection's description by slug, or its Markdown shows raw.
+  it("collection details render the Markdown description in About", async () => {
+    const { t, user } = await open("browse", {
+      browse: withAbout(collOnly, () => ({ kind: "about", description: "### Install notes\n\n**Read me** first.\n\n<script>alert(1)</script>" })),
+      collection_info: infoWith([]),
+    });
+    await showCollections(user);
+    await user.click(await screen.findByRole("button", { name: "Coll abc" }));
+    const dlg = await screen.findByRole("dialog", { name: "Coll abc" });
+    await clickTab(user, dlg, "About");
+    const about = within(dlg).getByRole("region", { name: "About" });
+    expect(await within(about).findByRole("heading", { name: "Install notes" })).toBeInTheDocument();
+    expect(within(about).getByText("Read me").tagName).toBe("STRONG");
+    expect(about).toHaveTextContent("<script>alert(1)</script>");
+    expect(dlg.querySelector("script")).toBeNull();
+    expect(t.callsOf("browse").map(aboutOf).filter(Boolean)).toEqual([{ kind: "collection", slug: "abc" }]);
   });
 });

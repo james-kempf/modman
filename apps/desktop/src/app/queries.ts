@@ -13,11 +13,14 @@ export function makeQueryClient(): QueryClient {
   });
 }
 
-/** Picture queries: no command changes them (game art's key holds the app id) and they may need the network. */
-const PICTURES = new Set(["art", "collection-art"]);
+/**
+ * Picture queries and Nexus descriptions: no command changes them (game art's key holds the app id) and they
+ * may need the network.
+ */
+const PICTURES = new Set(["art", "collection-art", "nexus-about"]);
 
 /**
- * Refresh after a command or job: every query except pictures. `refetchType: "all"`
+ * Refresh after a command or job: every query except pictures and descriptions. `refetchType: "all"`
  * also refetches queries whose view is not mounted (the Overview counts), so they
  * are current when the user switches to that view instead of only after it mounts.
  */

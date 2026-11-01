@@ -2,7 +2,7 @@
 // Demo Nexus listings for Browse: a fixed catalogue, filtered by period and
 // words, sorted and paged like the backend (24 per page).
 
-import type { BrowseRequest, BrowseView, CollectionHit, SearchHit } from "../ipc/types";
+import type { AboutTarget, AboutView, BrowseRequest, BrowseView, CollectionHit, SearchHit } from "../ipc/types";
 
 const DAY = 86_400_000;
 const PAGE = 24;
@@ -114,4 +114,13 @@ export function demoBrowse(
     };
   });
   return { kind: "collections", total: hits.length, collections };
+}
+
+/** A demo description in each item's real format: BBCode for mods, Markdown for collections. */
+export function demoAbout(about: AboutTarget): AboutView {
+  const description =
+    about.kind === "mod"
+      ? `[center][size=5][b]Demo mod ${about.mod_id}[/b][/size][/center]\n<br />A [i]stand-in[/i] description with a [url=https://www.nexusmods.com]link[/url].\n<br />[list]\n<br />[*]Feature one\n<br />[*]Feature two\n<br />[/list]\n<br />[spoiler]Hidden details.[/spoiler]`
+      : `### Demo collection ${about.slug}\n\nA **stand-in** description with a [link](https://www.nexusmods.com).\n\n- First step\n- Second step\n\n> Read the install notes.`;
+  return { kind: "about", description };
 }

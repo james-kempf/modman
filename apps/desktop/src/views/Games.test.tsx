@@ -114,6 +114,18 @@ describe("game library", () => {
   });
 
   // Fails when an experimental game is not labelled, or a tested one is labelled experimental.
+  // A5/A6. Fails when the filter leaves the header's top right, gamepad Y does not focus it, or it loses the
+  // shared longer width (capped so narrow windows do not scroll sideways).
+  it("the search sits top right in the header, wide, and gamepad Y focuses it", async () => {
+    await library();
+    const box = screen.getByRole("searchbox", { name: "Search games" });
+    expect(box.closest("header")).toContainElement(screen.getByRole("heading", { level: 1, name: "Games" }));
+    expect(screen.getByRole("search", { name: "Filter games" }).className.split(" ")).toEqual(expect.arrayContaining(["w-96", "max-w-full"]));
+    expect(box.className.split(" ")).toContain("w-full");
+    act(() => performNav({ type: "search" }));
+    expect(document.activeElement).toBe(box);
+  });
+
   it("labels support: experimental vs tested", async () => {
     await library();
     expect(within(tile("Cyberpunk 2077")).getByTestId("experimental-badge")).toHaveTextContent("Experimental");
@@ -188,8 +200,10 @@ describe("game library", () => {
 
 describe("add-game dialog", () => {
   const detected = [
-    { domain: "fallout4", name: "Fallout 4", install_dir: "/s/Fallout 4", support: "experimental", configured: false },
-    { domain: "skyrimspecialedition", name: "Skyrim Special Edition", install_dir: "/s/SSE", support: "tested", configured: true },
+    { domain: "fallout4", name: "Fallout 4", appid: 377160, install_dir: "/s/Fallout 4", support: "experimental", configured: false },
+    { domain: "skyrimspecialedition", name: "Skyrim Special Edition", appid: 489830, install_dir: "/s/SSE", support: "tested", configured: true },
+    // No preset: offered in the Games grid, not as a one-click add here.
+    { domain: "steam-632360", name: "Risk of Rain 2", appid: 632360, install_dir: "/s/RoR2", support: null, configured: false },
   ];
 
   // Fails when detected games are not offered, or Add does not pass the Steam folder / close the dialog.

@@ -186,11 +186,19 @@ export interface UiState {
 
   /** The add-game dialog (the Games view's "Add game" tile) is open. */
   addGame: boolean;
-  setAddGame(open: boolean): void;
+  /** Prefill of the dialog's manual form (an unsupported game found in Steam). */
+  addGamePrefill: AddGamePrefill | null;
+  setAddGame(open: boolean, prefill?: AddGamePrefill): void;
 
   browse: BrowseSession | null;
   /** Merge into the game's Browse session (a session of another game is replaced). */
   saveBrowse(game: string, patch: Partial<Omit<BrowseSession, "game">>): void;
+}
+
+/** A game found in Steam with no preset: its name and install folder. */
+export interface AddGamePrefill {
+  name: string;
+  path: string;
 }
 
 let seq = 0;
@@ -212,6 +220,7 @@ const initial = {
   loaderLog: {},
   osk: null,
   addGame: false,
+  addGamePrefill: null as AddGamePrefill | null,
   browse: null as BrowseSession | null,
 };
 
@@ -341,7 +350,7 @@ export const useUi = create<UiState>()((set, get) => ({
   openOsk: (t) => set({ osk: t }),
   closeOsk: () => set({ osk: null }),
 
-  setAddGame: (open) => set({ addGame: open }),
+  setAddGame: (open, prefill) => set({ addGame: open, addGamePrefill: (open && prefill) || null }),
 
   saveBrowse: (game, patch) =>
     set((s) => ({ browse: { ...(s.browse?.game === game ? s.browse : browseDefaults(game)), ...patch } })),

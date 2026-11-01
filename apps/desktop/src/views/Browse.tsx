@@ -6,7 +6,7 @@
 // the download queue.
 
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode, type Ref } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent } from "react";
 import { errMsg } from "../app/bridge";
 import { useActiveGame } from "../app/queries";
 import { useBusy, useRun } from "../app/run";
@@ -22,16 +22,13 @@ import {
   DownloadSimpleIcon,
   HardDrivesIcon,
   LinkIcon,
-  MagnifyingGlassIcon,
   PackageIcon,
   ThumbsUpIcon,
   TrashIcon,
-  XIcon,
 } from "@phosphor-icons/react";
 import {
   Badge,
   Button,
-  CARD_TILE,
   Card,
   CardSection,
   Empty,
@@ -42,6 +39,7 @@ import {
   StatusDot,
   TextField,
   Toggle,
+  SearchField,
   ViewFrame,
   ViewHeader,
   bytes,
@@ -53,12 +51,7 @@ import { collectionText, collectionTone, removedText } from "./Collections";
 import { uninstalledText } from "./Mods";
 import { installKey } from "./Requirements";
 import { NoGame } from "../components/shell/NoGame";
-
-/** 12345 -> "12.3K" (legacy `compact`). */
-function compact(n: number | null): string {
-  if (n === null) return "0";
-  return Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(n);
-}
+import { FOCUS_ATTR, MOD_GRID, MOD_PICTURE, RESULTS_GRID, Stat, Tile, compact } from "../components/browse/Tile";
 
 const FOMOD = [
   { value: "ask", label: "Ask (wizard)" },
@@ -124,10 +117,9 @@ export function Browse() {
   const { game, isLoading } = useActiveGame();
   return (
     <ViewFrame>
-      <ViewHeader
-        title="Browse"
-        eyebrow={game?.name}
-      />
+      <ViewHeader title="Browse" eyebrow={game?.name}>
+        {game?.nexus_domain && <BrowseSearch key={game.id} game={game.id} />}
+      </ViewHeader>
       {isLoading ? null : !game ? (
         // Every install goes into the active game.
         <NoGame>Pick or add a game in Games first; Browse shows and installs mods for the active game.</NoGame>
@@ -295,9 +287,6 @@ export const PAGE_SIZE = 24;
 /** Items in one browse page. */
 const pageItems = (p: BrowseView) => (p.kind === "mods" ? p.mods.length : p.collections.length);
 
-/** Marks a Browse control whose focus is remembered for the session (value: a stable key). */
-const FOCUS_ATTR = "data-browse-focus";
-
 /** The scrolling view container (App's <main>). */
 const scroller = () => document.querySelector("main");
 
@@ -356,9 +345,32 @@ function useBrowsePosition(game: string, ready: boolean) {
   };
 }
 
+/**
+ * The Nexus search, top right in the header like the Games filter: Enter (or the on-screen keyboard's Search)
+ * lists the matches; emptying the field lists everything again.
+ */
+function BrowseSearch({ game }: { game: string }) {
+  const [s, save] = useBrowseSession(game);
+  return (
+    <SearchField
+      region="Search Nexus"
+      label="Search"
+      name="browse-search"
+      data-osk-submit="Search"
+      value={s.draft}
+      placeholder={s.kind === "mods" ? "Search mod names" : "Search collections"}
+      onChange={(e) => {
+        const draft = e.target.value;
+        save(!draft.trim() && s.text ? { draft, text: "", page: 0 } : { draft });
+      }}
+      onSubmit={() => save({ text: s.draft.trim(), page: 0 })}
+    />
+  );
+}
+
 function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
   const [s, save] = useBrowseSession(game);
-  const { kind, period, sort, draft, text, page } = s;
+  const { kind, period, sort, text, page } = s;
   // Any change to what is listed starts again at the first page.
   const refine = (patch: Partial<Omit<BrowseSession, "game">>) => save({ ...patch, page: 0 });
   const q = useQuery({
@@ -392,35 +404,12 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
           : undefined
       }
     >
-      <CardSection className="grid gap-5">
-        <div className="flex flex-wrap items-end gap-x-6 gap-y-4">
+      <CardSection>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-4">
           <Segmented label="Show" value={kind} options={KINDS} onChange={(v) => refine({ kind: v })} />
           <Segmented label="Created" value={period} options={PERIODS} onChange={(v) => refine({ period: v })} />
-          <Select label="Sort" value={sort} options={SORTS} onChange={(v) => refine({ sort: v })} />
+          <Select label="Sort" inline value={sort} options={SORTS} onChange={(v) => refine({ sort: v })} />
         </div>
-        <form
-          className="flex flex-wrap items-end gap-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            refine({ text: draft.trim() });
-          }}
-        >
-          <TextField
-            label="Search"
-            value={draft}
-            onChange={(e) => save({ draft: e.target.value })}
-            className="min-w-0 flex-[1_1_18rem]"
-            placeholder={kind === "mods" ? "Search mod names" : "Search collections"}
-          />
-          <Button type="submit" inactive={draft.trim() === text} icon={<MagnifyingGlassIcon aria-hidden size={16} />}>
-            Search
-          </Button>
-          {text && (
-            <Button tone="ghost" icon={<XIcon aria-hidden size={16} />} onClick={() => refine({ draft: "", text: "" })}>
-              Clear
-            </Button>
-          )}
-        </form>
       </CardSection>
       <CardSection>
         {!linked ? (
@@ -443,7 +432,7 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
         ) : (
           <>
             <ul
-              className={cx("@container grid gap-4 sm:grid-cols-2", kind === "mods" && "xl:grid-cols-3")}
+              className={kind === "mods" ? MOD_GRID : RESULTS_GRID}
               aria-label={kind === "mods" ? "Mods" : "Collections"}
               aria-busy={q.isPlaceholderData || undefined}
             >
@@ -482,104 +471,6 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
         )}
       </CardSection>
     </Card>
-  );
-}
-
-/**
- * One browse result: a single focusable card (picture, name and byline,
- * summary, stats, status badges) styled and highlighted like the Games tiles.
- * Activating it opens the item's details dialog, which holds its actions.
- */
-function Tile({
-  picture,
-  name,
-  byline,
-  summary,
-  stats,
-  badges,
-  focusKey,
-  onOpen,
-  cardRef,
-  dialog,
-  horizontal = false,
-}: {
-  horizontal?: boolean;
-  picture: ReactNode;
-  name: string;
-  byline: string;
-  summary: string | null;
-  stats: ReactNode;
-  /** Non-interactive status badges (Installed, ...). */
-  badges: ReactNode;
-  /** The card's session focus key ([data-browse-focus]). */
-  focusKey: string;
-  onOpen: () => void;
-  cardRef: Ref<HTMLButtonElement>;
-  /** The open details dialog (portalled), if any. */
-  dialog: ReactNode;
-}) {
-  const statusId = useId();
-  const text = (
-    <>
-      <span className="block shrink-0 truncate text-[15.5px] font-medium text-zinc-100" title={name}>
-        {name}
-      </span>
-      <span className="block shrink-0 truncate font-mono text-[11.5px] text-dim">{byline}</span>
-      {summary && (
-        <span
-          data-testid="tile-summary"
-          className={cx(
-            "mt-2 block min-h-0 overflow-hidden text-ellipsis text-label leading-relaxed text-zinc-400",
-            horizontal ? "line-clamp-4 shrink" : "line-clamp-2",
-          )}
-        >
-          {summary}
-        </span>
-      )}
-      <span className="mt-auto flex min-w-0 shrink-0 flex-wrap items-center gap-x-4 gap-y-2 pt-3">
-        {stats}
-        <span id={statusId} className={cx("flex flex-wrap items-center gap-1.5 empty:hidden", !horizontal && "ml-auto")}>
-          {badges}
-        </span>
-      </span>
-    </>
-  );
-  return (
-    <li className="min-w-0">
-      <button
-        ref={cardRef}
-        type="button"
-        aria-label={name}
-        aria-describedby={statusId}
-        aria-haspopup="dialog"
-        {...{ [FOCUS_ATTR]: focusKey }}
-        onClick={onOpen}
-        className={cx(CARD_TILE, "border-hairline bg-ink", horizontal ? "flex-row" : "flex-col pb-3.5")}
-      >
-        {picture}
-        {horizontal ? (
-          // Collections: the picture alone sets the card's height. The text sits absolutely in the column beside
-          // it, so a long summary never makes the card taller; it shrinks (clipped, ellipsis) between the fixed
-          // title/byline and the stats/badges row.
-          <span className="relative min-w-0 flex-1 self-stretch">
-            <span className="absolute inset-0 flex flex-col overflow-hidden px-1.5 py-1">{text}</span>
-          </span>
-        ) : (
-          <span className="flex min-w-0 flex-1 flex-col self-stretch px-1.5">{text}</span>
-        )}
-      </button>
-      {dialog}
-    </li>
-  );
-}
-
-function Stat({ icon, value, label }: { icon: ReactNode; value: string; label: string }) {
-  return (
-    <span className="flex min-w-0 items-center justify-start gap-1.5 font-mono text-[11.5px] text-dim">
-      <span className="shrink-0">{icon}</span>
-      <span className="truncate">{value}</span>
-      <span className="sr-only">{label}</span>
-    </span>
   );
 }
 
@@ -667,14 +558,13 @@ function useDetails() {
   return { open, card, show: () => setOpen(true), hide: () => setOpen(false) };
 }
 
-// Mod pictures fill the tile's width at 16:9 (Nexus tile art). Collection pictures are 4:5 portrait, left of the
+// Mod pictures fill the tile's width at 16:9 (MOD_PICTURE). Collection pictures are 4:5 portrait, left of the
 // text, and their width is a mod picture's height. The results <ul> is the container
 // (100cqw), and the mod tile's picture width is its column (mods: 1 / sm 2 / xl 3, gap-4 = 1rem) less the tile's
 // p-2.5 and 1px border (1.25rem + 2px); times 9/16 is that picture's height. Keep in step with the grid and Tile.
 // The monogram fallback takes the same box, so a picture arriving never shifts the grid.
 // self-start: the horizontal tile's row stretches its items to the text column's (or grid row's) height, and a
 // stretched cross size overrides aspect-ratio when the width is fixed, so the picture would grow past 4:5.
-const MOD_PICTURE = "aspect-video w-full shrink-0 rounded-card";
 const COLLECTION_PICTURE = cx(
   "aspect-[4/5] shrink-0 self-start rounded-card",
   "w-[calc((100cqw-1.25rem-2px)*9/16)]",
@@ -722,6 +612,7 @@ function ModTile({ game, m }: { game: string; m: SearchHit }) {
       dialog={
         details.open && (
           <ModDetailsDialog
+            game={game}
             m={m}
             onClose={details.hide}
             returnFocus={details.card.current}

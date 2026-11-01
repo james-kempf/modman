@@ -28,6 +28,37 @@ const BROWSE_COLLECTIONS_QUERY: &str =
       tileImage { thumbnailUrl(size: med) } user { name } category { name }
       latestPublishedRevision { revisionNumber modCount totalSize } } } }";
 
+const MOD_DESCRIPTION_QUERY: &str = "query($ids: [CompositeDomainWithIdInput!]!) {
+  legacyModsByDomain(ids: $ids) { nodes { modId description } } }";
+
+const COLLECTION_DESCRIPTION_QUERY: &str =
+    "query($slug: String, $domainName: String, $viewAdultContent: Boolean) {
+  collection(slug: $slug, domainName: $domainName, viewAdultContent: $viewAdultContent) { description } }";
+
+/// A non-blank string at `pointer`.
+fn description_at(data: &Value, pointer: &str) -> Option<String> {
+    data.pointer(pointer)
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+        .map(str::to_owned)
+}
+
+/// The description of `mod_id` in a `legacyModsByDomain` response (the
+/// node with that id; Nexus BBCode). `None` when missing or blank.
+fn parse_mod_description(data: &Value, mod_id: u64) -> Option<String> {
+    data.pointer("/legacyModsByDomain/nodes")?
+        .as_array()?
+        .iter()
+        .find(|n| n.get("modId").and_then(Value::as_u64) == Some(mod_id))
+        .and_then(|n| description_at(n, "/description"))
+}
+
+/// The description in a `collection` response (Markdown). `None` when
+/// missing or blank.
+fn parse_collection_description(data: &Value) -> Option<String> {
+    description_at(data, "/collection/description")
+}
+
 /// Order of a browse listing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -293,6 +324,41 @@ impl NexusClient {
         })
     }
 
+    /// A mod's long description (Nexus BBCode); `None` when it has none.
+    pub async fn mod_description(
+        &self,
+        game: &str,
+        mod_id: u64,
+    ) -> Result<Option<String>, NexusError> {
+        let g = check_domain(game)?;
+        let data = self
+            .graphql(
+                MOD_DESCRIPTION_QUERY,
+                json!({ "ids": [{ "gameDomain": g, "modId": mod_id }] }),
+            )
+            .await?;
+        Ok(parse_mod_description(&data, mod_id))
+    }
+
+    /// A collection's description (Markdown); `None` when it has none.
+    /// `view_adult` is the `adult` setting (else adult collections fail).
+    pub async fn collection_description(
+        &self,
+        game: &str,
+        slug: &str,
+        view_adult: bool,
+    ) -> Result<Option<String>, NexusError> {
+        let g = check_domain(game)?;
+        let data = self
+            .collection_graphql(
+                COLLECTION_DESCRIPTION_QUERY,
+                json!({ "slug": slug, "domainName": g }),
+                view_adult,
+            )
+            .await?;
+        Ok(parse_collection_description(&data))
+    }
+
     /// Looks up `fields` for several mods in one query (aliases `m<id>`).
     /// Nexus nulls the whole result when one mod is hidden or deleted, so
     /// the failing aliases are recorded as `None` and the rest asked again,
@@ -391,6 +457,46 @@ mod tests {
         assert_eq!(utc_date(1_790_640_000), "2026-09-29");
         assert_eq!(utc_date(951_782_400), "2000-02-29");
         assert_eq!(utc_date(1_790_726_399), "2026-09-29");
+    }
+
+    // Fails when the description is read from the wrong path, from another mod's node, or when a blank
+    // description is passed on instead of falling back (None).
+    #[test]
+    fn mod_description_parses_the_matching_node() {
+        let data = json!({ "legacyModsByDomain": { "nodes": [
+            { "modId": 7, "description": "other" },
+            { "modId": 266, "description": "[b]USSEP[/b]\n<br />x" }
+        ] } });
+        assert_eq!(
+            parse_mod_description(&data, 266).as_deref(),
+            Some("[b]USSEP[/b]\n<br />x")
+        );
+        assert_eq!(parse_mod_description(&data, 1), None);
+        let blank =
+            json!({ "legacyModsByDomain": { "nodes": [{ "modId": 1, "description": "  " }] } });
+        assert_eq!(parse_mod_description(&blank, 1), None);
+        assert_eq!(parse_mod_description(&json!({}), 1), None);
+        let null =
+            json!({ "legacyModsByDomain": { "nodes": [{ "modId": 1, "description": null }] } });
+        assert_eq!(parse_mod_description(&null, 1), None);
+    }
+
+    // Fails when the collection description path changes or blank/null descriptions are not None.
+    #[test]
+    fn collection_description_parses_or_is_none() {
+        let data = json!({ "collection": { "description": "### Hi\n\n**bold**" } });
+        assert_eq!(
+            parse_collection_description(&data).as_deref(),
+            Some("### Hi\n\n**bold**")
+        );
+        assert_eq!(
+            parse_collection_description(&json!({ "collection": { "description": "" } })),
+            None
+        );
+        assert_eq!(
+            parse_collection_description(&json!({ "collection": null })),
+            None
+        );
     }
 
     #[test]

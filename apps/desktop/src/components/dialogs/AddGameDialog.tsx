@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Add a game: supported games found in the Steam libraries (games_detect),
-// or any Nexus game domain with an optional folder (game_add). game_add is a
+// or any Nexus game domain with an optional folder (game_add). Opened for an
+// unsupported Steam game, the folder is prefilled and the user supplies the
+// domain. game_add is a
 // job: it may ask for the folder, profile or the active-game switch through
 // prompts, which open on top of this dialog.
 
@@ -11,6 +13,7 @@ import { errMsg } from "../../app/bridge";
 import { useBusy, useRun } from "../../app/run";
 import { useUi } from "../../app/store";
 import * as ipc from "../../ipc/commands";
+import type { Detected, Support } from "../../ipc/types";
 import { Dialog } from "./Dialog";
 import { Button, Empty, ErrorNote, SupportBadge, TextField } from "../ui";
 
@@ -35,10 +38,12 @@ export function AddGameDialog() {
   const close = () => useUi.getState().setAddGame(false);
   const run = useRun();
   const adding = useBusy("Add game");
+  const prefill = useUi((s) => s.addGamePrefill);
   const detect = useQuery({ queryKey: ["detect"], queryFn: ipc.gamesDetect });
-  const fresh = detect.data?.filter((d) => !d.configured) ?? [];
+  // Games without a preset need a domain: they go through the form below.
+  const fresh = detect.data?.filter((d): d is Detected & { support: Support } => !d.configured && d.support !== null) ?? [];
   const [domain, setDomain] = useState("");
-  const [folder, setFolder] = useState("");
+  const [folder, setFolder] = useState(prefill?.path ?? "");
   const [domainError, setDomainError] = useState<string | null>(null);
 
   const add = async (a: { domain: string; path?: string | null }) => {
@@ -114,7 +119,13 @@ export function AddGameDialog() {
         <h3 id="add-game-manual" className="eyebrow">
           Add by Nexus domain
         </h3>
+        {prefill && (
+          <p className="text-body text-zinc-300">
+            Vessel has no preset for {prefill.name}. Enter its Nexus Mods domain to add it with generic settings.
+          </p>
+        )}
         <TextField
+          autoFocus={!!prefill}
           label="Nexus game domain"
           placeholder="e.g. stardewvalley"
           helper="The part after nexusmods.com/ in the game's URL."

@@ -3,19 +3,20 @@
 // Steam library art (a data: URL from game_art, else a monogram), support,
 // active and deploy-due markers. Picking a tile makes that game active
 // (game_use) and opens its Overview. Below it, a second grid of the same tiles
-// lists supported games found in Steam but not managed yet (games_detect);
-// picking one adds it (game_add). Adding by Nexus domain stays in the
-// add-game dialog. Tiles are plain buttons in grids, so spatial navigation
+// lists every game found in Steam but not managed yet (games_detect), with
+// its Steam art by app id (steam_art). Picking a supported one adds it
+// (game_add); picking one with no preset opens the add-game dialog with its
+// folder prefilled, since only the user knows its Nexus domain. Tiles are plain buttons in grids, so spatial navigation
 // moves between them in 2D.
 
-import { CheckIcon, FlaskIcon, MagnifyingGlassIcon, PlusIcon, RocketLaunchIcon } from "@phosphor-icons/react";
+import { CheckIcon, FlaskIcon, PlusIcon, RocketLaunchIcon } from "@phosphor-icons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { errMsg } from "../app/bridge";
 import { useGames } from "../app/queries";
 import { useDeployDue, useRun } from "../app/run";
 import { useUi } from "../app/store";
-import { Badge, Button, CARD_TILE, Empty, ErrorNote, ViewFrame, ViewHeader, cx, monogram } from "../components/ui";
+import { Badge, Button, CARD_TILE, Empty, ErrorNote, SearchField, ViewFrame, ViewHeader, cx, monogram } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import type { Detected, GameView, Support } from "../ipc/types";
 import { openView } from "../nav/actions";
@@ -42,19 +43,13 @@ export function Games() {
     <ViewFrame>
       <ViewHeader title="Games">
         {all.length > 0 && (
-          <div role="search" aria-label="Filter games" className="relative">
-            <MagnifyingGlassIcon aria-hidden size={18} className="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 text-zinc-400" />
-            <input
-              type="search"
-              name="game-search"
-              aria-label="Search games"
-              autoComplete="off"
-              spellCheck={false}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="input w-56 pl-10"
-            />
-          </div>
+          <SearchField
+            region="Filter games"
+            label="Search games"
+            name="game-search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
         )}
       </ViewHeader>
       {games.error ? (
@@ -111,7 +106,12 @@ function GameTile({ game }: { game: GameView }) {
         game.active ? "border-accent-400/50 bg-white/4" : "border-white/6 bg-ink-2",
       )}
     >
-      <Art game={game} />
+      <Art
+        name={game.name}
+        // The app id is in the key: setting another one looks the art up again.
+        artKey={game.appid === null ? null : ["art", game.id, game.appid]}
+        load={() => ipc.gameArt(game.id)}
+      />
       <span className="grid min-w-0 gap-2 px-1">
         <span className="truncate text-lead font-medium text-zinc-50" title={game.name}>
           {game.name}
@@ -138,17 +138,16 @@ function GameTile({ game }: { game: GameView }) {
   );
 }
 
-/** Portrait art (2:3), else a flat monogram tile. */
-function Art({ game }: { game: Pick<GameView, "id" | "name" | "appid"> }) {
+/** Portrait art (2:3), else a flat monogram tile. artKey null: no art to look up. */
+function Art({ name, artKey, load }: { name: string; artKey: readonly unknown[] | null; load: () => Promise<string | null> }) {
   const q = useQuery({
-    // The app id is in the key: setting another one looks the art up again.
-    queryKey: ["art", game.id, game.appid],
-    queryFn: () => ipc.gameArt(game.id),
-    enabled: game.appid !== null,
+    queryKey: artKey ?? ["art-none"],
+    queryFn: load,
+    enabled: artKey !== null,
     staleTime: Infinity,
   });
   const src = q.data && q.data.startsWith("data:image/") ? q.data : null;
-  const m = monogram(game.name);
+  const m = monogram(name);
   return (
     <span aria-hidden className="relative block aspect-2/3 w-full overflow-hidden rounded-card bg-ink-3">
       {src ? (
@@ -165,7 +164,13 @@ function Art({ game }: { game: Pick<GameView, "id" | "name" | "appid"> }) {
   );
 }
 
-function SupportMark({ support }: { support: Support }) {
+function SupportMark({ support }: { support: Support | null }) {
+  if (support === null)
+    return (
+      <span data-testid="unsupported-badge" className="inline-flex" title="No Vessel preset: you supply the Nexus domain and settings">
+        <Badge>Unsupported</Badge>
+      </span>
+    );
   return support === "experimental" ? (
     <span data-testid="experimental-badge" className="inline-flex" title="Not tested end to end; may need manual fixes">
       <Badge tone="amber">
@@ -178,7 +183,7 @@ function SupportMark({ support }: { support: Support }) {
   );
 }
 
-/** Supported games found in Steam that are not managed yet; picking one adds it. */
+/** Games found in Steam that are not managed yet; picking one adds it. */
 function Unmanaged({ managed, q }: { managed: GameView[]; q: string }) {
   const detect = useQuery({ queryKey: ["detect"], queryFn: ipc.gamesDetect });
   const setAddGame = useUi((s) => s.setAddGame);
@@ -201,7 +206,7 @@ function Unmanaged({ managed, q }: { managed: GameView[]; q: string }) {
       ) : detect.isPending ? (
         <p className="text-body text-zinc-400">Looking for Steam games…</p>
       ) : !fresh.length ? (
-        <Empty>No other supported games found in Steam.</Empty>
+        <Empty>No other games found in Steam.</Empty>
       ) : !list.length ? (
         <p className="text-body text-zinc-400">No found games match “{q}”.</p>
       ) : (
@@ -219,20 +224,26 @@ function Unmanaged({ managed, q }: { managed: GameView[]; q: string }) {
 
 function DetectedTile({ found }: { found: Detected }) {
   const run = useRun();
+  const setAddGame = useUi((s) => s.setAddGame);
   const statusId = useId();
-  // key: a double click (or A pressed twice) adds once; the dialog shares it.
-  const add = () => void run(ADD, () => ipc.gameAdd({ domain: found.domain, path: found.install_dir }), { key: ADD });
+  const supported = found.support !== null;
+  const add = () =>
+    supported
+      ? // key: a double click (or A pressed twice) adds once; the dialog shares it.
+        void run(ADD, () => ipc.gameAdd({ domain: found.domain, path: found.install_dir }), { key: ADD })
+      : setAddGame(true, { name: found.name, path: found.install_dir });
   return (
     <button
       type="button"
       aria-label={`Add ${found.name}`}
+      aria-haspopup={supported ? undefined : "dialog"}
       aria-describedby={statusId}
       data-detected={found.domain}
       title={found.install_dir}
       onClick={add}
-      className={cx(TILE, "border-dashed border-white/15 bg-ink-2/60")}
+      className={cx(TILE, "border-dashed bg-ink-2/60", supported ? "border-white/15" : "border-white/8 opacity-80")}
     >
-      <Art game={{ id: found.domain, name: found.name, appid: null }} />
+      <Art name={found.name} artKey={["steam-art", found.appid]} load={() => ipc.steamArt(found.appid)} />
       <span className="grid min-w-0 gap-2 px-1">
         <span className="truncate text-lead font-medium text-zinc-200" title={found.name}>
           {found.name}

@@ -193,18 +193,22 @@ pub fn lookup(
 /// no art anywhere).
 pub fn game_art(cx: &Cx<'_>, game: &str, kind: ArtKind) -> R<Option<String>> {
     let g = games::require_game(cx.store.conn(), game)?;
-    let Some(appid) = g.appid else {
-        return Ok(None);
-    };
-    let roots = steam::steam_roots(&cx.paths.home);
-    Ok(lookup(
+    Ok(g.appid.and_then(|appid| steam_art(cx.paths, appid, kind)))
+}
+
+/// Library art of any Steam app (e.g. an installed game not managed yet).
+/// The cache file name derives from `appid` alone and fetches go only to
+/// [`art_url`] under the [`allowed_url`] guard.
+pub fn steam_art(paths: &Paths, appid: u32, kind: ArtKind) -> Option<String> {
+    let roots = steam::steam_roots(&paths.home);
+    lookup(
         &roots,
-        &art_dir(cx.paths),
+        &art_dir(paths),
         appid,
         kind,
         store::now(),
         |dest, url| fetch_image(dest, url, kind.max_bytes(), allowed_url),
-    ))
+    )
 }
 
 #[cfg(test)]

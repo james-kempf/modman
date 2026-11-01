@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Gamepad API polling -> navigation actions (standard mapping):
-// A select, B back, LB/RB previous/next tab, D-pad or left stick move.
+// A select, B back, Y focus the view's search, LB/RB previous/next tab
+// (a dialog's tabs while one is open), D-pad or left stick move.
 // Directions repeat while held; buttons fire once per press.
 
 import type { NavAction } from "./actions";
@@ -8,7 +9,7 @@ import { navArbiter, type NavArbiter, type NavInput } from "./arbiter";
 import { setModality } from "./modality";
 import type { Dir } from "./spatial";
 
-export const BUTTON = { A: 0, B: 1, LB: 4, RB: 5, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 } as const;
+export const BUTTON = { A: 0, B: 1, Y: 3, LB: 4, RB: 5, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 } as const;
 
 export interface GamepadNavOptions {
   /** Stick deflection that counts as a direction. */
@@ -65,7 +66,7 @@ export class GamepadNav {
     let dir: Dir | null = null;
     for (const [i, p] of Array.from(this.getPads()).entries()) {
       if (!p?.connected) continue;
-      for (const b of ["A", "B", "LB", "RB"] as const) if (pressed(p, BUTTON[b])) hold(b, i);
+      for (const b of ["A", "B", "Y", "LB", "RB"] as const) if (pressed(p, BUTTON[b])) hold(b, i);
       if (dir) continue;
       dir = this.direction(p);
       if (dir) hold(dir, i);
@@ -90,6 +91,7 @@ export class GamepadNav {
     };
     if (edge("A")) emit("A", { type: "select" });
     if (edge("B")) emit("B", { type: "back" });
+    if (edge("Y")) emit("Y", { type: "search" });
     if (edge("LB")) emit("LB", { type: "tab", delta: -1 });
     if (edge("RB")) emit("RB", { type: "tab", delta: 1 });
     this.held = down;

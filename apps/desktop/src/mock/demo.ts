@@ -7,10 +7,10 @@
 // prompt counts as cancel. Mods, the "changed since deploy" flag, profiles
 // and collections are kept per game.
 
-import type { Answer, BrowseRequest, CollectionRecord, ConfigEntry, LoaderCard, ModView, Msg, ProfileSummary, Prompt, ReqRow, UpdateReport } from "../ipc/types";
+import type { AboutTarget, Answer, BrowseRequest, CollectionRecord, ConfigEntry, LoaderCard, ModView, Msg, ProfileSummary, Prompt, ReqRow, UpdateReport } from "../ipc/types";
 import { createFakeTransport, type Args, type FakeTransport } from "./fake";
 import { afterChange, autoupdateStatus, deployReport, experimentalGame, game, mod } from "./fixtures";
-import { demoBrowse } from "./browse";
+import { demoAbout, demoBrowse } from "./browse";
 import { demoPoisoned, repairHandlers } from "./repair";
 import { DEMO_LOADER_MOD, installedLoaders, loaderHandlers } from "./loaders";
 
@@ -224,9 +224,18 @@ export function createDemoBackend(): FakeTransport {
       {
         domain: "fallout4",
         name: "Fallout 4",
+        appid: 377160,
         install_dir: "/steam/common/Fallout 4",
         support: "experimental",
         configured: games.some((g) => g.id === "fallout4" || g.nexus_domain === "fallout4"),
+      },
+      {
+        domain: "steam-632360",
+        name: "Risk of Rain 2",
+        appid: 632360,
+        install_dir: "/steam/common/Risk of Rain 2",
+        support: null,
+        configured: games.some((g) => g.folder === "/steam/common/Risk of Rain 2"),
       },
     ],
     game_use: (a: Args) => {
@@ -260,6 +269,8 @@ export function createDemoBackend(): FakeTransport {
       if (g.id !== "skyrimspecialedition") return null;
       return a!.kind === "library_hero" ? placeholderHero(g.name) : placeholderArt(g.name);
     },
+    // Steam art by app id: generated for the detected Fallout 4, none for the others.
+    steam_art: (a: Args) => (a!.appid === 377160 ? placeholderArt("Fallout 4") : null),
     open_folder: (a: Args) => {
       const g = games.find((x) => x.id === a!.game);
       if (!g) throw { message: `no game '${String(a!.game)}'` };
@@ -574,7 +585,11 @@ export function createDemoBackend(): FakeTransport {
         if (installed) changed(g);
         return { ...rep, updates: rep.updates.filter((u) => u.pinned), installed };
       }),
+    // The browser is not opened in the demo; the backend would reject non-web schemes.
+    open_url: (a: Args) => a!.url,
     browse: (a: Args) => {
+      const about = (a!.request as { about?: AboutTarget }).about;
+      if (about) return demoAbout(about);
       const g = st(a);
       return demoBrowse(
         a!.request as BrowseRequest,

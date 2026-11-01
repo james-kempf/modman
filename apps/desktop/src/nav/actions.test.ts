@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetUi, useUi } from "../app/store";
-import { BACK_EVENT, keyToNav, performNav } from "./actions";
+import { BACK_EVENT, TAB_EVENT, keyToNav, performNav } from "./actions";
 
 const key = (k: string, target: Element = document.body, mods: Partial<KeyboardEventInit> = {}) => {
   const e = new KeyboardEvent("keydown", { key: k, bubbles: true, ...mods });
@@ -81,11 +81,31 @@ describe("performNav", () => {
     expect(back).toHaveBeenCalledOnce();
   });
 
-  it("tab switching is blocked while a dialog is open", () => {
+  // Fails when LB/RB inside a dialog also switch the app's views, or never reach the dialog (its own tabs).
+  it("tab inside a dialog goes to the dialog, not the app's views", () => {
     const dlg = document.createElement("div");
     dlg.setAttribute("data-nav-scope", "");
     document.body.appendChild(dlg);
+    const tab = vi.fn();
+    dlg.addEventListener(TAB_EVENT, (e) => tab((e as CustomEvent).detail));
     performNav({ type: "tab", delta: 1 });
+    performNav({ type: "tab", delta: -1 });
     expect(useUi.getState().view).toBe("games");
+    expect(tab.mock.calls).toEqual([[{ delta: 1 }], [{ delta: -1 }]]);
+  });
+
+  // Fails when Y does not focus the view's search field, or reaches it behind an open dialog.
+  it("search focuses the view's search field, except while a dialog is open", () => {
+    const input = document.createElement("input");
+    input.setAttribute("data-view-search", "");
+    document.body.appendChild(input);
+    performNav({ type: "search" });
+    expect(document.activeElement).toBe(input);
+    input.blur();
+    const dlg = document.createElement("div");
+    dlg.setAttribute("data-nav-scope", "");
+    document.body.appendChild(dlg);
+    performNav({ type: "search" });
+    expect(document.activeElement).not.toBe(input);
   });
 });

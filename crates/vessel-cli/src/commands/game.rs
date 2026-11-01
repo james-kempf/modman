@@ -206,29 +206,33 @@ fn detect(ctx: &Ctx) -> Result<()> {
     let out = ctx.out;
     out.heading("Installed games with presets");
     let defs = ctx.definitions()?;
-    let found = games::detect_installed(&ctx.paths.home, &defs);
+    // Preset games only, as before; non-preset installs are a GUI listing.
+    let found: Vec<_> = games::detect_installed(&ctx.paths.home, &defs)
+        .into_iter()
+        .filter_map(|d| Some((d.definition?, d.app)))
+        .collect();
     if found.is_empty() {
         out.info(
             "No supported Steam games found. Any Nexus game works: vessel game add <domain> <path>",
         );
         return Ok(());
     }
-    for d in found {
-        let domain = &d.definition.domain;
+    for (def, app) in found {
+        let domain = &def.domain;
         let status = if games::get_game(ctx.store.conn(), domain)?.is_some() {
             out.green("configured")
         } else {
             format!("{} → vessel game add {domain}", out.yellow("not set up"))
         };
-        let support = match d.definition.support {
+        let support = match def.support {
             Support::Tested => String::new(),
             Support::Experimental => format!("  {}", out.dim("(experimental)")),
         };
         println!(
             "  {}  {}  {}{support}\n      {status}",
             out.bold(domain),
-            d.definition.name,
-            out.dim(&d.app.install_dir.display().to_string())
+            def.name,
+            out.dim(&app.install_dir.display().to_string())
         );
     }
     Ok(())

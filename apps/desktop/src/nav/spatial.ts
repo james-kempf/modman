@@ -5,14 +5,20 @@
 
 export type Dir = "up" | "down" | "left" | "right";
 
+/** Marks the current view's search field, focused by the "search" nav action (gamepad Y). */
+export const SEARCH_ATTR = "data-view-search";
+
+// tabindex=-1 opts a control out (e.g. dialog tabs, switched by LB/RB and the mouse only).
 const FOCUSABLE = [
   "button:not([disabled])",
   "a[href]",
   "input:not([disabled]):not([type=hidden])",
   "textarea:not([disabled])",
   "select:not([disabled])",
-  "[tabindex]:not([tabindex='-1'])",
-].join(",");
+  "[tabindex]",
+]
+  .map((s) => `${s}:not([tabindex='-1'])`)
+  .join(",");
 
 export function navScope(doc: Document = document): HTMLElement {
   const scopes = doc.querySelectorAll<HTMLElement>("[data-nav-scope]");

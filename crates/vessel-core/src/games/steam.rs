@@ -39,6 +39,8 @@ pub struct SteamApp {
     pub prefix: Option<PathBuf>,
     pub buildid: Option<String>,
     pub state_flags: Option<u32>,
+    /// Display name from the appmanifest.
+    pub name: Option<String>,
 }
 
 fn vdf_err(origin: &str, message: impl ToString) -> GamesError {
@@ -148,34 +150,85 @@ pub fn find_prefix(
         .find(|p| p.is_dir())
 }
 
+/// The app described by `<lib>/steamapps/appmanifest_<appid>.acf` when it
+/// names an existing `steamapps/common/<installdir>` folder.
+fn app_in_library(libraries: &[PathBuf], lib: &Path, appid: u32) -> Option<SteamApp> {
+    let acf = lib.join(format!("steamapps/appmanifest_{appid}.acf"));
+    let text = std::fs::read_to_string(&acf).ok()?;
+    let manifest = parse_app_manifest(&text, &acf.display().to_string())
+        .map_err(|e| tracing::warn!("skipping {}: {e}", acf.display()))
+        .ok()?;
+    let install_dir = lib.join("steamapps/common").join(&manifest.installdir);
+    install_dir.is_dir().then(|| SteamApp {
+        appid,
+        library: lib.to_path_buf(),
+        install_dir,
+        prefix: find_prefix(libraries, appid, Some(lib)),
+        buildid: manifest.buildid,
+        state_flags: manifest.state_flags,
+        name: manifest.name,
+    })
+}
+
 /// First library whose `appmanifest_<appid>.acf` names an existing
 /// `steamapps/common/<installdir>` folder.
 pub fn find_app(libraries: &[PathBuf], appid: u32) -> Option<SteamApp> {
+    libraries
+        .iter()
+        .find_map(|lib| app_in_library(libraries, lib, appid))
+}
+
+/// Steam tools without a `toolmanifest.vdf` (Steamworks Common
+/// Redistributables), plus known Proton / Steam Linux Runtime ids in case a
+/// tool folder lacks its manifest.
+pub const TOOL_APPIDS: [u32; 10] = [
+    228980, 1070560, 1391110, 1628350, 4183110, 1493710, 1887720, 2180100, 2805730, 4628710,
+];
+
+/// App ids of every `appmanifest_<appid>.acf` in `lib`, sorted.
+fn manifest_appids(lib: &Path) -> Vec<u32> {
+    let Ok(dir) = std::fs::read_dir(lib.join("steamapps")) else {
+        return Vec::new();
+    };
+    let mut ids: Vec<u32> = dir
+        .flatten()
+        .filter_map(|e| {
+            e.file_name()
+                .to_str()?
+                .strip_prefix("appmanifest_")?
+                .strip_suffix(".acf")?
+                .parse()
+                .ok()
+        })
+        .collect();
+    ids.sort_unstable();
+    ids
+}
+
+/// Every installed game across `libraries`: each appmanifest whose install
+/// folder exists and whose `StateFlags` say installed (a pending update
+/// still counts), minus Steam tools and runtimes (a `toolmanifest.vdf` in
+/// the install folder, or [`TOOL_APPIDS`]). An app in several libraries is
+/// taken from the first, as [`find_app`]. Read-only.
+pub fn list_installed_apps(libraries: &[PathBuf]) -> Vec<SteamApp> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
     for lib in libraries {
-        let acf = lib.join(format!("steamapps/appmanifest_{appid}.acf"));
-        let Ok(text) = std::fs::read_to_string(&acf) else {
-            continue;
-        };
-        let manifest = match parse_app_manifest(&text, &acf.display().to_string()) {
-            Ok(m) => m,
-            Err(e) => {
-                tracing::warn!("skipping {}: {e}", acf.display());
+        for appid in manifest_appids(lib) {
+            if seen.contains(&appid) || TOOL_APPIDS.contains(&appid) {
                 continue;
             }
-        };
-        let install_dir = lib.join("steamapps/common").join(&manifest.installdir);
-        if install_dir.is_dir() {
-            return Some(SteamApp {
-                appid,
-                library: lib.clone(),
-                install_dir,
-                prefix: find_prefix(libraries, appid, Some(lib)),
-                buildid: manifest.buildid,
-                state_flags: manifest.state_flags,
-            });
+            let Some(app) = app_in_library(libraries, lib, appid) else {
+                continue;
+            };
+            seen.insert(appid);
+            let installed = app.state_flags.is_some_and(state_flags::installed);
+            if installed && !app.install_dir.join("toolmanifest.vdf").exists() {
+                out.push(app);
+            }
         }
     }
-    None
+    out
 }
 
 /// Case-insensitive first object value for `key` in `obj`.
@@ -202,6 +255,11 @@ pub mod state_flags {
     /// Fully installed, no update pending or running, files intact.
     pub fn fully_installed(flags: u32) -> bool {
         flags & FULLY_INSTALLED != 0 && flags & (UPDATE_REQUIRED | BUSY_OR_BROKEN) == 0
+    }
+
+    /// Installed and intact; a pending update (not yet running) is allowed.
+    pub fn installed(flags: u32) -> bool {
+        flags & FULLY_INSTALLED != 0 && flags & BUSY_OR_BROKEN == 0
     }
 }
 
@@ -653,6 +711,88 @@ mod tests {
         )
         .unwrap();
         assert_eq!(tm.require_tool_appid, Some(1628350));
+    }
+
+    /// Writes `appmanifest_<appid>.acf` in `lib`, and its install folder
+    /// unless `dir` is false.
+    fn manifest(lib: &Path, appid: u32, name: &str, flags: u32, dir: bool) -> PathBuf {
+        let installdir = format!("{name} dir");
+        fs::create_dir_all(lib.join("steamapps")).unwrap();
+        fs::write(
+            lib.join(format!("steamapps/appmanifest_{appid}.acf")),
+            format!(
+                "\"AppState\" {{ \"appid\" \"{appid}\" \"name\" \"{name}\" \"installdir\" \"{installdir}\" \"StateFlags\" \"{flags}\" }}"
+            ),
+        )
+        .unwrap();
+        let p = lib.join("steamapps/common").join(installdir);
+        if dir {
+            fs::create_dir_all(&p).unwrap();
+        }
+        p
+    }
+
+    /// Catches: only preset/known apps scanned, second libraryfolders entry
+    /// ignored, update-pending games hidden, tools/runtimes, busy or
+    /// folderless installs listed, or a duplicate appid listed twice.
+    #[test]
+    fn list_installed_apps_scans_every_manifest_in_every_library() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (home, root, sd) = fake_steam(tmp.path());
+        manifest(&root, 632360, "Risk of Rain 2", 4, true);
+        manifest(&root, 1422450, "Deadlock", 6, true);
+        let proton = manifest(&root, 1493710, "Proton Experimental", 4, true);
+        fs::write(proton.join("toolmanifest.vdf"), "").unwrap();
+        let ge = manifest(&root, 3000001, "Some Runtime", 4, true);
+        fs::write(ge.join("toolmanifest.vdf"), "").unwrap();
+        manifest(&root, 228980, "Steamworks Common Redistributables", 4, true);
+        manifest(&root, 999001, "Updating", 1026, true);
+        manifest(&root, 999002, "No Folder", 4, false);
+        manifest(&root, 999003, "Not Installed", 0, true);
+        manifest(&sd, 1808500, "ARC Raiders", 4, true);
+        manifest(&sd, 632360, "Risk of Rain 2 copy", 4, true);
+
+        let libs = steam_libraries(&home);
+        let apps = list_installed_apps(&libs);
+        let mut got: Vec<(u32, &str)> = apps
+            .iter()
+            .map(|a| (a.appid, a.name.as_deref().unwrap()))
+            .collect();
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                (632360, "Risk of Rain 2"),
+                (1422450, "Deadlock"),
+                (1808500, "ARC Raiders"),
+            ]
+        );
+        let arc = apps.iter().find(|a| a.appid == 1808500).unwrap();
+        assert_eq!(arc.library, sd.canonicalize().unwrap());
+    }
+
+    /// Catches: the Flatpak Steam root not scanned.
+    #[test]
+    fn list_installed_apps_finds_games_under_flatpak_steam() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp
+            .path()
+            .join(".var/app/com.valvesoftware.Steam/.local/share/Steam");
+        manifest(&root, 646570, "Slay the Spire", 4, true);
+        let apps = list_installed_apps(&steam_libraries(tmp.path()));
+        assert_eq!(apps.len(), 1);
+        assert_eq!(apps[0].appid, 646570);
+        assert!(is_flatpak_steam(&apps[0].library));
+    }
+
+    /// Catches: a pending update hiding a game, or busy/broken counted.
+    #[test]
+    fn state_flags_installed_allows_pending_update_only() {
+        assert!(state_flags::installed(4));
+        assert!(state_flags::installed(6));
+        assert!(!state_flags::installed(2));
+        assert!(!state_flags::installed(4 | 1024));
+        assert!(!state_flags::installed(4 | 32));
     }
 
     #[test]

@@ -22,6 +22,8 @@ import type {
   ShortcutStatus,
   ArtKind,
   AutoupdateStatus,
+  AboutTarget,
+  AboutView,
   BrowseRequest,
   BrowseView,
   CollectionInfo,
@@ -94,10 +96,12 @@ export const COMMANDS = [
   "game_set",
   "game_launch",
   "game_art",
+  "steam_art",
   "open_folder",
   "mods_list",
   "mod_detail",
   "mod_open_page",
+  "open_url",
   "mods_set_enabled",
   "mod_move",
   "mods_uninstall",
@@ -212,6 +216,9 @@ export const gameLaunch = (game?: Game) => call<Launched>("game_launch", { game:
 /** Steam library art as a `data:` URL; null = none. kind: portrait (default, a monogram stands in) or wide hero. */
 export const gameArt = (game: string, kind: ArtKind = "library_600x900") =>
   call<string | null>("game_art", { game, kind });
+/** Library art of any Steam app by id (installed games not managed yet), as gameArt. */
+export const steamArt = (appid: number, kind: ArtKind = "library_600x900") =>
+  call<string | null>("steam_art", { appid, kind });
 /** Open the game folder or the Proton prefix in the file manager (the backend resolves the path). Resolves to the path. */
 export const openFolder = (game: string, which: GameFolder) => call<string>("open_folder", { game, which });
 
@@ -221,6 +228,8 @@ export const modsList = (game?: Game) => call<ModsView>("mods_list", { game: gam
 /** reference: #position, uid, name, Nexus id or a unique name part. */
 export const modDetail = (reference: string, game?: Game) =>
   call<ModDetail>("mod_detail", { game: game ?? null, reference });
+/** Opens an http/https link (from a description) in the browser; the backend rejects other schemes. */
+export const openUrl = (url: string) => call<string>("open_url", { url });
 /** Opens the mod's Nexus page in the browser; returns the URL. */
 export const modOpenPage = (reference: string, game?: Game) =>
   call<string>("mod_open_page", { game: game ?? null, reference });
@@ -407,6 +416,11 @@ export const updatesInstall = (opts: { all?: boolean; refresh?: boolean } = {}, 
 /** A page of the game's mods or collections on Nexus (24 per page). */
 export const browse = (request: BrowseRequest, game?: Game) =>
   call<BrowseView>("browse", { game: game ?? null, request });
+/** A mod's (BBCode) or collection's (Markdown) Nexus description; null when it has none. */
+export const browseAbout = async (about: AboutTarget, game?: Game): Promise<string | null> => {
+  const r = await call<AboutView>("browse", { game: game ?? null, request: { about } });
+  return typeof r?.description === "string" ? r.description : null;
+};
 
 // ── auto-update ─────────────────────────────────────────────
 

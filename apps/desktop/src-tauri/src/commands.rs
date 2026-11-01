@@ -366,6 +366,19 @@ pub async fn mod_open_page(
     .await
 }
 
+/// Opens a link from a Nexus description in the browser; returns the URL.
+/// The webview never navigates: the text is parsed here and only absolute
+/// http/https URLs reach the opener (anything else is an error).
+#[tauri::command(rename_all = "snake_case")]
+pub async fn open_url(url: String) -> CmdResult<String> {
+    blocking(move || {
+        Ok(appgames::open_web_url(&url, |u| {
+            appgames::launch_opener(OsStr::new(u))
+        })?)
+    })
+    .await
+}
+
 #[tauri::command(rename_all = "snake_case")]
 pub async fn mods_set_enabled(
     app: AppHandle,
@@ -440,6 +453,22 @@ pub async fn game_art(
 ) -> CmdResult<Option<String>> {
     query(app, &state, None, move |cx| {
         art::game_art(cx, &game, kind.unwrap_or_default())
+    })
+    .await
+}
+
+/// Library art of any Steam app by id (installed games not managed yet),
+/// as [`game_art`]. Only a numeric `appid` crosses the bridge: serde
+/// rejects anything else, and the cache path and CDN URL derive from it.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn steam_art(
+    app: AppHandle,
+    state: St<'_>,
+    appid: u32,
+    kind: Option<art::ArtKind>,
+) -> CmdResult<Option<String>> {
+    query(app, &state, None, move |cx| {
+        Ok(art::steam_art(cx.paths, appid, kind.unwrap_or_default()))
     })
     .await
 }

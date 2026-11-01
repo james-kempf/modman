@@ -263,31 +263,48 @@ pub fn overview(cx: &Cx<'_>) -> R<Vec<GameView>> {
     Ok(v)
 }
 
-/// A supported game found in a Steam library.
+/// A game found in a Steam library.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Detected {
+    /// The preset's Nexus domain; `steam-<appid>` for a game with no preset
+    /// (a stable key only: the user supplies the real domain when adding).
     pub domain: String,
     pub name: String,
+    pub appid: u32,
     pub install_dir: PathBuf,
-    pub support: Support,
+    /// `None`: no preset (unsupported).
+    pub support: Option<Support>,
     pub configured: bool,
 }
 
-/// Supported games installed through Steam (read-only).
+/// Installed Steam games, tools and runtimes excluded (read-only).
 pub fn detect(cx: &Cx<'_>) -> R<Vec<Detected>> {
     let defs = games::load_definitions(Some(&cx.paths.definitions_dir()))?;
+    let managed = games::list_games(cx.store.conn())?;
     let mut v = Vec::new();
     for d in games::detect_installed(&cx.paths.home, &defs) {
-        let domain = &d.definition.domain;
-        // Set up under that id, or another game already links its Nexus domain.
-        let configured = games::get_game(cx.store.conn(), domain)?.is_some()
-            || !games::games_for_nexus_domain(cx.store.conn(), domain)?.is_empty();
+        let app = &d.app;
+        // Managed by that Steam app or folder, or (preset) set up under its
+        // id, or another game already links its Nexus domain.
+        let mut configured = managed.iter().any(|g| {
+            g.appid == Some(app.appid) || g.folder.as_deref() == Some(app.install_dir.as_path())
+        });
+        let domain = match &d.definition {
+            Some(def) => {
+                configured = configured
+                    || games::get_game(cx.store.conn(), &def.domain)?.is_some()
+                    || !games::games_for_nexus_domain(cx.store.conn(), &def.domain)?.is_empty();
+                def.domain.clone()
+            }
+            None => format!("steam-{}", app.appid),
+        };
         v.push(Detected {
             configured,
-            domain: d.definition.domain.clone(),
-            name: d.definition.name.clone(),
-            install_dir: d.app.install_dir.clone(),
-            support: d.definition.support,
+            domain,
+            name: d.name(),
+            appid: app.appid,
+            install_dir: app.install_dir.clone(),
+            support: d.definition.as_ref().map(|def| def.support),
         });
     }
     Ok(v)
@@ -420,6 +437,26 @@ pub fn launch_file_manager(dir: &Path) -> R<()> {
     launch_opener(dir.as_os_str())
 }
 
+/// Opens a web link from untrusted text (a Nexus description) with `open`:
+/// only absolute `http`/`https` URLs with a host; `file:`, `javascript:`,
+/// `data:` and custom schemes fail before anything is launched. `open`
+/// gets the re-serialized URL, never the raw text. Returns that URL.
+pub fn open_web_url(raw: &str, open: impl FnOnce(&str) -> R<()>) -> R<String> {
+    let url = match url::Url::parse(raw.trim()) {
+        Ok(u) => u,
+        Err(_) => fail!("Not a web link: {raw}"),
+    };
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none_or(str::is_empty) {
+        fail!(
+            "Only http and https links can be opened, not {}.",
+            url.scheme()
+        );
+    }
+    let url = url.to_string();
+    open(&url)?;
+    Ok(url)
+}
+
 /// Opens a folder or URL with the desktop's opener (`xdg-open`, else `gio open`),
 /// detached: no shell, output discarded, the child reaped in the background.
 pub fn launch_opener(target: &OsStr) -> R<()> {
@@ -452,6 +489,58 @@ mod tests {
     use crate::app::testing::Recorder;
     use crate::paths::Paths;
     use crate::store::Store;
+
+    /// `open_web_url` with an opener that records what it was given.
+    fn try_open(raw: &str) -> (R<String>, Option<String>) {
+        let mut seen = None;
+        let r = open_web_url(raw, |u| {
+            seen = Some(u.to_owned());
+            Ok(())
+        });
+        (r, seen)
+    }
+
+    // Fails when a non-web scheme from a description reaches xdg-open (file:, javascript:, data:, custom
+    // handlers, scheme-relative or hostless links) instead of an error with the opener never called.
+    #[test]
+    fn open_web_url_rejects_non_web_schemes() {
+        for raw in [
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "JavaScript:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            "steam://run/489830",
+            "nxm://skyrimspecialedition/mods/1/files/2",
+            "vbscript:msgbox",
+            "ftp://example.com/x",
+            "//example.com/x",
+            "/relative/path",
+            "example.com",
+            "",
+            "http://",
+            "https://:443/x",
+        ] {
+            let (r, seen) = try_open(raw);
+            assert!(r.is_err(), "{raw:?} was accepted");
+            assert_eq!(seen, None, "{raw:?} reached the opener");
+        }
+    }
+
+    // Fails when a plain http/https link is refused or the opener gets the raw text instead of the parsed URL.
+    #[test]
+    fn open_web_url_opens_http_and_https() {
+        let (r, seen) = try_open(" https://www.nexusmods.com/skyrimspecialedition/mods/266 ");
+        assert_eq!(
+            r.unwrap(),
+            "https://www.nexusmods.com/skyrimspecialedition/mods/266"
+        );
+        assert_eq!(
+            seen.as_deref(),
+            Some("https://www.nexusmods.com/skyrimspecialedition/mods/266")
+        );
+        let (r, _) = try_open("HTTP://Example.com/a b");
+        assert_eq!(r.unwrap(), "http://example.com/a%20b");
+    }
 
     #[test]
     fn non_interactive_add_needs_a_folder_and_marks_experimental_games() {

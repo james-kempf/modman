@@ -56,10 +56,13 @@ export interface GameView extends GameConfig {
 }
 
 export interface Detected {
+  /** The preset's Nexus domain; `steam-<appid>` (a key only) when there is no preset. */
   domain: string;
   name: string;
+  appid: number;
   install_dir: string;
-  support: Support;
+  /** null: no preset (unsupported); adding asks for the Nexus domain. */
+  support: Support | null;
   configured: boolean;
 }
 
@@ -537,6 +540,13 @@ export interface BrowseRequest {
 export type BrowseView =
   | { kind: "mods"; total: number; mods: SearchHit[] }
   | { kind: "collections"; total: number; collections: CollectionHit[] };
+/** The item whose description `browse` fetches instead of a page. */
+export type AboutTarget = { kind: "mod"; mod_id: number } | { kind: "collection"; slug: string };
+/** `browse` with an about target: BBCode (mod) or Markdown (collection); null = none. */
+export interface AboutView {
+  kind: "about";
+  description: string | null;
+}
 
 // ── account & settings ──────────────────────────────────────
 

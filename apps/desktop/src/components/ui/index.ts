@@ -19,6 +19,7 @@ export { Notice, type NoticeTone } from "./feedback/Notice";
 export { Picture } from "./display/Picture";
 export { Row } from "./layout/Row";
 export { Segmented } from "./controls/Segmented";
+export { SearchField } from "./controls/SearchField";
 export { Select } from "./controls/Select";
 export { StatusDot, type DotTone } from "./display/StatusDot";
 export { SupportBadge } from "./display/SupportBadge";

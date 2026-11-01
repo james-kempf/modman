@@ -57,6 +57,13 @@ describe("spatial navigation", () => {
     expect(findNext(g.a, "down")).toBe(g.d);
   });
 
+  // Fails when a tabindex=-1 control (dialog tabs, switched by LB/RB only) is still a spatial stop.
+  it("skips controls opted out with tabindex=-1", () => {
+    const g = grid();
+    g.c.tabIndex = -1;
+    expect(findNext(g.a, "down")).toBe(g.d);
+  });
+
   it("stays inside the topmost dialog scope", () => {
     grid();
     const dlg = document.createElement("div");

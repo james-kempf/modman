@@ -170,8 +170,7 @@ describe("Browse", () => {
     await user.click(screen.getByRole("button", { name: /Sort/ }));
     await user.click(await screen.findByRole("option", { name: "Newest" }));
     await waitFor(() => expect(req()).toMatchObject({ sort: "newest" }));
-    await user.type(screen.getByLabelText("Search"), "sky ui");
-    await user.click(screen.getByRole("button", { name: "Search" }));
+    await user.type(screen.getByRole("searchbox", { name: "Search" }), "sky ui{Enter}");
     await waitFor(() => expect(req()).toMatchObject({ text: "sky ui" }));
     await user.click(within(screen.getByRole("group", { name: "Show" })).getByRole("button", { name: "Collections" }));
     expect(await screen.findByText("Coll abc")).toBeInTheDocument();

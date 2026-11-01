@@ -162,6 +162,16 @@ pub struct BrowseRequest {
     /// Name words; empty = everything.
     pub text: String,
     pub offset: u64,
+    /// Asks for one item's long description instead of a page.
+    pub about: Option<AboutTarget>,
+}
+
+/// The item whose description [`browse`] fetches (details dialogs, on open).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AboutTarget {
+    Mod { mod_id: u64 },
+    Collection { slug: String },
 }
 
 /// Items per browse page.
@@ -178,6 +188,11 @@ pub enum BrowseView {
     Collections {
         total: u64,
         collections: Vec<CollectionHit>,
+    },
+    /// An item's description: Nexus BBCode for a mod, Markdown for a
+    /// collection; `None` when it has none.
+    About {
+        description: Option<String>,
     },
 }
 
@@ -212,6 +227,17 @@ pub fn browse(cx: &Cx<'_>, game: &GameConfig, req: &BrowseRequest) -> R<BrowseVi
         count: BROWSE_PAGE,
         adult: cx.config()?.adult,
     };
+    if let Some(about) = &req.about {
+        let description = match about {
+            AboutTarget::Mod { mod_id } => {
+                nexus.run(nexus.client.mod_description(domain, *mod_id))??
+            }
+            AboutTarget::Collection { slug } => {
+                nexus.run(nexus.client.collection_description(domain, slug, q.adult))??
+            }
+        };
+        return Ok(BrowseView::About { description });
+    }
     Ok(match req.kind {
         BrowseKind::Mods => {
             let res = nexus.run(nexus.client.browse_mods(domain, &q))??;
@@ -291,6 +317,34 @@ mod tests {
     use super::*;
 
     // Fails when config_list stops carrying the metadata the GUI builds its controls from.
+    // Fails when the about target stops deserializing from the webview's `{ about: { kind, ... } }` request
+    // (or a plain page request starts carrying one).
+    #[test]
+    fn browse_request_reads_about_targets() {
+        let r: BrowseRequest = serde_json::from_value(
+            serde_json::json!({ "about": { "kind": "mod", "mod_id": 266 } }),
+        )
+        .unwrap();
+        assert_eq!(r.about, Some(AboutTarget::Mod { mod_id: 266 }));
+        let r: BrowseRequest = serde_json::from_value(
+            serde_json::json!({ "about": { "kind": "collection", "slug": "qdurkx" } }),
+        )
+        .unwrap();
+        assert_eq!(
+            r.about,
+            Some(AboutTarget::Collection {
+                slug: "qdurkx".into()
+            })
+        );
+        let r: BrowseRequest =
+            serde_json::from_value(serde_json::json!({ "kind": "mods" })).unwrap();
+        assert_eq!(r.about, None);
+        assert!(serde_json::from_value::<BrowseRequest>(
+            serde_json::json!({ "about": { "kind": "mod", "mod_id": "x" } })
+        )
+        .is_err());
+    }
+
     #[test]
     fn config_entries_carry_kind_and_options() {
         let home = tempfile::tempdir().unwrap();

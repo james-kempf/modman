@@ -12,11 +12,25 @@ import { setup } from "../test/harness";
 const found = (o: Partial<Detected> = {}): Detected => ({
   domain: "fallout4",
   name: "Fallout 4",
+  appid: 377160,
   install_dir: "/s/Fallout 4",
   support: "experimental",
   configured: false,
   ...o,
 });
+
+const unsupported = found({ domain: "steam-632360", name: "Risk of Rain 2", appid: 632360, install_dir: "/s/RoR2", support: null });
+const JPEG = "data:image/jpeg;base64,/9j/";
+
+async function setupArt() {
+  const env = await setup({
+    games_detect: () => [found(), unsupported],
+    steam_art: (a) => ((a as { appid: number }).appid === 377160 ? JPEG : null),
+  });
+  env.renderApp();
+  await screen.findByRole("list", { name: "Game library" });
+  return env;
+}
 
 /** A backend whose game_add manages the detected game, as the real one does. */
 async function view(detected: Detected[], games: GameView[] = [game()]) {
@@ -63,7 +77,7 @@ describe("unmanaged games grid", () => {
   // Fails when there is no empty state, or an empty grid is rendered.
   it("shows an empty state when nothing new was found", async () => {
     await view([found({ configured: true })]);
-    expect(await screen.findByText("No other supported games found in Steam.")).toBeInTheDocument();
+    expect(await screen.findByText("No other games found in Steam.")).toBeInTheDocument();
     expect(screen.queryByRole("list", { name: "Unmanaged games" })).toBeNull();
   });
 
@@ -75,7 +89,7 @@ describe("unmanaged games grid", () => {
       expect(t.callsOf("game_add")).toEqual([{ domain: "fallout4", path: "/s/Fallout 4", subdir: null, profile: null }]),
     );
     await waitFor(() => expect(libraryNames()).toEqual(["Skyrim Special Edition", "Fallout 4"]));
-    expect(await screen.findByText("No other supported games found in Steam.")).toBeInTheDocument();
+    expect(await screen.findByText("No other games found in Steam.")).toBeInTheDocument();
   });
 
   // Fails when a double activation adds twice.
@@ -107,6 +121,39 @@ describe("unmanaged games grid", () => {
     await waitFor(async () =>
       expect(within(await unmanaged()).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["Add Starfield"]),
     );
+  });
+
+  // Fails when unmanaged tiles skip Steam art (G1: appid null), ask game_art for an unmanaged game, or drop the monogram fallback.
+  it("shows Steam art by app id, else a monogram", async () => {
+    const { t } = await setupArt();
+    const list = await unmanaged();
+    const fo4 = within(list).getByRole("button", { name: "Add Fallout 4" });
+    await waitFor(() => expect(within(fo4).getByTestId("game-art")).toHaveAttribute("src", JPEG));
+    const ror = within(list).getByRole("button", { name: "Add Risk of Rain 2" });
+    await waitFor(() => expect(t.callsOf("steam_art")).toHaveLength(2));
+    expect(within(ror).getByTestId("game-monogram")).toBeInTheDocument();
+    expect(t.callsOf("steam_art")).toEqual(
+      expect.arrayContaining([
+        { appid: 377160, kind: "library_600x900" },
+        { appid: 632360, kind: "library_600x900" },
+      ]),
+    );
+    expect(t.callsOf("game_art").filter((a) => (a as { game: string }).game !== "skyrimspecialedition")).toEqual([]);
+  });
+
+  // Fails when an unsupported game looks supported, is added directly with its key domain, or the dialog lacks the folder.
+  it("an unsupported game is marked and opens the add dialog with its folder", async () => {
+    const { t, user } = await view([found(), unsupported]);
+    const list = await unmanaged();
+    const ror = within(list).getByRole("button", { name: "Add Risk of Rain 2" });
+    expect(ror).toHaveAccessibleDescription(/Unsupported/);
+    expect(within(list).getByRole("button", { name: "Add Fallout 4" })).not.toHaveAccessibleDescription(/Unsupported/);
+    await user.click(ror);
+    const dlg = await screen.findByRole("dialog", { name: "Add a game" });
+    expect(within(dlg).getByLabelText("Game folder (optional)")).toHaveValue("/s/RoR2");
+    expect(within(dlg).getByText(/no preset for Risk of Rain 2/)).toBeInTheDocument();
+    expect(within(dlg).queryByRole("button", { name: "Add Risk of Rain 2" })).toBeNull();
+    expect(t.callsOf("game_add")).toEqual([]);
   });
 
   // Fails when demo mode offers no detected game to try the flow with.

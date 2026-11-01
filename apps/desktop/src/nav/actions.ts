@@ -3,16 +3,20 @@
 
 import { useUi, type ViewId } from "../app/store";
 import { navArbiter, type NavArbiter, type NavInput } from "./arbiter";
-import { focusables, isTextInput, moveFocus, navScope, type Dir } from "./spatial";
+import { SEARCH_ATTR, focusables, isTextInput, moveFocus, navScope, type Dir } from "./spatial";
 
 export type NavAction =
   | { type: "move"; dir: Dir }
   | { type: "select" }
   | { type: "back" }
-  | { type: "tab"; delta: 1 | -1 };
+  | { type: "tab"; delta: 1 | -1 }
+  | { type: "search" };
 
 /** Dispatched on the topmost nav scope (a dialog) for "back"; dialogs close on it. */
 export const BACK_EVENT = "vessel:back";
+/** Dispatched on the topmost nav scope (a dialog) for "tab" (detail: { delta }); a dialog's own tabs switch on it. */
+export const TAB_EVENT = "vessel:tab";
+export type TabEventDetail = { delta: 1 | -1 };
 
 export function focusCurrentTab(doc: Document = document): void {
   doc.querySelector<HTMLElement>("[data-tab][aria-current='page']")?.focus();
@@ -58,13 +62,22 @@ export function performNav(action: NavAction, doc: Document = document): void {
       return;
     }
     case "tab": {
-      // Not while a dialog is open: it owns the input.
-      if (navScope(doc) !== doc.body) return;
+      // While a dialog is open it owns the input: its tabs (if any) switch, never the app's views.
+      const scope = navScope(doc);
+      if (scope !== doc.body) {
+        scope.dispatchEvent(new CustomEvent<TabEventDetail>(TAB_EVENT, { detail: { delta: action.delta } }));
+        return;
+      }
       const view = useUi.getState().cycleView(action.delta);
       // Tab buttons are always rendered, so focus follows the selection now.
       doc.querySelector<HTMLElement>(`[data-tab='${view}']`)?.focus();
       return;
     }
+    case "search":
+      // The view's search field; not while a dialog is open (the field is behind it, inert).
+      if (navScope(doc) !== doc.body) return;
+      doc.querySelector<HTMLElement>(`[${SEARCH_ATTR}]`)?.focus();
+      return;
   }
 }
 

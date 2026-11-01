@@ -545,26 +545,51 @@ pub fn apply_setting(
     Ok(g)
 }
 
-/// A preset game found in a Steam library.
+/// A game found in a Steam library, with its preset when one matches.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DetectedGame {
-    pub definition: GameDefinition,
+    /// `None`: no preset for this Steam app (unsupported).
+    pub definition: Option<GameDefinition>,
     pub app: steam::SteamApp,
 }
 
-/// Definitions (in order) whose Steam app is installed under `home`.
+impl DetectedGame {
+    /// The preset name, else the appmanifest name, else the install folder.
+    pub fn name(&self) -> String {
+        self.definition
+            .as_ref()
+            .map(|d| d.name.clone())
+            .or_else(|| self.app.name.clone())
+            .unwrap_or_else(|| {
+                self.app.install_dir.file_name().map_or_else(
+                    || self.app.appid.to_string(),
+                    |n| n.to_string_lossy().into(),
+                )
+            })
+    }
+}
+
+/// Every installed Steam game under `home` (tools and runtimes excluded):
+/// preset matches first, in definition order, then the others by name.
 /// Read-only: never writes to Steam folders.
 pub fn detect_installed(home: &Path, defs: &[GameDefinition]) -> Vec<DetectedGame> {
-    let libs = steam::steam_libraries(home);
-    defs.iter()
-        .filter_map(|d| {
-            let app = steam::find_app(&libs, d.steam_appid?)?;
-            Some(DetectedGame {
-                definition: d.clone(),
-                app,
-            })
-        })
-        .collect()
+    let apps = steam::list_installed_apps(&steam::steam_libraries(home));
+    let mut presets: Vec<(usize, DetectedGame)> = Vec::new();
+    let mut others = Vec::new();
+    for app in apps {
+        let preset = defs.iter().position(|d| d.steam_appid == Some(app.appid));
+        let found = DetectedGame {
+            definition: preset.map(|i| defs[i].clone()),
+            app,
+        };
+        match preset {
+            Some(i) => presets.push((i, found)),
+            None => others.push(found),
+        }
+    }
+    presets.sort_by_key(|(i, _)| *i);
+    others.sort_by_cached_key(|d| d.name().to_lowercase());
+    presets.into_iter().map(|(_, d)| d).chain(others).collect()
 }
 
 /// Resolved UE4SS mods folder of `game` (relative to its deploy folder),
@@ -615,6 +640,65 @@ mod tests {
         let mut g = GameConfig::custom("foo");
         g.subdir = "./Data/".into();
         save_game(store.conn(), &g).unwrap();
+    }
+
+    fn acf(lib: &Path, appid: u32, name: &str, flags: u32) -> PathBuf {
+        let dir = lib.join("steamapps/common").join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            lib.join(format!("steamapps/appmanifest_{appid}.acf")),
+            format!("\"AppState\" {{ \"appid\" \"{appid}\" \"name\" \"{name}\" \"installdir\" \"{name}\" \"StateFlags\" \"{flags}\" }}"),
+        )
+        .unwrap();
+        dir
+    }
+
+    /// Catches the T1 root cause: only preset games detected. Also a preset
+    /// match losing its definition, or tools / redistributables listed.
+    #[test]
+    fn detect_installed_lists_non_preset_games_from_every_library() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let root = home.join(".local/share/Steam");
+        let lib2 = tmp.path().join("lib2");
+        std::fs::create_dir_all(lib2.join("steamapps")).unwrap();
+        std::fs::create_dir_all(root.join("steamapps")).unwrap();
+        let vdf = include_str!("../tests/fixtures/steam/libraryfolders.vdf")
+            .replace("/home/deck/.local/share/Steam", root.to_str().unwrap())
+            .replace("/run/media/mmcblk0p1", lib2.to_str().unwrap());
+        std::fs::write(root.join("steamapps/libraryfolders.vdf"), vdf).unwrap();
+        acf(&root, 489830, "Skyrim Special Edition", 4);
+        acf(&root, 632360, "Risk of Rain 2", 4);
+        acf(&root, 1422450, "Deadlock", 6);
+        let proton = acf(&root, 1493710, "Proton - Experimental", 4);
+        std::fs::write(proton.join("toolmanifest.vdf"), "").unwrap();
+        acf(&root, 228980, "Steamworks Common Redistributables", 4);
+        acf(&lib2, 1808500, "ARC Raiders", 4);
+
+        let found = detect_installed(&home, &builtin_definitions());
+        let got: Vec<(u32, Option<&str>, String)> = found
+            .iter()
+            .map(|d| {
+                (
+                    d.app.appid,
+                    d.definition.as_ref().map(|x| x.domain.as_str()),
+                    d.name(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (
+                    489830,
+                    Some("skyrimspecialedition"),
+                    "Skyrim Special Edition".into()
+                ),
+                (1808500, None, "ARC Raiders".into()),
+                (1422450, None, "Deadlock".into()),
+                (632360, None, "Risk of Rain 2".into()),
+            ]
+        );
     }
 
     fn store_with(domain: &str) -> Store {

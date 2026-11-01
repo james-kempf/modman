@@ -40,6 +40,7 @@ export function baseHandlers(games: GameView[] = [game()]): Record<string, Handl
     plugins_list: () => [],
     thumbnail: () => null,
     game_art: () => null,
+    steam_art: () => null,
     collection_art: () => null,
     prompt_answer: () => true,
     backups_poisoned: () => [],

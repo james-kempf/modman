@@ -13,6 +13,7 @@ import { cx } from "../styles";
 export function Select<T extends string>({
   label,
   hideLabel,
+  inline,
   value,
   options,
   onChange,
@@ -21,6 +22,8 @@ export function Select<T extends string>({
 }: {
   label: ReactNode;
   hideLabel?: boolean;
+  /** Label left of the control on one row, styled like a Segmented label (toolbars). */
+  inline?: boolean;
   value: T;
   options: readonly { value: T; label: string }[];
   onChange: (v: T) => void;
@@ -69,8 +72,14 @@ export function Select<T extends string>({
     if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOpen(false);
   };
   return (
-    <div className={cx("relative grid min-w-0 gap-2", className)} onBlur={open ? onBlur : undefined}>
-      <span id={`${id}-label`} className={cx("text-label font-medium wrap-anywhere text-zinc-300", hideLabel && "sr-only")}>
+    <div
+      className={cx("relative min-w-0", inline ? "flex items-center gap-3" : "grid gap-2", className)}
+      onBlur={open ? onBlur : undefined}
+    >
+      <span
+        id={`${id}-label`}
+        className={cx(inline ? "eyebrow shrink-0" : "text-label font-medium wrap-anywhere text-zinc-300", hideLabel && "sr-only")}
+      >
         {label}
       </span>
       <button

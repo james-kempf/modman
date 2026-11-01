@@ -48,6 +48,15 @@ describe("gamepad mapping (mocked navigator.getGamepads)", () => {
     expect(nav.poll(16)).toEqual([{ type: "tab", delta: -1 }]);
   });
 
+  // Fails when Y is unmapped or fires again while held.
+  it("Y focuses search, once per press", () => {
+    const s = mockPads();
+    const nav = new GamepadNav();
+    s.pads = [pad([BUTTON.Y])];
+    expect(nav.poll(0)).toEqual([{ type: "search" }]);
+    expect(nav.poll(16)).toEqual([]);
+  });
+
   it("D-pad moves in four directions", () => {
     const s = mockPads();
     const nav = new GamepadNav();
