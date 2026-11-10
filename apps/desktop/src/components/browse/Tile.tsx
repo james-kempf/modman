@@ -97,10 +97,14 @@ export function Tile({
           {summary}
         </span>
       )}
-      <span className="mt-auto flex min-w-0 shrink-0 flex-wrap items-center gap-x-4 gap-y-2 pt-3">
-        {stats}
-        <span id={statusId} className={cx("flex flex-wrap items-center gap-1.5 empty:hidden", !horizontal && "ml-auto")}>
-          {badges}
+      {/* At least a badge tall (h-badge's token), so a tile without Installed (or any badge) has the same
+          stats line as one with it: the text stats alone are shorter. pt-3 sits outside the min height. */}
+      <span className="mt-auto block min-w-0 shrink-0 pt-3">
+        <span data-tile-stats className="flex min-h-badge min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
+          {stats}
+          <span id={statusId} className={cx("flex flex-wrap items-center gap-1.5 empty:hidden", !horizontal && "ml-auto")}>
+            {badges}
+          </span>
         </span>
       </span>
     </>
@@ -163,7 +167,10 @@ export function TileSkeleton({ picture, horizontal = false }: { picture: string;
           <span className={cx(BONE, "h-3 w-1/3")} />
           <span className={cx(BONE, "mt-2 h-3 w-full")} />
           <span className={cx(BONE, "h-3 w-5/6")} />
-          <span className={cx(BONE, "mt-auto h-3 w-1/2")} />
+          {/* The stats line, as tall as a real tile's (min-h-badge). */}
+          <span className="mt-auto flex min-h-badge items-center">
+            <span className={cx(BONE, "h-3 w-1/2")} />
+          </span>
         </span>
       </div>
     </li>

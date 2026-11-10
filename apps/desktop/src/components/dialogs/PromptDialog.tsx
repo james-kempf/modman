@@ -14,6 +14,13 @@ import { Dialog } from "./Dialog";
 import { CheckIcon, WarningIcon } from "@phosphor-icons/react";
 import { Badge, Button, TextField, TILE, bytes, cx } from "../ui";
 
+/**
+ * Dispatched on the document once an answer reached the backend (detail: PromptAnsweredDetail), so whoever
+ * started the job can react to it (e.g. a details dialog closes once its uninstall is confirmed).
+ */
+export const PROMPT_ANSWERED = "vessel:prompt-answered";
+export type PromptAnsweredDetail = { job: number | null; answer: Answer };
+
 export function PromptHost() {
   const head = useUi((s) => s.prompts[0]);
   if (!head) return null;
@@ -31,6 +38,7 @@ function PromptDialog({ event }: { event: PromptEvent }) {
     setSending(true);
     try {
       await promptAnswer(event.id, a);
+      document.dispatchEvent(new CustomEvent<PromptAnsweredDetail>(PROMPT_ANSWERED, { detail: { job: event.job, answer: a } }));
     } catch (e) {
       notify("error", `Answer not delivered: ${errMsg(e)}`);
     } finally {

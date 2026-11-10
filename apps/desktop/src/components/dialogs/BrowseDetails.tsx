@@ -253,7 +253,7 @@ export function ModDetailsDialog({
       returnFocus={returnFocus}
       wide
       fixedHeight
-      footer={<ActionRow actions={<ModActions game={game} m={m} />} onClose={onClose} />}
+      footer={<ActionRow actions={<ModActions game={game} m={m} onAccepted={onClose} />} onClose={onClose} />}
     >
       <DialogTabs label="Mod" tabs={MOD_TABS} value={tab} onChange={setTab}>
         {tab === "details" ? (

@@ -11,7 +11,7 @@ import {
   BroomIcon,
   FolderOpenIcon,
   PlayIcon,
-  RocketLaunchIcon,
+  LightningIcon,
   ShieldCheckIcon,
   TrashIcon,
 } from "@phosphor-icons/react";
@@ -280,7 +280,7 @@ function DeploymentCard({
             size="lg"
             className="w-full"
             busy={deploying}
-            icon={<RocketLaunchIcon aria-hidden size={19} weight="duotone" />}
+            icon={<LightningIcon aria-hidden size={19} weight="duotone" />}
             onClick={() => void deploy()}
           >
             Deploy

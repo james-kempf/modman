@@ -9,7 +9,7 @@
 // folder prefilled, since only the user knows its Nexus domain. Tiles are plain buttons in grids, so spatial navigation
 // moves between them in 2D.
 
-import { CheckIcon, FlaskIcon, PlusIcon, RocketLaunchIcon } from "@phosphor-icons/react";
+import { CheckIcon, FlaskIcon, PlusIcon, LightningIcon } from "@phosphor-icons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { errMsg } from "../app/bridge";
@@ -127,7 +127,7 @@ function GameTile({ game }: { game: GameView }) {
           {due && (
             <span data-testid="deploy-due" className="inline-flex" title="Mod changes are not deployed yet">
               <Badge tone="amber">
-                <RocketLaunchIcon aria-hidden size={12} weight="bold" />
+                <LightningIcon aria-hidden size={12} weight="bold" />
                 Deploy due
               </Badge>
             </span>

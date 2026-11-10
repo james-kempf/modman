@@ -376,6 +376,8 @@ function CollectionTile({ game, c }: { game: string; c: CollectionHit }) {
   const installed = c.installed_revision !== null;
   const behind = installed && c.revision !== null && c.installed_revision! < c.revision;
   const act = async (update: boolean) => {
+    // Accepted: the dialog closes at once (focus back on the card); progress shows in the job island.
+    details.hide();
     const r = await run(
       update ? "Update collection" : "Install collection",
       () => (update ? ipc.collectionUpdate({ reference: c.slug }) : ipc.collectionInstall({ reference: c.slug, optional: "ask" })),
@@ -427,7 +429,7 @@ function CollectionTile({ game, c }: { game: string; c: CollectionHit }) {
                       Update to {c.revision}
                     </Button>
                   )}
-                  <RemoveButton game={game} item={{ kind: "collection", slug: c.slug, name: c.name }} />
+                  <RemoveButton game={game} item={{ kind: "collection", slug: c.slug, name: c.name }} onAccepted={details.hide} />
                 </>
               ) : (
                 <Button

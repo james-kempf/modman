@@ -124,6 +124,257 @@ describe("Browse cards (Browse-1)", () => {
   });
 });
 
+describe("Browse dialogs close on install/uninstall (T9)", () => {
+  /** A command held until release (the job keeps running after the dialog closed). */
+  const slow = <T,>(value: T) => {
+    let open!: () => void;
+    const gate = new Promise<void>((r) => (open = r));
+    return { handler: async () => (await gate, value), release: () => act(async () => open()) };
+  };
+  const installResult = { game: null, installed: null, collection: null, after: { deployed: null, needs_deploy: false } };
+  /** The backend's uninstall confirmation for job `job` of `kind`. */
+  const confirmFor = (t: { emit(e: string, p: unknown): void }, job: number, kind: string) =>
+    act(() => {
+      t.emit("vessel:job", { id: job, kind, state: "started", error: null });
+      t.emit("vessel:prompt", { id: job * 10, job, prompt: { type: "confirm", question: "Sure?", default_yes: false } });
+    });
+  const browseBoth = (a: unknown) =>
+    reqOf(a).kind === "mods"
+      ? { kind: "mods", total: 2, mods: [hit(7), hit(8, { installed: true })] }
+      : { kind: "collections", total: 2, collections: [coll("new"), coll("cur", { installed_revision: 3 })] };
+
+  // Fails when the mod dialog stays open after Install (until the job ends), or focus does not return to the card.
+  it("mod Install closes the dialog at once and focuses the card", async () => {
+    const inst = slow(installResult);
+    const { t, user } = await open("browse", { browse: browseBoth, install: inst.handler });
+    const card = await screen.findByRole("button", { name: "Mod 7" });
+    await user.click(card);
+    const dlg = await screen.findByRole("dialog", { name: "Mod 7" });
+    await user.click(within(dlg).getByRole("button", { name: "Install Mod 7" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(t.callsOf("install")).toHaveLength(1);
+    await waitFor(() => expect(document.activeElement).toBe(card));
+    await inst.release();
+  });
+
+  // Fails when Remove closes the dialog before the confirmation is answered, keeps it open after Yes, or
+  // closes it on No.
+  it("mod Remove: No keeps the dialog, Yes closes it and focuses the card", async () => {
+    // First run: answered No, the job ends with nothing done; second run: Yes.
+    const first = slow({ done: false, mods: 0, archives: [], after: { deployed: null, needs_deploy: false } });
+    const rm = slow({ done: true, mods: 1, archives: [], after: { deployed: null, needs_deploy: false } });
+    let runs = 0;
+    const { t, user } = await open("browse", { browse: browseBoth, mods_uninstall: () => (runs++ ? rm.handler() : first.handler()) });
+    const card = await screen.findByRole("button", { name: "Mod 8" });
+    await user.click(card);
+    const dlg = await screen.findByRole("dialog", { name: "Mod 8" });
+    await user.click(within(dlg).getByRole("button", { name: "Remove Mod 8" }));
+    confirmFor(t, 5, "mods_uninstall");
+    expect(screen.getByRole("dialog", { name: "Mod 8" })).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "No" }));
+    await first.release();
+    await act(() => new Promise((r) => setTimeout(r, 20)));
+    expect(screen.getByRole("dialog", { name: "Mod 8" })).toBeInTheDocument();
+
+    await user.click(within(screen.getByRole("dialog", { name: "Mod 8" })).getByRole("button", { name: "Remove Mod 8" }));
+    confirmFor(t, 6, "mods_uninstall");
+    await user.click(await screen.findByRole("button", { name: "Yes" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(card));
+    await rm.release();
+  });
+
+  // Fails when a collection's Install or Remove leaves its dialog open.
+  it("collection Install and Remove close the dialog and focus the card", async () => {
+    const inst = slow({ ...installResult });
+    const rm = slow({ removed: true, uninstalled: 1, after: { deployed: null, needs_deploy: false } });
+    const { t, user } = await open("browse", { browse: browseBoth, collection_install: inst.handler, collection_remove: rm.handler });
+    await showCollections(user);
+    const fresh = await screen.findByRole("button", { name: "Coll new" });
+    await user.click(fresh);
+    let dlg = await screen.findByRole("dialog", { name: "Coll new" });
+    await user.click(within(dlg).getByRole("button", { name: "Install Coll new" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(fresh));
+
+    const cur = screen.getByRole("button", { name: "Coll cur" });
+    await user.click(cur);
+    dlg = await screen.findByRole("dialog", { name: "Coll cur" });
+    await user.click(within(dlg).getByRole("button", { name: "Remove Coll cur" }));
+    confirmFor(t, 8, "collection_remove");
+    await user.click(await screen.findByRole("button", { name: "Yes" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(cur));
+    await inst.release();
+    await rm.release();
+  });
+
+  // Fails when Install on a mod inside a collection's Mods tab closes the collection dialog too (or nothing).
+  it("a mod installed from a collection's Mods tab closes only its own dialog", async () => {
+    const inst = slow(installResult);
+    const { user } = await open("browse", {
+      browse: browseBoth,
+      install: inst.handler,
+      collection_info: () => ({
+        game: "skyrimspecialedition",
+        slug: "new",
+        revision: {
+          name: "Coll new", author: "c", game_name: "Skyrim SE", number: 3, status: "published", latest: 3, mod_count: 1, optional_count: 0, total_size: 1, summary: "", url: "",
+          mods: [{ name: "SkyUI", version: "5.2", author: "s", mod_id: 12604, size: 1, optional: false }],
+        },
+        installed: null,
+        update_available: null,
+      }),
+    });
+    await showCollections(user);
+    await user.click(await screen.findByRole("button", { name: "Coll new" }));
+    const outer = await screen.findByRole("dialog", { name: "Coll new" });
+    await user.click(await within(outer).findByRole("tab", { name: /^Mods/ }));
+    const tile = await within(outer).findByRole("button", { name: "SkyUI" });
+    await user.click(tile);
+    const inner = await screen.findByRole("dialog", { name: "SkyUI" });
+    await user.click(within(inner).getByRole("button", { name: "Install SkyUI" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "SkyUI" })).toBeNull());
+    expect(screen.getByRole("dialog", { name: "Coll new" })).toBeInTheDocument();
+    await waitFor(() => expect(document.activeElement).toBe(tile));
+    await inst.release();
+  });
+
+  const twoFiles = () => ({
+    files: [1, 2].map((i) => ({ file_id: i, name: `File ${i}`, version: null, category_name: "MAIN", file_name: null, size_in_bytes: null, uploaded_timestamp: null, is_primary: i === 1 })),
+    default: 0,
+  });
+  /** The backend's file choice for install job `job` (after the job started). */
+  const chooseFileFor = (t: { emit(e: string, p: unknown): void }, job: number) =>
+    act(() => {
+      t.emit("vessel:job", { id: job, kind: "install", state: "started", error: null });
+      t.emit("vessel:prompt", { id: job * 10, job, prompt: { type: "choose_file", files: twoFiles().files, default: 0 } });
+    });
+
+  // T10: fails when a mod with several files closes its dialog before the file is picked, stays open after
+  // the pick, or focus does not end on the card.
+  it("a mod with file options: the dialog stays open while choosing, closes on the pick", async () => {
+    const inst = slow(installResult);
+    const { t, user } = await open("browse", { browse: browseBoth, install: inst.handler, mod_files: twoFiles });
+    const card = await screen.findByRole("button", { name: "Mod 7" });
+    await user.click(card);
+    const dlg = await screen.findByRole("dialog", { name: "Mod 7" });
+    await user.click(within(dlg).getByRole("button", { name: "Install Mod 7" }));
+    await waitFor(() => expect(t.callsOf("mod_files")).toHaveLength(1));
+    await act(() => new Promise((r) => setTimeout(r, 20)));
+    expect(screen.getByRole("dialog", { name: "Mod 7" })).toBeInTheDocument();
+    chooseFileFor(t, 5);
+    const chooser = await screen.findByRole("dialog", { name: "Choose a file" });
+    expect(screen.getByRole("dialog", { name: "Mod 7" })).toBeInTheDocument();
+    await user.click(within(chooser).getByRole("button", { name: "Install this file" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(card));
+    await inst.release();
+  });
+
+  // T10: fails when cancelling the file choice closes the mod dialog or leaves focus outside it.
+  it("cancelling the file choice keeps the dialog open, focus on Install", async () => {
+    const inst = slow(installResult);
+    const { t, user } = await open("browse", { browse: browseBoth, install: inst.handler, mod_files: twoFiles });
+    await user.click(await screen.findByRole("button", { name: "Mod 7" }));
+    const dlg = await screen.findByRole("dialog", { name: "Mod 7" });
+    const install = within(dlg).getByRole("button", { name: "Install Mod 7" });
+    await user.click(install);
+    await waitFor(() => expect(t.callsOf("mod_files")).toHaveLength(1));
+    chooseFileFor(t, 6);
+    const chooser = await screen.findByRole("dialog", { name: "Choose a file" });
+    await user.click(within(chooser).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Choose a file" })).toBeNull());
+    await act(() => new Promise((r) => setTimeout(r, 20)));
+    expect(screen.getByRole("dialog", { name: "Mod 7" })).toBeInTheDocument();
+    await waitFor(() => expect(document.activeElement).toBe(install));
+    await inst.release();
+  });
+
+  // T10: fails when the nested collection-mod dialog ignores the file choice (closes early) or closes the collection.
+  it("nested: a collection's mod with file options closes only after the pick, collection stays", async () => {
+    const inst = slow(installResult);
+    const { t, user } = await open("browse", {
+      browse: browseBoth,
+      install: inst.handler,
+      mod_files: twoFiles,
+      collection_info: () => ({
+        game: "skyrimspecialedition",
+        slug: "new",
+        revision: {
+          name: "Coll new", author: "c", game_name: "Skyrim SE", number: 3, status: "published", latest: 3, mod_count: 1, optional_count: 0, total_size: 1, summary: "", url: "",
+          mods: [{ name: "SkyUI", version: "5.2", author: "s", mod_id: 12604, size: 1, optional: false }],
+        },
+        installed: null,
+        update_available: null,
+      }),
+    });
+    await showCollections(user);
+    await user.click(await screen.findByRole("button", { name: "Coll new" }));
+    const outer = await screen.findByRole("dialog", { name: "Coll new" });
+    await user.click(await within(outer).findByRole("tab", { name: /^Mods/ }));
+    const tile = await within(outer).findByRole("button", { name: "SkyUI" });
+    await user.click(tile);
+    const inner = await screen.findByRole("dialog", { name: "SkyUI" });
+    await user.click(within(inner).getByRole("button", { name: "Install SkyUI" }));
+    await waitFor(() => expect(t.callsOf("mod_files")).toHaveLength(1));
+    chooseFileFor(t, 7);
+    const chooser = await screen.findByRole("dialog", { name: "Choose a file" });
+    expect(screen.getByRole("dialog", { name: "SkyUI" })).toBeInTheDocument();
+    await user.click(within(chooser).getByRole("button", { name: "Install this file" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "SkyUI" })).toBeNull());
+    expect(screen.getByRole("dialog", { name: "Coll new" })).toBeInTheDocument();
+    await waitFor(() => expect(document.activeElement).toBe(tile));
+    await inst.release();
+  });
+
+  // Fails when a non-install action (Close excepted) such as the About tab closes the dialog.
+  it("switching tabs does not close the dialog", async () => {
+    const { user } = await open("browse", { browse: browseBoth });
+    await user.click(await screen.findByRole("button", { name: "Mod 7" }));
+    const dlg = await screen.findByRole("dialog", { name: "Mod 7" });
+    await user.click(within(dlg).getByRole("tab", { name: "About" }));
+    expect(screen.getByRole("dialog", { name: "Mod 7" })).toBeInTheDocument();
+  });
+});
+
+describe("Browse tile stats row height (T11)", () => {
+  /** The flex line that holds a tile's stats and its status badges. */
+  const statsLine = (card: HTMLElement) => within(card).getByText("downloads", { selector: ".sr-only" }).closest<HTMLElement>("[data-tile-stats]")!;
+  // Fails when the stats line is only as tall as its text without the Installed badge (h-badge), so an
+  // installed tile's line is taller than its neighbour's.
+  it("is at least badge-tall with and without Installed, mods and collections", async () => {
+    const { user } = await open("browse", {
+      browse: (a) =>
+        reqOf(a).kind === "mods"
+          ? { kind: "mods", total: 2, mods: [hit(7), hit(8, { installed: true })] }
+          : { kind: "collections", total: 2, collections: [coll("new"), coll("cur", { installed_revision: 3 })] },
+    });
+    const lines = async (a: string, b: string) => [statsLine(await screen.findByRole("button", { name: a })), statsLine(screen.getByRole("button", { name: b }))];
+    for (const [plain, installed] of [await lines("Mod 7", "Mod 8")]) {
+      expect(within(installed).getByText("Installed")).toBeInTheDocument();
+      expect(within(plain).queryByText("Installed")).toBeNull();
+      for (const l of [plain, installed]) expect(l.className.split(" ")).toEqual(expect.arrayContaining(["flex", "min-h-badge", "items-center"]));
+      expect(plain.className).toBe(installed.className);
+    }
+    await showCollections(user);
+    for (const [plain, installed] of [await lines("Coll new", "Coll cur")]) {
+      for (const l of [plain, installed]) expect(l.className.split(" ")).toEqual(expect.arrayContaining(["flex", "min-h-badge", "items-center"]));
+      expect(plain.className).toBe(installed.className);
+    }
+  });
+
+  // Fails when the skeleton's stats line is shorter than a real tile's (the grid jumps when tiles arrive).
+  it("the skeleton's stats line is badge-tall too", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    await open("browse", { browse: async (a) => (await gate, paged(a)) });
+    const sk = (await screen.findAllByTestId("tile-skeleton"))[0];
+    expect(sk.querySelector(".min-h-badge")).not.toBeNull();
+    await act(async () => release());
+  });
+});
+
 describe("Browse collection card height (Browse-5)", () => {
   // Fails when a long collection description can make the card taller than its picture: the text column must be
   // taken out of flow (absolute in a relative column, overflow hidden) and the summary must shrink and clamp with an
