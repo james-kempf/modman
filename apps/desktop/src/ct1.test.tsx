@@ -235,15 +235,6 @@ describe("CT1 D05 focus across back-to-back dialogs", () => {
     act(() => screen.getByText("done").click());
     await waitFor(() => expect(document.activeElement).toBe(opener));
   });
-
-  // Fails when the Install button is natively disabled once the field is cleared: focus cannot return to it.
-  it("Install stays focusable (aria-disabled) with an empty target", async () => {
-    await open("browse");
-    const form = (await screen.findByLabelText(/Mod id, Nexus URL/)).closest("form")!;
-    const b = within(form).getByRole("button", { name: "Install" });
-    expect(b).not.toBeDisabled();
-    expect(b).toHaveAttribute("aria-disabled", "true");
-  });
 });
 
 describe("CT1 D06 per-game results", () => {
@@ -393,7 +384,7 @@ describe("CT1 D10 failing queries", () => {
 
   it.each([
     ["collections", "collections_list"],
-    ["browse", "downloads_list"],
+    ["activity", "downloads_list"],
     ["activity", "log_tail"],
   ] as const)("%s shows a note when %s fails", async (view, cmd) => {
     await open(view, { [cmd]: fail(cmd) });
@@ -446,7 +437,6 @@ describe("CT1 D15 Install without games", () => {
   it("shows the No active game empty state", async () => {
     await open("browse", {}, []);
     expect(await within(main()).findByRole("heading", { name: "No active game" })).toBeInTheDocument();
-    expect(within(main()).queryByLabelText(/Mod id, Nexus URL/)).toBeNull();
   });
 });
 
@@ -461,7 +451,8 @@ describe("CT1 D16/D17 job labels and cancellation", () => {
 
   // D17: fails when a cancelled FOMOD wizard is shown as a failed job / error notice.
   it("a cancelled job shows a neutral Cancelled state, not an error", async () => {
-    const { t, user } = await open("browse", {
+    const { t, user } = await open("requirements", {
+      deps: () => [{ status: "missing", key: "skse", name: "SKSE64", hint: "install 30379", urls: [], by: [], detail: "", acked: false }],
       install: () => {
         throw { message: "FOMOD installer cancelled" };
       },
@@ -474,8 +465,7 @@ describe("CT1 D16/D17 job labels and cancellation", () => {
     const island = screen.getByRole("status", { name: "Current job" });
     expect(island).toHaveTextContent("Cancelled");
     expect(island).not.toHaveTextContent("Failed");
-    await user.type(screen.getByLabelText(/Mod id, Nexus URL/), "266");
-    await user.click(within(screen.getByLabelText(/Mod id, Nexus URL/).closest("form")!).getByRole("button", { name: "Install" }));
+    await user.click(await within(main()).findByRole("button", { name: "Install" }));
     await waitFor(() => expect(useUi.getState().notices.map((n) => [n.tone, n.text])).toContainEqual(["info", "Install cancelled."]));
     expect(screen.queryByRole("alert")).toBeNull();
     act(() => useUi.getState().setView("activity"));

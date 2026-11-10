@@ -133,16 +133,16 @@ describe("structured results", () => {
 
   it("command errors become a notice with the CmdError message", async () => {
     const { renderApp } = await setup({
-      nxm_submit: () => {
-        throw { message: "not an nxm link" };
+      deps: () => [{ status: "missing", key: "skse", name: "SKSE64", hint: "install 30379", urls: [], by: [], detail: "", acked: false }],
+      install: () => {
+        throw { message: "mod not found" };
       },
     });
     renderApp();
-    act(() => useUi.getState().setView("browse"));
+    act(() => useUi.getState().setView("requirements"));
     const user = userEvent.setup();
-    await user.type(await screen.findByLabelText("nxm link"), "nxm://bad");
-    await user.click(screen.getByRole("button", { name: "Download" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("not an nxm link");
+    await user.click(await within(screen.getByRole("main")).findByRole("button", { name: "Install" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("mod not found");
   });
 });
 

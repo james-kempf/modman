@@ -5,7 +5,7 @@
 // this arbiter so whichever source arrives second is dropped.
 
 /** A physical input both sources can report. */
-export type NavInput = "up" | "down" | "left" | "right" | "A" | "B" | "Y" | "LB" | "RB";
+export type NavInput = "up" | "down" | "left" | "right" | "A" | "B" | "Y" | "LB" | "RB" | "LT" | "RT";
 
 /** Default ms within which the other source reporting the same input is a duplicate. */
 export const DUP_WINDOW = 150;

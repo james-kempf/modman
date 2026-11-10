@@ -3,7 +3,7 @@
 // Layout defects are guarded by the classes / DOM placement that fix them
 // (jsdom has no layout); the Playwright re-run covers the rendered result.
 import { QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -279,29 +279,6 @@ describe("CT2 D06/D08 layout guards", () => {
     expect(list.getAttribute("tabindex")).toBe("0");
     expect(list.className).toMatch(/overflow-y-auto/);
     expect(within(list).getAllByRole("listitem").every((li) => !li.hasAttribute("tabindex"))).toBe(true);
-  });
-});
-
-describe("CT2 D09 multi-line paste", () => {
-  // Fails when a multi-line nxm paste is sent as one glued string.
-  it("nxm field: each pasted link is shown and sent separately", async () => {
-    const { user, t } = await open("browse", { nxm_submit: (a) => ({ row: 1, link: String(a!.url).split("?")[0], kind: "mod" }) });
-    const field = await screen.findByLabelText("nxm link");
-    fireEvent.paste(field, { clipboardData: { getData: () => "nxm://a/mods/1/files/1?key=k\nnxm://a/mods/2/files/2?key=k\n" } });
-    expect(field).toHaveValue("nxm://a/mods/1/files/1?key=k nxm://a/mods/2/files/2?key=k");
-    await user.click(screen.getByRole("button", { name: "Download" }));
-    await waitFor(() => expect(t.callsOf("nxm_submit").map((a) => a!.url)).toEqual(["nxm://a/mods/1/files/1?key=k", "nxm://a/mods/2/files/2?key=k"]));
-    await waitFor(() => expect(noticeTexts()).toContain("Queued 2 links"));
-    expect(field).toHaveValue("");
-  });
-
-  // Fails when lines are glued together ("266267") in the install field.
-  it("install field keeps the first pasted line and says so", async () => {
-    await open("browse");
-    const field = await screen.findByLabelText(/Mod id, Nexus URL/);
-    fireEvent.paste(field, { clipboardData: { getData: () => "266\n267\n" } });
-    expect(field).toHaveValue("266");
-    expect(noticeTexts()).toContain("Pasted the first of 2 lines; install one mod at a time.");
   });
 });
 

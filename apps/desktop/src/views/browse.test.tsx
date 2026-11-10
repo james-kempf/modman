@@ -498,7 +498,6 @@ describe("Browse paging (Browse-4)", () => {
     expect(lastReq(t).offset).toBe(24);
     expect(pager).toHaveTextContent("Page 2 of 2 · 25–30 of 30");
     expect(next).toHaveAttribute("aria-disabled", "true");
-    expect(document.activeElement).toBe(next);
 
     await user.click(prev);
     expect(await screen.findByText("Mod 1")).toBeInTheDocument();
@@ -512,6 +511,247 @@ describe("Browse paging (Browse-4)", () => {
     await user.click(within(screen.getByRole("navigation", { name: "Collections pages" })).getByRole("button", { name: /Next/ }));
     expect(await screen.findByText("Coll s25")).toBeInTheDocument();
     expect(lastReq(t)).toMatchObject({ kind: "collections", offset: 24 });
+  });
+});
+
+describe("Browse LT/RT paging", () => {
+  // Fails when the triggers do not page Browse, page past the first/last page, or ask for another offset
+  // than the Previous/Next buttons.
+  it("RT next, LT previous; nothing past the first or last page", async () => {
+    const { t } = await open("browse", { browse: paged });
+    await screen.findByText("Mod 1");
+    const pager = screen.getByRole("navigation", { name: "Mods pages" });
+    const calls = () => t.callsOf("browse").length;
+
+    let before = calls();
+    act(() => performNav({ type: "page", delta: -1 }));
+    await act(() => new Promise((r) => setTimeout(r, 20)));
+    expect(calls()).toBe(before);
+    expect(pager).toHaveTextContent("Page 1 of 2");
+
+    act(() => performNav({ type: "page", delta: 1 }));
+    expect(await screen.findByText("Mod 25")).toBeInTheDocument();
+    expect(lastReq(t).offset).toBe(24);
+    expect(pager).toHaveTextContent("Page 2 of 2");
+
+    before = calls();
+    act(() => performNav({ type: "page", delta: 1 }));
+    await act(() => new Promise((r) => setTimeout(r, 20)));
+    expect(calls()).toBe(before);
+    expect(pager).toHaveTextContent("Page 2 of 2");
+
+    act(() => performNav({ type: "page", delta: -1 }));
+    expect(await screen.findByText("Mod 1")).toBeInTheDocument();
+    expect(pager).toHaveTextContent("Page 1 of 2");
+  });
+
+  // Fails when a trigger with no results listed still changes the page (a request for an empty offset).
+  it("does nothing when there are no results", async () => {
+    const { t } = await open("browse", { browse: () => ({ kind: "mods", total: 0, mods: [] }) });
+    await screen.findByText(/No mods were created/);
+    const before = t.callsOf("browse").length;
+    act(() => performNav({ type: "page", delta: 1 }));
+    await act(() => new Promise((r) => setTimeout(r, 20)));
+    expect(t.callsOf("browse")).toHaveLength(before);
+  });
+
+  // Fails when the pager does not span the content width with Next pushed to the right edge.
+  it("the pager spans the full width, Next on the right", async () => {
+    await open("browse", { browse: paged });
+    await screen.findByText("Mod 1");
+    const pager = screen.getByRole("navigation", { name: "Mods pages" });
+    expect(pager.className).toMatch(/(^|\s)-mx-section(\s|$)/);
+    expect(within(pager).getByRole("button", { name: /Next/ }).className).toMatch(/\bml-auto\b/);
+  });
+});
+
+describe("Browse page change: top and first tile", () => {
+  /** jsdom has no layout: give <main> a settable scrollTop, scrolled down to 900. */
+  const scrolled = () => {
+    const main = document.querySelector("main")!;
+    let top = 900;
+    Object.defineProperty(main, "scrollTop", { configurable: true, get: () => top, set: (v: number) => (top = v) });
+    return { top: () => top, down: () => (top = 900) };
+  };
+  const tile = (name: string) => screen.getByRole("button", { name });
+
+  // Fails when a page change leaves the view scrolled down at the old position, or the highlight on the
+  // pager (or a removed tile) instead of the new page's first result.
+  it("Next/RT and Previous/LT scroll to the top and focus the first tile (mods)", async () => {
+    const { user } = await open("browse", { browse: paged });
+    await screen.findByText("Mod 1");
+    const pos = scrolled();
+    const pager = screen.getByRole("navigation", { name: "Mods pages" });
+
+    await user.click(within(pager).getByRole("button", { name: /Next/ }));
+    await waitFor(() => expect(document.activeElement).toBe(tile("Mod 25")));
+    expect(pos.top()).toBe(0);
+
+    pos.down();
+    await user.click(within(pager).getByRole("button", { name: /Previous/ }));
+    await waitFor(() => expect(document.activeElement).toBe(tile("Mod 1")));
+    expect(pos.top()).toBe(0);
+
+    pos.down();
+    act(() => performNav({ type: "page", delta: 1 }));
+    await waitFor(() => expect(document.activeElement).toBe(tile("Mod 25")));
+    expect(pos.top()).toBe(0);
+
+    pos.down();
+    act(() => performNav({ type: "page", delta: -1 }));
+    await waitFor(() => expect(document.activeElement).toBe(tile("Mod 1")));
+    expect(pos.top()).toBe(0);
+  });
+
+  it("collections: RT focuses the first collection of the new page", async () => {
+    const { user } = await open("browse", { browse: paged });
+    await showCollections(user);
+    await screen.findByText("Coll s1");
+    const pos = scrolled();
+    act(() => performNav({ type: "page", delta: 1 }));
+    await waitFor(() => expect(document.activeElement).toBe(tile("Coll s25")));
+    expect(pos.top()).toBe(0);
+  });
+
+  // Fails when a filter change (not a page change) moves the focus into the results.
+  it("a filter change does not move the focus to the first tile", async () => {
+    const { user } = await open("browse", { browse: paged });
+    await screen.findByText("Mod 1");
+    const month = screen.getByRole("button", { name: "Month" });
+    await user.click(month);
+    await act(() => new Promise((r) => setTimeout(r, 20)));
+    expect(document.activeElement).toBe(month);
+  });
+
+  // Fails when an empty next page throws or strands the focus on <body>: the listing falls back to the last
+  // non-empty page and the focus lands on its first tile.
+  it("an empty new page keeps the focus in the view", async () => {
+    let total = 30;
+    const { t, user } = await open("browse", {
+      browse: (a) => {
+        const r = reqOf(a);
+        if (r.offset >= total) return { kind: "mods", total, mods: [] };
+        return { ...(paged(a) as object), total };
+      },
+    });
+    await screen.findByText("Mod 1");
+    total = 24; // the listing shrank on the server: page 2 now comes back empty
+    const next = within(screen.getByRole("navigation", { name: "Mods pages" })).getByRole("button", { name: /Next/ });
+    await user.click(next);
+    await waitFor(() => expect(document.activeElement).toBe(tile("Mod 1")));
+    expect(t.callsOf("browse").some((c) => reqOf(c).offset === 24)).toBe(true);
+    expect(screen.getByRole("navigation", { name: "Mods pages" })).toHaveTextContent(/^Previous\s*Page 1 of/);
+  });
+});
+
+describe("Browse pager toolbar (sticky bottom)", () => {
+  const place = (el: HTMLElement, x: number, y: number, w = 100, h = 40) => {
+    el.getBoundingClientRect = () => ({ left: x, top: y, right: x + w, bottom: y + h, width: w, height: h, x, y, toJSON() {} }) as DOMRect;
+  };
+  // Fails when the pager scrolls away with the results (not sticky to the bottom of <main>), stops spanning the
+  // card section's width, or stops being the section's last child (sticky would then pin it mid-card).
+  it("is a sticky bottom toolbar across the results section, only on Browse", async () => {
+    await open("browse", { browse: paged });
+    await screen.findByText("Mod 1");
+    const pager = screen.getByRole("navigation", { name: "Mods pages" });
+    expect(pager.tagName).toBe("DIV");
+    expect(pager.className).toMatch(/\bsticky\b/);
+    expect(pager.className).toMatch(/(^|\s)bottom-\[calc\(var\(--main-pb,0px\)\*-1\)\](\s|$)/);
+    expect(pager.className).toMatch(/(^|\s)-mx-section(\s|$)/);
+    expect(pager.parentElement!.lastElementChild).toBe(pager);
+    expect(pager.parentElement!.contains(screen.getByRole("list", { name: "Mods" }))).toBe(true);
+    act(() => useUi.getState().setView("activity"));
+    await screen.findByRole("heading", { name: "Activity" });
+    expect(screen.queryByRole("navigation", { name: /pages$/ })).toBeNull();
+  });
+
+  // Fails when the always-on-screen pager steals Down from a tile whose next row is still visible above it,
+  // or Up from the pager leaves the grid.
+  it("pinned over the grid: Down goes row by row, Up from the pager returns to the grid", async () => {
+    await open("browse", { browse: paged });
+    await screen.findByText("Mod 1");
+    const pager = screen.getByRole("navigation", { name: "Mods pages" });
+    const prev = within(pager).getByRole("button", { name: /Previous/ });
+    const next = within(pager).getByRole("button", { name: /Next/ });
+    const tiles = within(screen.getByRole("list", { name: "Mods" })).getAllByRole("button");
+    // Viewport: rows at 100 and 450, the pager pinned at 600, every later row below it (off screen).
+    tiles.forEach((t, i) => place(t, 0, i === 0 ? 100 : i === 1 ? 450 : 900 + i * 300, 100, 120));
+    place(prev, 0, 600);
+    place(next, 300, 600);
+
+    tiles[0].focus();
+    act(() => performNav({ type: "move", dir: "down" }));
+    expect(document.activeElement).toBe(tiles[1]);
+    act(() => performNav({ type: "move", dir: "down" }));
+    expect(document.activeElement).toBe(prev);
+    act(() => performNav({ type: "move", dir: "up" }));
+    expect(document.activeElement).toBe(tiles[1]);
+  });
+});
+
+describe("Browse pager toolbar: pinned while scrolled up, page margin at the end", () => {
+  const cls = (el: Element, c: string) => el.className.split(/\s+/).includes(c);
+  // Fails when Browse loses the shared page margin at the end of the scroll (<main>'s pb-*), or the card
+  // puts its own padding/border under the toolbar (a gap under it while it is pinned flush to <main>'s
+  // scrollport: sticky ignores the scroll container's padding, so <main>'s pb only shows at the end).
+  it("keeps <main>'s bottom padding; nothing of the card sits below the toolbar", async () => {
+    await open("browse", { browse: paged });
+    await screen.findByText("Mod 1");
+    const main = document.querySelector("main")!;
+    expect(main.className).toMatch(/\bpb-10\b/);
+    expect(main.className).toMatch(/\bscroll-pb-32\b/);
+    // WebKit insets the sticky bar by <main>'s padding-bottom: the pager pulls itself down by exactly that
+    // padding, published by <main> as --main-pb with the same number as its pb-* class.
+    const pbMatches = () => {
+      const pb = /(^|\s)pb-(\d+)(\s|$)/.exec(main.className)![2];
+      expect(main.className).toContain(`[--main-pb:calc(var(--spacing)*${pb})]`);
+    };
+    pbMatches();
+    act(() => useUi.getState().notify("info", "hello"));
+    await waitFor(() => expect(main.className).toMatch(/\bpb-28\b/));
+    pbMatches();
+    const pager = screen.getByRole("navigation", { name: "Mods pages" });
+    const section = pager.parentElement!;
+    expect(cls(section, "pb-0")).toBe(true);
+    expect(cls(pager, "-mb-px")).toBe(true);
+    expect(cls(pager, "bottom-[calc(var(--main-pb,0px)*-1)]")).toBe(true);
+    expect(cls(pager, "bottom-0")).toBe(false);
+    // The results card is the view's last block: nothing after it in the frame.
+    expect(section.closest("[data-view-frame] > *")!.nextElementSibling).toBeNull();
+    act(() => useUi.getState().setView("activity"));
+    await screen.findByRole("heading", { name: "Activity" });
+    expect(main.className).toMatch(/\bpb-28\b/);
+  });
+});
+
+describe("Browse pager keyboard reach", () => {
+  const place = (el: HTMLElement, x: number, y: number, w = 100, h = 40) => {
+    el.getBoundingClientRect = () => ({ left: x, top: y, right: x + w, bottom: y + h, width: w, height: h, x, y, toJSON() {} }) as DOMRect;
+  };
+  // Fails when the pager is its own landmark region for spatial nav: Down from the grid then skips past
+  // Previous/Next to the next control in <main> (the "below" stand-in), so the arrows never reach the pager.
+  it("Down from the last tile reaches the pager, Right moves Previous -> Next, Enter pages", async () => {
+    const { t, user } = await open("browse", { browse: paged });
+    const tile = await screen.findByRole("button", { name: "Mod 24" });
+    const pager = screen.getByRole("navigation", { name: "Mods pages" });
+    const prev = within(pager).getByRole("button", { name: /Previous/ });
+    const next = within(pager).getByRole("button", { name: /Next/ });
+    const below = document.createElement("button");
+    below.textContent = "below";
+    document.querySelector("main")!.appendChild(below);
+    place(tile, 0, 100);
+    place(prev, 0, 300);
+    place(next, 300, 300);
+    place(below, 0, 500);
+
+    tile.focus();
+    act(() => performNav({ type: "move", dir: "down" }));
+    expect(document.activeElement).toBe(prev);
+    act(() => performNav({ type: "move", dir: "right" }));
+    expect(document.activeElement).toBe(next);
+    await user.keyboard("{Enter}");
+    expect(await screen.findByText("Mod 25")).toBeInTheDocument();
+    expect(lastReq(t).offset).toBe(24);
   });
 });
 

@@ -274,49 +274,6 @@ describe("Browse", () => {
   });
 });
 
-describe("Install", () => {
-  it("installs a target with the FOMOD wizard mode and shows the result", async () => {
-    const { t, user } = await open("browse", {
-      install: () => ({
-        game: "skyrimspecialedition",
-        installed: { mod_id: 1, uid: "u", name: "SkyUI", files: 5, size: 1, fomod_found: true, replaced: null, warnings: [] },
-        collection: null,
-        after: { deployed: null, needs_deploy: false },
-      }),
-    });
-    const target = await screen.findByLabelText(/Mod id, Nexus URL/);
-    await user.type(target, "12604");
-    await user.click(within(target.closest("form")!).getByRole("button", { name: "Install" }));
-    await waitFor(() => expect(t.callsOf("install")).toHaveLength(1));
-    expect(t.callsOf("install")[0]).toMatchObject({ target: "12604", fomod: "ask", deploy: false });
-    expect(await screen.findByText(/Installed SkyUI \(5 files\)/)).toBeInTheDocument();
-  });
-
-  // T16 F2b: fails when the on-screen keyboard can only fill the field and the gamepad user must find Install.
-  it("on-screen keyboard Install button fills the target and submits it", async () => {
-    const { t } = await open("browse", {
-      install: () => ({ game: null, installed: null, collection: null, after: { deployed: null, needs_deploy: false } }),
-    });
-    const target = (await screen.findByLabelText(/Mod id, Nexus URL/)) as HTMLInputElement;
-    act(() => useUi.getState().openOsk({ input: target, label: "target" }));
-    const dlg = await screen.findByRole("dialog");
-    act(() => within(dlg).getByRole("button", { name: "7" }).click());
-    act(() => within(dlg).getByRole("button", { name: "Install" }).click());
-    await waitFor(() => expect(t.callsOf("install")).toHaveLength(1));
-    expect(t.callsOf("install")[0]).toMatchObject({ target: "7" });
-  });
-
-  it("nxm paste box submits the link", async () => {
-    const { t, user } = await open("browse", {
-      nxm_submit: () => ({ row: 3, link: "nxm://skyrimspecialedition/mods/1/files/2", kind: "mod" }),
-    });
-    await user.type(await screen.findByLabelText("nxm link"), "nxm://skyrimspecialedition/mods/1/files/2?key=k&expires=1");
-    await user.click(screen.getByRole("button", { name: "Download" }));
-    await waitFor(() => expect(t.callsOf("nxm_submit")).toEqual([{ url: "nxm://skyrimspecialedition/mods/1/files/2?key=k&expires=1" }]));
-    expect(await screen.findByText(/Queued mod link/)).toBeInTheDocument();
-  });
-});
-
 describe("Collections", () => {
   it("looks up a collection and installs that revision", async () => {
     const { t, user } = await open("collections", {
@@ -406,6 +363,27 @@ describe("Activity", () => {
     expect(await screen.findByRole("list", { name: "Jobs" })).toHaveTextContent("Install");
     expect(screen.getByRole("list", { name: "Messages" })).toHaveTextContent("Extracting");
     expect(await screen.findByText("line one")).toBeInTheDocument();
+  });
+
+  // Fails when the download queue is lost in the move from Browse, or Browse keeps its own copy
+  // (and the removed direct-install / nxm forms come back).
+  it("shows the download queue; Browse no longer does", async () => {
+    const row = {
+      id: 4, game: "skyrimspecialedition", source: "nxm", url: null, nexus_mod_id: 266, nexus_file_id: 1,
+      collection_slug: null, collection_revision: null, file_name: "SkyUI.7z", dest_path: null, part_path: null,
+      size: 2048, bytes_done: 2048, md5: null, sha256: null, status: "done", error: null, created_at: 0, updated_at: 0,
+    };
+    const { t } = await open("activity", { downloads_list: () => [row] });
+    const list = await screen.findByRole("list", { name: "Downloads" });
+    expect(list).toHaveTextContent("SkyUI.7z");
+    expect(list).toHaveTextContent("done");
+    act(() => useUi.getState().setView("browse"));
+    expect(await screen.findByRole("heading", { name: "Browse" })).toBeInTheDocument();
+    const callsBefore = t.callsOf("downloads_list").length;
+    expect(screen.queryByRole("list", { name: "Downloads" })).toBeNull();
+    expect(screen.queryByLabelText(/Mod id, Nexus URL/)).toBeNull();
+    expect(screen.queryByLabelText("nxm link")).toBeNull();
+    expect(t.callsOf("downloads_list")).toHaveLength(callsBefore);
   });
 });
 

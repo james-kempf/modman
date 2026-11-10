@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Gamepad API polling -> navigation actions (standard mapping):
 // A select, B back, Y focus the view's search, LB/RB previous/next tab
-// (a dialog's tabs while one is open), D-pad or left stick move, right stick
+// (a dialog's tabs while one is open), LT/RT previous/next page of the
+// view's listing (Browse), D-pad or left stick move, right stick
 // scrolls (smoothly, every frame, in proportion to the deflection).
 // Directions repeat while held; buttons fire once per press.
 
@@ -10,7 +11,7 @@ import { navArbiter, type NavArbiter, type NavInput } from "./arbiter";
 import { setModality } from "./modality";
 import type { Dir } from "./spatial";
 
-export const BUTTON = { A: 0, B: 1, Y: 3, LB: 4, RB: 5, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 } as const;
+export const BUTTON = { A: 0, B: 1, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 } as const;
 
 /** Right stick deflection below this scrolls nothing. */
 const SCROLL_DEADZONE = 0.15;
@@ -78,7 +79,7 @@ export class GamepadNav {
     let stick = 0;
     for (const [i, p] of Array.from(this.getPads()).entries()) {
       if (!p?.connected) continue;
-      for (const b of ["A", "B", "Y", "LB", "RB"] as const) if (pressed(p, BUTTON[b])) hold(b, i);
+      for (const b of ["A", "B", "Y", "LB", "RB", "LT", "RT"] as const) if (pressed(p, BUTTON[b])) hold(b, i);
       if (!stick) stick = rightStickY(p);
       if (dir) continue;
       dir = this.direction(p);
@@ -107,6 +108,8 @@ export class GamepadNav {
     if (edge("Y")) emit("Y", { type: "search" });
     if (edge("LB")) emit("LB", { type: "tab", delta: -1 });
     if (edge("RB")) emit("RB", { type: "tab", delta: 1 });
+    if (edge("LT")) emit("LT", { type: "page", delta: -1 });
+    if (edge("RT")) emit("RT", { type: "page", delta: 1 });
     this.held = down;
     this.arbiter.notePoll(new Set(down.keys()), now);
 

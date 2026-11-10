@@ -11,6 +11,8 @@ export type NavAction =
   | { type: "back" }
   | { type: "tab"; delta: 1 | -1 }
   | { type: "search" }
+  /** LT/RT: previous/next page of the view's listing (only Browse listens). */
+  | { type: "page"; delta: 1 | -1 }
   /** Right stick: scroll the open dialog, else the view, by `dy` pixels (negative = up). */
   | { type: "scroll"; dy: number };
 
@@ -19,6 +21,9 @@ export const BACK_EVENT = "vessel:back";
 /** Dispatched on the topmost nav scope (a dialog) for "tab" (detail: { delta }); a dialog's own tabs switch on it. */
 export const TAB_EVENT = "vessel:tab";
 export type TabEventDetail = { delta: 1 | -1 };
+/** Dispatched on the document for "page" (detail: { delta }); a view with a pager pages on it. */
+export const PAGE_EVENT = "vessel:page";
+export type PageEventDetail = { delta: 1 | -1 };
 
 export function focusCurrentTab(doc: Document = document): void {
   doc.querySelector<HTMLElement>("[data-tab][aria-current='page']")?.focus();
@@ -88,6 +93,11 @@ export function performNav(action: NavAction, doc: Document = document): void {
       doc.querySelector<HTMLElement>(`[data-tab='${view}']`)?.focus();
       return;
     }
+    case "page":
+      // Not while a dialog is open: the pager is behind it.
+      if (navScope(doc) !== doc.body) return;
+      doc.dispatchEvent(new CustomEvent<PageEventDetail>(PAGE_EVENT, { detail: { delta: action.delta } }));
+      return;
     case "search":
       // The view's search field; not while a dialog is open (the field is behind it, inert).
       if (navScope(doc) !== doc.body) return;

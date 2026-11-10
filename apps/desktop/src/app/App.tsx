@@ -70,7 +70,16 @@ const ICON: Record<ViewId, ReactNode> = {
  * (+ scroll-padding, also kept at the top) for the fixed stack (~82px per notice or island + 24px
  * offset), so a control scrolled into view is not under it.
  */
-const STACK_ROOM = ["pb-10 scroll-pb-32", "pb-28 scroll-pb-60", "pb-48 scroll-pb-80", "pb-72 scroll-pb-96", "pb-96 scroll-pb-[30rem]"];
+// --main-pb repeats each pb-* (Tailwind's own value for it): WebKit insets a sticky child by the scroll
+// container's padding, so a bar pinned to the bottom (Browse's pager) offsets itself by it. Classes, not a
+// style attribute: CSP.
+const STACK_ROOM = [
+  "pb-10 [--main-pb:calc(var(--spacing)*10)] scroll-pb-32",
+  "pb-28 [--main-pb:calc(var(--spacing)*28)] scroll-pb-60",
+  "pb-48 [--main-pb:calc(var(--spacing)*48)] scroll-pb-80",
+  "pb-72 [--main-pb:calc(var(--spacing)*72)] scroll-pb-96",
+  "pb-96 [--main-pb:calc(var(--spacing)*96)] scroll-pb-[30rem]",
+];
 
 /** How long a finished job stays in the island (legacy: 5 s). */
 const ISLAND_LINGER = 5000;

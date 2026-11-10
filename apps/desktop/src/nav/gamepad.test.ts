@@ -48,6 +48,17 @@ describe("gamepad mapping (mocked navigator.getGamepads)", () => {
     expect(nav.poll(16)).toEqual([{ type: "tab", delta: -1 }]);
   });
 
+  // Fails when LT/RT are unmapped, fire again while held, or reuse the tab action (LB/RB's job).
+  it("triggers page the view (LT previous, RT next), once per press", () => {
+    const s = mockPads();
+    const nav = new GamepadNav();
+    s.pads = [pad([BUTTON.RT])];
+    expect(nav.poll(0)).toEqual([{ type: "page", delta: 1 }]);
+    expect(nav.poll(16)).toEqual([]);
+    s.pads = [pad([BUTTON.LT])];
+    expect(nav.poll(32)).toEqual([{ type: "page", delta: -1 }]);
+  });
+
   // Fails when Y is unmapped or fires again while held.
   it("Y focuses search, once per press", () => {
     const s = mockPads();

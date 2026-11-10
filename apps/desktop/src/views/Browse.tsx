@@ -1,27 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Browse: the game's mods and collections on Nexus (top of all time or a
-// recent window, newest, or matching words) with one-click installs, then
-// direct installs by id/URL/archive (FOMOD choices come up as the installer
-// wizard dialog), the nxm paste box (Game Mode has no browser handoff) and
-// the download queue.
+// recent window, newest, or matching words) with one-click installs. The
+// download queue is on Activity.
 
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, type FocusEvent } from "react";
 import { errMsg } from "../app/bridge";
 import { useActiveGame } from "../app/queries";
-import { useBusy, useRun } from "../app/run";
+import { useRun } from "../app/run";
 import { browseDefaults, useUi, type BrowseSession } from "../app/store";
 import { CollectionDetailsDialog, ModTile } from "../components/dialogs/BrowseDetails";
-import { RemoveButton, installedText } from "../components/browse/ModActions";
-import { readClipboard } from "../components/shell/Osk";
+import { RemoveButton } from "../components/browse/ModActions";
 import {
   ArrowClockwiseIcon,
   CaretLeftIcon,
   CaretRightIcon,
-  ClipboardTextIcon,
   DownloadSimpleIcon,
   HardDrivesIcon,
-  LinkIcon,
   PackageIcon,
   ThumbsUpIcon,
 } from "@phosphor-icons/react";
@@ -35,9 +30,6 @@ import {
   Picture,
   Segmented,
   Select,
-  StatusDot,
-  TextField,
-  Toggle,
   SearchField,
   ViewFrame,
   ViewHeader,
@@ -45,17 +37,12 @@ import {
   cx,
 } from "../components/ui";
 import * as ipc from "../ipc/commands";
+import { PAGE_EVENT, type PageEventDetail } from "../nav/actions";
+import { focusables } from "../nav/spatial";
 import type { BrowseKind, BrowsePeriod, BrowseSort, BrowseView, CollectionHit } from "../ipc/types";
 import { collectionText, collectionTone } from "./Collections";
-import { installKey } from "./Requirements";
 import { NoGame } from "../components/shell/NoGame";
 import { FOCUS_ATTR, InstalledBadge, MOD_GRID, RESULTS_GRID, Stat, Tile, WorkingBadge, compact, useDetails } from "../components/browse/Tile";
-
-const FOMOD = [
-  { value: "ask", label: "Ask (wizard)" },
-  { value: "reuse", label: "Reuse choices" },
-  { value: "default", label: "Defaults" },
-] as const;
 
 const KINDS = [
   { value: "mods", label: "Mods" },
@@ -85,19 +72,6 @@ const PERIOD_PHRASE: Record<BrowsePeriod, string> = {
   day: "from the past day",
 };
 
-/** The non-empty lines/words of pasted text (nxm links never contain whitespace). */
-export function splitLinks(text: string): string[] {
-  return text.split(/\s+/).filter(Boolean);
-}
-
-/** Insert `text` over the input's selection; returns the new value. */
-function insertAtSelection(input: HTMLInputElement, text: string): string {
-  const v = input.value;
-  const a = input.selectionStart ?? v.length;
-  const b = input.selectionEnd ?? v.length;
-  return v.slice(0, a) + text + v.slice(b);
-}
-
 export function Browse() {
   const { game, isLoading } = useActiveGame();
   return (
@@ -109,160 +83,10 @@ export function Browse() {
         // Every install goes into the active game.
         <NoGame>Pick or add a game in Games first; Browse shows and installs mods for the active game.</NoGame>
       ) : (
-        <>
-          {/* key: listings belong to one game. */}
-          <BrowseCard key={game.id} game={game.id} linked={!!game.nexus_domain} />
-          <section className="stagger grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-            <InstallCard />
-            <NxmCard />
-          </section>
-          <DownloadsCard />
-        </>
+        // key: listings belong to one game.
+        <BrowseCard key={game.id} game={game.id} linked={!!game.nexus_domain} />
       )}
     </ViewFrame>
-  );
-}
-
-function InstallCard() {
-  const run = useRun();
-  const notify = useUi((s) => s.notify);
-  const busy = useBusy("Install");
-  const [target, setTarget] = useState("");
-  const [fomod, setFomod] = useState<(typeof FOMOD)[number]["value"]>("ask");
-  const [deploy, setDeploy] = useState(false);
-  const submit = async () => {
-    if (!target.trim()) return;
-    const r = await run("Install", () => ipc.install({ target: target.trim(), fomod, deploy }), {
-      key: installKey(target.trim()),
-    });
-    if (r) {
-      notify(r.installed || r.collection ? "success" : "info", installedText(r));
-      setTarget("");
-    }
-  };
-  return (
-    <Card title="Direct install">
-      <CardSection>
-        <form
-          className="grid gap-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void submit();
-          }}
-        >
-          <TextField
-            label="Mod id, Nexus URL, collection URL or archive path"
-            value={target}
-            onChange={(e) => setTarget(e.target.value)}
-            onPaste={(e) => {
-              // A text input drops line breaks and glues the lines together ("266\n267" -> "266267"):
-              // keep the first line and say so.
-              const lines = e.clipboardData
-                .getData("text")
-                .split(/\r?\n/)
-                .map((l) => l.trim())
-                .filter(Boolean);
-              if (lines.length < 2) return;
-              e.preventDefault();
-              setTarget(insertAtSelection(e.currentTarget, lines[0]));
-              notify("warn", `Pasted the first of ${lines.length} lines; install one mod at a time.`);
-            }}
-            data-osk-submit="Install"
-            placeholder="e.g. 266 or https://www.nexusmods.com/skyrimspecialedition/mods/266"
-          />
-          <Segmented label="FOMOD" value={fomod} options={FOMOD} onChange={setFomod} />
-          <div className="flex flex-wrap items-center gap-3">
-            <Toggle label="Deploy after install" checked={deploy} onChange={setDeploy} />
-            {/* inactive, not disabled: focus returns here after the installer dialogs, when the field is already cleared. */}
-            <Button
-              type="submit"
-              tone="primary"
-              busy={busy}
-              inactive={!target.trim()}
-              className="ml-auto"
-              icon={<DownloadSimpleIcon aria-hidden size={16} />}
-            >
-              Install
-            </Button>
-          </div>
-        </form>
-      </CardSection>
-    </Card>
-  );
-}
-
-function NxmCard() {
-  const run = useRun();
-  const notify = useUi((s) => s.notify);
-  const busy = useBusy("Queue link");
-  const [url, setUrl] = useState("");
-  // Several links (a multi-line paste) are queued one by one; the field shows them space-separated,
-  // exactly what is sent, and keeps the ones that failed.
-  const submit = async (text: string) => {
-    const links = splitLinks(text);
-    if (!links.length) return;
-    const failed: string[] = [];
-    const queued: string[] = [];
-    for (const link of links) {
-      const r = await run("Queue link", () => ipc.nxmSubmit(link));
-      if (r) queued.push(`${r.kind} link ${r.link}`);
-      else failed.push(link);
-    }
-    if (queued.length === 1) notify("success", `Queued ${queued[0]}`);
-    else if (queued.length > 1) notify("success", `Queued ${queued.length} links`);
-    setUrl(failed.join(" "));
-  };
-  const setLinks = (text: string) => setUrl(splitLinks(text).join(" "));
-  return (
-    <Card title="Mod Manager Download link">
-      <CardSection>
-        <p className="mb-5 text-body leading-relaxed text-zinc-400">
-          From the "Mod Manager Download" button on Nexus. Links clicked in a browser arrive here by themselves.
-        </p>
-        <form
-          className="grid gap-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void submit(url);
-          }}
-        >
-          <TextField
-            label="nxm link"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            onPaste={(e) => {
-              const text = e.clipboardData.getData("text");
-              if (!/\s/.test(text.trim())) return;
-              e.preventDefault();
-              setUrl(insertAtSelection(e.currentTarget, splitLinks(text).join(" ")));
-            }}
-            placeholder="nxm://…"
-          />
-          <div className="flex flex-wrap gap-3">
-            <Button
-              icon={<ClipboardTextIcon aria-hidden size={16} />}
-              onClick={async () => {
-                const t = await readClipboard();
-                if (t === null) notify("warn", "Clipboard not readable here; paste into the field with Ctrl+V.");
-                else setLinks(t);
-              }}
-            >
-              Paste
-            </Button>
-            <Button
-              type="submit"
-              tone="primary"
-              busy={busy}
-              disabled={!url.trim()}
-              className="ml-auto"
-              icon={<LinkIcon aria-hidden size={16} />}
-            >
-              Download
-            </Button>
-          </div>
-        </form>
-      </CardSection>
-    </Card>
   );
 }
 
@@ -356,8 +180,14 @@ function BrowseSearch({ game }: { game: string }) {
 function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
   const [s, save] = useBrowseSession(game);
   const { kind, period, sort, text, page } = s;
-  // Any change to what is listed starts again at the first page.
-  const refine = (patch: Partial<Omit<BrowseSession, "game">>) => save({ ...patch, page: 0 });
+  // Set by a page change: once the new page is rendered, go to the top and focus its first result.
+  const toFirst = useRef(false);
+  const results = useRef<HTMLUListElement>(null);
+  // Any change to what is listed starts again at the first page (focus stays on the filter).
+  const refine = (patch: Partial<Omit<BrowseSession, "game">>) => {
+    toFirst.current = false;
+    save({ ...patch, page: 0 });
+  };
   const q = useQuery({
     queryKey: ["browse", game, kind, period, sort, text, page],
     queryFn: () => ipc.browse({ kind, period, sort, text, offset: page * PAGE_SIZE }),
@@ -375,10 +205,37 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
   useEffect(() => {
     if (q.isSuccess && !q.isPlaceholderData && page > 0 && shown === 0) save({ page: Math.min(page, pages) - 1 });
   }, [q.isSuccess, q.isPlaceholderData, page, shown, pages]); // `save` is a fresh closure each render
+  useEffect(() => {
+    if (!toFirst.current || !q.isSuccess || q.isPlaceholderData) return;
+    // An empty page past the end is replaced by the last page above: keep waiting for that one.
+    if (!shown && page > 0) return;
+    toFirst.current = false;
+    const main = scroller();
+    if (main) main.scrollTop = 0;
+    const first = results.current && focusables(results.current)[0];
+    if (first) first.focus({ preventScroll: true });
+  }, [q.isSuccess, q.isPlaceholderData, data, page, shown]);
   const noun = kind === "mods" ? "mods" : "collections";
   const counted = `${total.toLocaleString()} ${total === 1 ? noun.slice(0, -1) : noun}`;
   const sortLabel = SORTS.find((o) => o.value === sort)!.label.toLowerCase();
   const first = page * PAGE_SIZE;
+  // The pager is shown (results listed): it is the card's bottom edge, flush with the view's.
+  const hasPager = linked && !q.isError && !q.isPending && shown > 0;
+  const paging = q.isPlaceholderData && q.isFetching;
+  // One rule for the buttons and LT/RT: nothing while a page loads, with no results, or past either end.
+  const goPage = (delta: 1 | -1) => {
+    const to = page + delta;
+    if (paging || !shown || to < 0 || to >= pages) return;
+    toFirst.current = true;
+    save({ page: to });
+  };
+  const goPageRef = useRef(goPage);
+  goPageRef.current = goPage;
+  useEffect(() => {
+    const onPage = (e: Event) => goPageRef.current((e as CustomEvent<PageEventDetail>).detail.delta);
+    document.addEventListener(PAGE_EVENT, onPage);
+    return () => document.removeEventListener(PAGE_EVENT, onPage);
+  }, []);
   return (
     <Card
       onFocus={onFocus}
@@ -396,7 +253,7 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
           <Select label="Sort" inline value={sort} options={SORTS} onChange={(v) => refine({ sort: v })} />
         </div>
       </CardSection>
-      <CardSection>
+      <CardSection className={hasPager ? "pb-0" : undefined}>
         {!linked ? (
           <Empty>This game is not linked to a Nexus Mods game, so there is nothing to browse.</Empty>
         ) : q.isError ? (
@@ -417,6 +274,7 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
         ) : (
           <>
             <ul
+              ref={results}
               className={kind === "mods" ? MOD_GRID : RESULTS_GRID}
               aria-label={kind === "mods" ? "Mods" : "Collections"}
               aria-busy={q.isPlaceholderData || undefined}
@@ -425,15 +283,27 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
                 ? data!.mods.map((m, i) => <ModTile key={m.modId !== null ? `m${m.modId}` : `i${i}`} game={game} m={m} focusKey={`m${m.modId ?? m.name}`} />)
                 : data!.collections.map((c) => <CollectionTile key={c.slug} game={game} c={c} />)}
             </ul>
-            <nav className="mt-5 flex flex-wrap items-center gap-4" aria-label={`${kind === "mods" ? "Mods" : "Collections"} pages`}>
+            {/* role=navigation, not <nav>: a <nav> is its own spatial-nav region (nav/spatial.ts), so Down from the
+                grid would skip the pager for the next control in <main>.
+                A toolbar stuck to the bottom of <main> (like the sidebar's sticky header): the last child of the
+                results section, so it pins while the grid is on screen and rests below the last row (in flow, it
+                never covers it). -mx-section: edge to edge across the card. While scrolled up it pins flush to
+                <main>'s bottom edge: WebKit insets sticky by <main>'s padding-bottom, so bottom is minus that
+                padding (--main-pb, set by App). At the end it rests here with <main>'s usual bottom padding below. Nothing of the card shows under it:
+                the section has no bottom padding (pb-0) and -mb-px covers the card's bottom border. */}
+            <div
+              role="navigation"
+              className="sticky bottom-[calc(var(--main-pb,0px)*-1)] z-10 -mx-section mt-5 -mb-px flex flex-wrap items-center gap-4 rounded-b-card border-t border-hairline bg-ink-2 px-section py-3"
+              aria-label={`${kind === "mods" ? "Mods" : "Collections"} pages`}
+            >
               {/* inactive, not disabled: focus stays on the button at the first/last page. */}
               <Button
                 size="sm"
                 {...{ [FOCUS_ATTR]: "page:prev" }}
                 inactive={page === 0}
-                busy={q.isPlaceholderData && q.isFetching}
+                busy={paging}
                 icon={<CaretLeftIcon aria-hidden size={15} />}
-                onClick={() => save({ page: page - 1 })}
+                onClick={() => goPage(-1)}
               >
                 Previous
               </Button>
@@ -445,13 +315,14 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
                 size="sm"
                 {...{ [FOCUS_ATTR]: "page:next" }}
                 inactive={page + 1 >= pages}
-                busy={q.isPlaceholderData && q.isFetching}
-                onClick={() => save({ page: page + 1 })}
+                busy={paging}
+                className="ml-auto"
+                onClick={() => goPage(1)}
               >
                 Next
                 <CaretRightIcon aria-hidden size={15} />
               </Button>
-            </nav>
+            </div>
           </>
         )}
       </CardSection>
@@ -554,74 +425,5 @@ function CollectionTile({ game, c }: { game: string; c: CollectionHit }) {
         )
       }
     />
-  );
-}
-
-const DOWNLOADS_SHOWN = 10;
-
-function DownloadsCard() {
-  const [cap, setCap] = useState(DOWNLOADS_SHOWN);
-  const q = useQuery({ queryKey: ["downloads"], queryFn: ipc.downloadsList });
-  const live = useUi((s) => s.downloads);
-  const rows = q.data ?? [];
-  const liveAll = Object.values(live).filter((d) => d.last.type !== "finished" && !rows.some((r) => r.file_name === d.name));
-  const total = liveAll.length + rows.length;
-  // Running downloads come first, so the cap trims the queue's tail.
-  const liveOnly = liveAll.slice(0, cap);
-  const shown = rows.slice(0, Math.max(0, cap - liveOnly.length));
-  return (
-    <Card title="Downloads">
-      <CardSection>
-        {q.isError && (
-          <div className="mb-4">
-            <ErrorNote>Could not load the download queue: {errMsg(q.error)}</ErrorNote>
-          </div>
-        )}
-        {!rows.length && !liveOnly.length ? (
-          <Empty>No downloads.</Empty>
-        ) : (
-          <ul className="rows" aria-label="Downloads">
-            {liveOnly.map((d) => (
-              <li key={d.name} tabIndex={0} className="grid gap-2 rounded-control py-3">
-                <span className="flex items-center gap-2.5 text-[14.5px] text-zinc-100">
-                  <StatusDot live />
-                  {d.name}
-                </span>
-                <progress aria-label={`${d.name} progress`} max={d.total ?? 1} value={d.total ? d.done : undefined} />
-                <span className="font-mono text-[11.5px] text-dim">
-                  {bytes(d.done)} / {bytes(d.total)}
-                  {d.last.type === "retrying" && ` · retrying (${d.last.reason})`}
-                </span>
-              </li>
-            ))}
-            {shown.map((r) => {
-              const l = r.file_name ? live[r.file_name] : undefined;
-              const done = l?.done ?? r.bytes_done;
-              const size = l?.total ?? r.size;
-              return (
-                <li key={r.id} tabIndex={0} className="grid gap-2 rounded-control py-3">
-                  <span className="flex flex-wrap items-center gap-2">
-                    <span className="min-w-0 flex-1 truncate text-[14.5px] text-zinc-100">
-                      {r.file_name ?? (r.nexus_mod_id ? `mod ${r.nexus_mod_id}` : r.collection_slug ?? `#${r.id}`)}
-                    </span>
-                    <Badge tone={r.status === "failed" ? "rose" : r.status === "done" ? "accent" : "zinc"}>{r.status}</Badge>
-                  </span>
-                  {r.status === "downloading" && <progress aria-label="progress" max={size ?? 1} value={size ? done : undefined} />}
-                  <span className="font-mono text-[11.5px] text-dim">
-                    {bytes(done)} / {bytes(size)} · {r.source}
-                    {r.error && ` · ${r.error}`}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        {total > cap && (
-          <Button size="sm" tone="ghost" className="mt-3" onClick={() => setCap(cap + DOWNLOADS_SHOWN)}>
-            Show more ({Math.min(DOWNLOADS_SHOWN, total - cap)})
-          </Button>
-        )}
-      </CardSection>
-    </Card>
   );
 }
