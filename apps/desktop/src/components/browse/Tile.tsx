@@ -146,6 +146,30 @@ export function Tile({
   );
 }
 
+/** Grey block of a skeleton tile (surface token; the pulse stops under prefers-reduced-motion). */
+const BONE = "block rounded-control bg-fill-2 motion-safe:animate-pulse";
+
+/**
+ * A loading placeholder shaped like a Tile (same shell, picture box and text lines). Hidden from
+ * assistive tech and never focusable: the grid around it carries aria-busy.
+ */
+export function TileSkeleton({ picture, horizontal = false }: { picture: string; horizontal?: boolean }) {
+  return (
+    <li aria-hidden="true" data-testid="tile-skeleton" className="min-w-0">
+      <div className={cx(CARD_TILE, "border-hairline bg-ink", horizontal ? "flex-row" : "flex-col pb-3.5")}>
+        <span className={cx(BONE, picture)} />
+        <span className={cx("flex min-w-0 flex-1 flex-col gap-2 self-stretch", horizontal ? "px-1.5 py-1" : "px-1.5")}>
+          <span className={cx(BONE, "h-4 w-3/4")} />
+          <span className={cx(BONE, "h-3 w-1/3")} />
+          <span className={cx(BONE, "mt-2 h-3 w-full")} />
+          <span className={cx(BONE, "h-3 w-5/6")} />
+          <span className={cx(BONE, "mt-auto h-3 w-1/2")} />
+        </span>
+      </div>
+    </li>
+  );
+}
+
 export function Stat({ icon, value, label }: { icon: ReactNode; value: string; label: string }) {
   return (
     <span className="flex min-w-0 items-center justify-start gap-1.5 font-mono text-[11.5px] text-dim">

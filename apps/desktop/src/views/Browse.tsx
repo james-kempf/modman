@@ -42,7 +42,19 @@ import { focusables } from "../nav/spatial";
 import type { BrowseKind, BrowsePeriod, BrowseSort, BrowseView, CollectionHit } from "../ipc/types";
 import { collectionText, collectionTone } from "./Collections";
 import { NoGame } from "../components/shell/NoGame";
-import { FOCUS_ATTR, InstalledBadge, MOD_GRID, RESULTS_GRID, Stat, Tile, WorkingBadge, compact, useDetails } from "../components/browse/Tile";
+import {
+  FOCUS_ATTR,
+  InstalledBadge,
+  MOD_GRID,
+  MOD_PICTURE,
+  RESULTS_GRID,
+  Stat,
+  Tile,
+  TileSkeleton,
+  WorkingBadge,
+  compact,
+  useDetails,
+} from "../components/browse/Tile";
 
 const KINDS = [
   { value: "mods", label: "Mods" },
@@ -216,17 +228,22 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
     if (first) first.focus({ preventScroll: true });
   }, [q.isSuccess, q.isPlaceholderData, data, page, shown]);
   const noun = kind === "mods" ? "mods" : "collections";
-  const counted = `${total.toLocaleString()} ${total === 1 ? noun.slice(0, -1) : noun}`;
-  const sortLabel = SORTS.find((o) => o.value === sort)!.label.toLowerCase();
   const first = page * PAGE_SIZE;
-  // The pager is shown (results listed): it is the card's bottom edge, flush with the view's.
-  const hasPager = linked && !q.isError && !q.isPending && shown > 0;
-  const paging = q.isPlaceholderData && q.isFetching;
+  // Nothing on screen belongs to this query yet (first load, or the previous query's placeholder data):
+  // skeleton tiles. A cached query has its data at once and never shows them.
+  const loading = linked && !q.isError && (q.isPending || q.isPlaceholderData);
+  // The pager is shown (results listed, or loading with a listing already up): it is the card's bottom edge,
+  // flush with the view's.
+  const hasPager = linked && !q.isError && (loading ? !!data : shown > 0);
   // One rule for the buttons and LT/RT: nothing while a page loads, with no results, or past either end.
   const goPage = (delta: 1 | -1) => {
     const to = page + delta;
-    if (paging || !shown || to < 0 || to >= pages) return;
+    if (loading || !shown || to < 0 || to >= pages) return;
     toFirst.current = true;
+    // A tile with focus (LT/RT) turns into a skeleton: park focus on the pager button for that direction
+    // until the new page's first tile takes it (T3).
+    if (results.current?.contains(document.activeElement))
+      document.querySelector<HTMLElement>(`[${FOCUS_ATTR}="page:${delta > 0 ? "next" : "prev"}"]`)?.focus({ preventScroll: true });
     save({ page: to });
   };
   const goPageRef = useRef(goPage);
@@ -239,12 +256,6 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
   return (
     <Card
       onFocus={onFocus}
-      title={kind === "mods" ? "Mods on Nexus" : "Collections on Nexus"}
-      intro={
-        q.isSuccess
-          ? `${counted}${text ? ` matching “${text}”` : ""}, ${sortLabel} ${PERIOD_PHRASE[period]}`
-          : undefined
-      }
     >
       <CardSection>
         <div className="flex flex-wrap items-center gap-x-6 gap-y-4">
@@ -263,9 +274,7 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
               Retry
             </Button>
           </ErrorNote>
-        ) : q.isPending ? (
-          <p className="text-body text-zinc-400">Loading {noun}…</p>
-        ) : !shown ? (
+        ) : !loading && !shown ? (
           <Empty>
             {text
               ? `No ${noun} match “${text}”. Try fewer words, or a longer period.`
@@ -277,9 +286,13 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
               ref={results}
               className={kind === "mods" ? MOD_GRID : RESULTS_GRID}
               aria-label={kind === "mods" ? "Mods" : "Collections"}
-              aria-busy={q.isPlaceholderData || undefined}
+              aria-busy={loading || undefined}
             >
-              {data!.kind === "mods"
+              {loading
+                ? Array.from({ length: PAGE_SIZE }, (_, i) => (
+                    <TileSkeleton key={`sk${i}`} horizontal={kind === "collections"} picture={kind === "mods" ? MOD_PICTURE : COLLECTION_PICTURE} />
+                  ))
+                : data!.kind === "mods"
                 ? data!.mods.map((m, i) => <ModTile key={m.modId !== null ? `m${m.modId}` : `i${i}`} game={game} m={m} focusKey={`m${m.modId ?? m.name}`} />)
                 : data!.collections.map((c) => <CollectionTile key={c.slug} game={game} c={c} />)}
             </ul>
@@ -301,21 +314,28 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
                 size="sm"
                 {...{ [FOCUS_ATTR]: "page:prev" }}
                 inactive={page === 0}
-                busy={paging}
+                busy={loading}
                 icon={<CaretLeftIcon aria-hidden size={15} />}
                 onClick={() => goPage(-1)}
               >
                 Previous
               </Button>
               <span className="font-mono text-caption text-dim" aria-live="polite">
-                Page {page + 1} of {pages.toLocaleString()} · {(first + 1).toLocaleString()}–
-                {(first + shown).toLocaleString()} of {total.toLocaleString()}
+                {loading ? (
+                  // The target page; the total may belong to the previous query.
+                  <>Page {page + 1} · loading…</>
+                ) : (
+                  <>
+                    Page {page + 1} of {pages.toLocaleString()} · {(first + 1).toLocaleString()}–
+                    {(first + shown).toLocaleString()} of {total.toLocaleString()}
+                  </>
+                )}
               </span>
               <Button
                 size="sm"
                 {...{ [FOCUS_ATTR]: "page:next" }}
                 inactive={page + 1 >= pages}
-                busy={paging}
+                busy={loading}
                 className="ml-auto"
                 onClick={() => goPage(1)}
               >

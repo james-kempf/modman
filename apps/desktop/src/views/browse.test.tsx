@@ -7,7 +7,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { useUi, type ViewId } from "../app/store";
-import { MOD_GRID } from "../components/browse/Tile";
+import { MOD_GRID, RESULTS_GRID } from "../components/browse/Tile";
 import { bytes } from "../components/ui";
 import type { Handler } from "../mock/fake";
 import { game } from "../mock/fixtures";
@@ -80,7 +80,8 @@ describe("Browse cards (Browse-1)", () => {
           ? { kind: "mods", total: 2, mods: [hit(7), hit(8, { installed: true })] }
           : { kind: "collections", total: 1, collections: [coll("cur", { installed_revision: 3 })] },
     });
-    const mods = await screen.findByRole("list", { name: "Mods" });
+    await screen.findByText("Mod 7");
+    const mods = screen.getByRole("list", { name: "Mods" });
     for (const li of within(mods).getAllByRole("listitem")) expect(within(li).getAllByRole("button")).toHaveLength(1);
     const card = within(mods).getByRole("button", { name: "Mod 8" });
     expect(card.tagName).toBe("BUTTON");
@@ -426,7 +427,10 @@ describe("Browse search (A5/A6)", () => {
   // Fails when the search goes back into the listing card instead of the header's top right (as in Games), loses
   // the shared wide search box, gamepad Y does not focus it, Enter does not search, or emptying it keeps the filter.
   it("sits top right in the header, Y focuses it, Enter searches, emptying it lists all again", async () => {
-    const { t, user } = await open("browse", { browse: paged });
+    // "sky" matches one mod, Mod 99; no words: the paged listing.
+    const { t, user } = await open("browse", {
+      browse: (a) => (reqOf(a).text ? { kind: "mods", total: 1, mods: [hit(99)] } : paged(a)),
+    });
     await screen.findByText("Mod 1");
     const box = screen.getByRole("searchbox", { name: "Search" });
     const header = box.closest("header")!;
@@ -437,11 +441,14 @@ describe("Browse search (A5/A6)", () => {
     expect(document.activeElement).toBe(box);
     await user.type(box, "sky{Enter}");
     await waitFor(() => expect(lastReq(t)).toMatchObject({ text: "sky", offset: 0 }));
-    expect(await screen.findByText(/matching “sky”/)).toBeInTheDocument();
+    expect(await screen.findByText("Mod 99")).toBeInTheDocument();
+    expect(screen.queryByText("Mod 1")).toBeNull();
+    const calls = t.callsOf("browse").length;
     await user.clear(box);
     // The unfiltered listing comes back (from cache: no new request needed).
-    await waitFor(() => expect(screen.queryByText(/matching “sky”/)).toBeNull());
-    expect(screen.getByText(/^30 mods, most endorsed/)).toBeInTheDocument();
+    expect(await screen.findByText("Mod 1")).toBeInTheDocument();
+    expect(screen.queryByText("Mod 99")).toBeNull();
+    expect(t.callsOf("browse")).toHaveLength(calls);
   });
 });
 
@@ -721,6 +728,112 @@ describe("Browse pager toolbar: pinned while scrolled up, page margin at the end
     act(() => useUi.getState().setView("activity"));
     await screen.findByRole("heading", { name: "Activity" });
     expect(main.className).toMatch(/\bpb-28\b/);
+  });
+});
+
+describe("Browse skeleton while loading", () => {
+  /** A browse handler held at `gate` for the offsets in `slow` (all when omitted). */
+  const gated = (slow?: (offset: number) => boolean, fail = false) => {
+    let open!: () => void;
+    const gate = new Promise<void>((r) => (open = r));
+    const handler: Handler = async (a) => {
+      if (!slow || slow(reqOf(a).offset)) await gate;
+      if (fail) throw { message: "nexus down" };
+      return paged(a);
+    };
+    return { handler, release: () => act(async () => open()) };
+  };
+  const skeletons = () => screen.queryAllByTestId("tile-skeleton");
+  const results = () => screen.getByRole("list", { name: /^(Mods|Collections)$/, hidden: true });
+
+  // Fails when the first load shows a text line / blank space instead of tile-shaped skeletons, the
+  // skeletons can take focus or are exposed to assistive tech, or the region is not marked busy.
+  it("first load: 24 aria-hidden, unfocusable skeleton tiles in a busy grid, then the real tiles", async () => {
+    const g = gated();
+    await open("browse", { browse: g.handler });
+    await waitFor(() => expect(skeletons()).toHaveLength(24));
+    const ul = results();
+    expect(ul).toHaveAttribute("aria-busy", "true");
+    expect(ul.className).toBe(MOD_GRID);
+    for (const li of skeletons()) expect(li).toHaveAttribute("aria-hidden", "true");
+    expect(focusables(ul)).toHaveLength(0);
+    expect(screen.queryByText(/Loading mods/)).toBeNull();
+    await g.release();
+    expect(await screen.findByText("Mod 1")).toBeInTheDocument();
+    expect(skeletons()).toHaveLength(0);
+    expect(results()).not.toHaveAttribute("aria-busy");
+  });
+
+  // Fails when a page change keeps the previous page's tiles up while the next loads, the pager goes away
+  // (or pages again) meanwhile, or focus ends anywhere but the new page's first tile.
+  it("page change: skeletons replace the old page, the pager stays inert, then the first tile is focused", async () => {
+    const g = gated((o) => o > 0);
+    const { t, user } = await open("browse", { browse: g.handler });
+    await screen.findByText("Mod 1");
+    const pager = screen.getByRole("navigation", { name: "Mods pages" });
+    const next = within(pager).getByRole("button", { name: /Next/ });
+    await user.click(next);
+    await waitFor(() => expect(skeletons()).toHaveLength(24));
+    expect(screen.queryByText("Mod 1")).toBeNull();
+    expect(results()).toHaveAttribute("aria-busy", "true");
+    expect(pager).toBeInTheDocument();
+    expect(pager).toHaveTextContent("Page 2 · loading");
+    const calls = t.callsOf("browse").length;
+    act(() => performNav({ type: "page", delta: 1 }));
+    act(() => performNav({ type: "page", delta: -1 }));
+    await user.click(next);
+    expect(t.callsOf("browse")).toHaveLength(calls);
+    await g.release();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Mod 25" })));
+    expect(skeletons()).toHaveLength(0);
+  });
+
+  // Fails when RT/LT pressed on a tile drops focus to <body> as the tiles turn into skeletons.
+  it("RT from a tile parks focus on Next while loading", async () => {
+    const g = gated((o) => o > 0);
+    await open("browse", { browse: g.handler });
+    const tile = await screen.findByRole("button", { name: "Mod 3" });
+    tile.focus();
+    act(() => performNav({ type: "page", delta: 1 }));
+    await waitFor(() => expect(skeletons()).toHaveLength(24));
+    expect(document.activeElement).toBe(within(screen.getByRole("navigation", { name: "Mods pages" })).getByRole("button", { name: /Next/ }));
+    await g.release();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Mod 25" })));
+  });
+
+  // Fails when a cached page flashes skeletons on the way back to it.
+  it("no skeleton for a cached page", async () => {
+    const { user } = await open("browse", { browse: paged });
+    await screen.findByText("Mod 1");
+    const pager = screen.getByRole("navigation", { name: "Mods pages" });
+    await user.click(within(pager).getByRole("button", { name: /Next/ }));
+    await screen.findByText("Mod 25");
+    await user.click(within(pager).getByRole("button", { name: /Previous/ }));
+    expect(skeletons()).toHaveLength(0);
+    expect(screen.getByText("Mod 1")).toBeInTheDocument();
+  });
+
+  // Fails when a collections load shows mod-shaped skeletons (wrong grid / tile shape).
+  it("collections skeletons use the collections grid", async () => {
+    const g = gated((o) => o > 0);
+    const { user } = await open("browse", { browse: g.handler });
+    await screen.findByText("Mod 1");
+    await showCollections(user);
+    await screen.findByText("Coll s1");
+    act(() => performNav({ type: "page", delta: 1 }));
+    await waitFor(() => expect(skeletons()).toHaveLength(24));
+    expect(results().className).toBe(RESULTS_GRID);
+    expect(results()).toHaveAttribute("aria-label", "Collections");
+  });
+
+  // Fails when a failed load leaves the skeletons up instead of the error state.
+  it("an error replaces the skeletons", async () => {
+    const g = gated(undefined, true);
+    await open("browse", { browse: g.handler });
+    await waitFor(() => expect(skeletons()).toHaveLength(24));
+    await g.release();
+    expect(await screen.findByText(/Could not load mods: nexus down/)).toBeInTheDocument();
+    expect(skeletons()).toHaveLength(0);
   });
 });
 
