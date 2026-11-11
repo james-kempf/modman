@@ -255,7 +255,13 @@ function ModList({ game }: { game: string }) {
       {loaderCard}
       <Card title="Load order">
         <ol aria-label="Load order" className="rows stagger min-w-0">
-          {shown.map((m) => (
+          {shown.map((m, i) => {
+            // Arrows follow the visible list (screen direction); under a filter
+            // a move lands next to the visible neighbor, past hidden mods.
+            const prev = shown[i - 1];
+            const next = shown[i + 1];
+            return (
+
             <li
               key={m.id}
               className="flex min-h-16 min-w-0 flex-wrap items-center gap-x-3 gap-y-1 py-2 pr-3 pl-2"
@@ -312,20 +318,26 @@ function ModList({ game }: { game: string }) {
                 />
                 <IconButton
                   label={`Move ${m.name} up`}
-                  disabled={m.position <= 1}
+                  disabled={!prev}
                   busy={moving}
                   onClick={() =>
-                    run("Move", () => ipc.modMove(m.uid, "up"), { key: MOVE })
+                    prev &&
+                    run("Move", () => ipc.modMove(m.uid, "before", prev.uid, game), {
+                      key: MOVE,
+                    })
                   }
                 >
                   <ArrowUpIcon aria-hidden size={18} />
                 </IconButton>
                 <IconButton
                   label={`Move ${m.name} down`}
-                  disabled={m.position >= list.length}
+                  disabled={!next}
                   busy={moving}
                   onClick={() =>
-                    run("Move", () => ipc.modMove(m.uid, "down"), { key: MOVE })
+                    next &&
+                    run("Move", () => ipc.modMove(m.uid, "after", next.uid, game), {
+                      key: MOVE,
+                    })
                   }
                 >
                   <ArrowDownIcon aria-hidden size={18} />
@@ -340,7 +352,8 @@ function ModList({ game }: { game: string }) {
                 </Button>
               </span>
             </li>
-          ))}
+            );
+          })}
         </ol>
       </Card>
       {detail && (

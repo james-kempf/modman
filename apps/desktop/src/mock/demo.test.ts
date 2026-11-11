@@ -91,14 +91,17 @@ describe("demo backend", () => {
     expect(added.position).toBe(mods.length);
   });
 
-  // Fails when moving the first mod up corrupts the list (undefined entries).
+  // Fails when a bad move corrupts the list (undefined entries) or after <next> does not move the row down.
   it("bounds-checks mod_move", async () => {
     const d = demo();
-    const first = (await d.call<ModsView>("mods_list")).mods[0];
-    await expect(d.call("mod_move", { reference: first.uid, spec: "up" })).rejects.toMatchObject({ message: /already first/ });
-    const mods = (await d.call<ModsView>("mods_list")).mods;
+    const [first, second] = (await d.call<ModsView>("mods_list")).mods;
+    await expect(d.call("mod_move", { reference: first.uid, spec: "before", arg: "nope" })).rejects.toMatchObject({ message: /bad move/ });
+    let mods = (await d.call<ModsView>("mods_list")).mods;
     expect(mods.every(Boolean)).toBe(true);
     expect(mods.map((m) => m.position)).toEqual([1, 2, 3]);
+    await expect(d.call("mod_move", { reference: first.uid, spec: "after", arg: second.uid })).resolves.toMatchObject({ from: 1, to: 2 });
+    mods = (await d.call<ModsView>("mods_list")).mods;
+    expect(mods.map((m) => m.uid).slice(0, 2)).toEqual([second.uid, first.uid]);
   });
 
   it("has handlers for every command the views call", () => {

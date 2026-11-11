@@ -309,11 +309,16 @@ export function createDemoBackend(): FakeTransport {
         const mods = g.mods;
         const i = mods.findIndex((m) => m.uid === a!.reference);
         if (i < 0) throw { message: `no mod '${String(a!.reference)}'` };
-        const j = a!.spec === "up" ? i - 1 : a!.spec === "down" ? i + 1 : i;
-        if (j < 0 || j >= mods.length) throw { message: `${mods[i].name} is already ${j < 0 ? "first" : "last"}` };
-        [mods[i], mods[j]] = [mods[j], mods[i]];
+        // The view sends before/after <visible neighbor>; same index math as core move_mod.
+        const rest = mods.filter((_, x) => x !== i);
+        const k = rest.findIndex((m) => m.uid === a!.arg);
+        if (k < 0 || !["before", "after"].includes(String(a!.spec))) throw { message: `bad move '${String(a!.spec)} ${String(a!.arg)}'` };
+        const j = a!.spec === "after" ? k + 1 : k;
+        rest.splice(j, 0, mods[i]);
+        mods.splice(0, mods.length, ...rest);
         renumber(g);
-        return { uid: a!.reference, from: i + 1, to: j + 1, of: mods.length, after: changed(g) };
+        const after = j === i ? afterChange({ needs_deploy: false }) : changed(g);
+        return { uid: a!.reference, from: i + 1, to: j + 1, of: mods.length, after };
       }),
     thumbnail: () => null,
     // Every demo listing picture is a generated tile (no network).

@@ -110,6 +110,39 @@ describe("Overview", () => {
 });
 
 describe("Mods", () => {
+  // D1: fails when arrows send core up/down (priority direction), which moves the row the opposite way on screen.
+  it("arrows move rows in screen direction", async () => {
+    const [a, b, c] = [mod({ name: "A", position: 1 }), mod({ name: "B", position: 2 }), mod({ name: "C", position: 3 })];
+    const { t, user } = await open("mods", {
+      mods_list: () => ({ mods: [a, b, c], changed_since_deploy: false }),
+      mod_move: () => ({ uid: a.uid, from: 1, to: 2, of: 3, after: { deployed: null, needs_deploy: false } }),
+    });
+    expect(await screen.findByRole("button", { name: "Move A up" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Move C down" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Move A down" }));
+    // after B == position 2
+    await waitFor(() =>
+      expect(t.callsOf("mod_move")).toEqual([expect.objectContaining({ reference: a.uid, spec: "after", arg: b.uid })]),
+    );
+  });
+
+  // D3/D4: fails when a filtered list moves past hidden mods' slots blindly or enables arrows by full-list position.
+  it("under a filter, arrows follow the visible neighbors", async () => {
+    const ms = ["Alpha", "Bravo", "Alpine", "Delta"].map((name, k) => mod({ name, position: k + 1 }));
+    const { t, user } = await open("mods", {
+      mods_list: () => ({ mods: ms, changed_since_deploy: false }),
+      mod_move: () => ({ uid: ms[2].uid, from: 3, to: 1, of: 4, after: { deployed: null, needs_deploy: false } }),
+    });
+    await user.type(await screen.findByRole("searchbox", { name: "Search mods" }), "Alp");
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Move Bravo up" })).toBeNull());
+    // Alpine is #3 of 4 but last of the visible rows.
+    expect(screen.getByRole("button", { name: "Move Alpine down" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Move Alpine up" }));
+    await waitFor(() =>
+      expect(t.callsOf("mod_move")).toEqual([expect.objectContaining({ reference: ms[2].uid, spec: "before", arg: ms[0].uid })]),
+    );
+  });
+
   it("conflict view lists file conflicts with the winner", async () => {
     const m = (id: number, name: string) => ({ id, uid: `u${id}`, name, priority: id });
     const { user } = await open("mods", {

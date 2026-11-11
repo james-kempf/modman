@@ -371,7 +371,8 @@ pub struct Moved {
     pub of: usize,
 }
 
-/// Moves `reference` per `spec`; the target position is clamped.
+/// Moves `reference` per `spec`; the target position is clamped. A move that
+/// lands where the mod already is writes nothing (`from == to`).
 pub fn move_mod(
     store: &mut Store,
     game: &str,
@@ -393,25 +394,27 @@ pub fn move_mod(
     let new = match spec {
         OrderSpec::First => 0,
         OrderSpec::Last => n - 1,
-        OrderSpec::Up(k) => cur + *k as i64,
-        OrderSpec::Down(k) => cur - *k as i64,
+        // Saturating: a huge count clamps instead of wrapping.
+        OrderSpec::Up(k) => cur.saturating_add(i64::try_from(*k).unwrap_or(i64::MAX)),
+        OrderSpec::Down(k) => cur.saturating_sub(i64::try_from(*k).unwrap_or(i64::MAX)),
         OrderSpec::Before(r) => index_in_rest(r)?,
         OrderSpec::After(r) => index_in_rest(r)? + 1,
-        OrderSpec::Position(p) => *p as i64 - 1,
+        OrderSpec::Position(p) => i64::try_from(*p).unwrap_or(i64::MAX).saturating_sub(1),
     }
     .clamp(0, (n - 1).max(0)) as usize;
+    let moved = |to: usize| Moved {
+        from: cur as usize + 1,
+        to: to + 1,
+        of: mods.len(),
+    };
+    if new as i64 == cur {
+        return Ok((me, moved(new)));
+    }
     let mut order: Vec<i64> = rest.iter().map(|m| m.id).collect();
     order.insert(new.min(order.len()), me.id);
     write_order(store, game, &order)?;
     mark_changed(store, game)?;
-    Ok((
-        me,
-        Moved {
-            from: cur as usize + 1,
-            to: new + 1,
-            of: mods.len(),
-        },
-    ))
+    Ok((me, moved(new)))
 }
 
 /// What [`remove_mods`] deleted.
@@ -670,6 +673,51 @@ pub(crate) mod tests {
             .map(|m| m.priority)
             .collect();
         assert_eq!(prios, [0, 1, 2, 3]);
+    }
+
+    // Fails when a clamped no-op move (Down on #1, Up on last) still rewrites
+    // the order and marks the game changed (spurious "changed since deploy").
+    #[test]
+    fn move_mod_noop_does_not_mark_changed() {
+        let mut s = store_with_game("g");
+        for u in ["a", "b"] {
+            add(&s, "g", u, u, None);
+        }
+        let (_, mv) = move_mod(&mut s, "g", "a", &OrderSpec::Down(1)).unwrap();
+        assert_eq!(
+            mv,
+            Moved {
+                from: 1,
+                to: 1,
+                of: 2
+            }
+        );
+        let (_, mv) = move_mod(&mut s, "g", "b", &OrderSpec::Up(1)).unwrap();
+        assert_eq!(
+            mv,
+            Moved {
+                from: 2,
+                to: 2,
+                of: 2
+            }
+        );
+        assert!(!changed_since(&s, "g", None).unwrap());
+        assert_eq!(uids(&s), ["a", "b"]);
+    }
+
+    // Fails when a huge count overflows (`usize as i64` wraps negative / add panics).
+    #[test]
+    fn move_mod_huge_count_clamps() {
+        let mut s = store_with_game("g");
+        for u in ["a", "b", "c"] {
+            add(&s, "g", u, u, None);
+        }
+        move_mod(&mut s, "g", "a", &OrderSpec::Up(usize::MAX)).unwrap();
+        assert_eq!(uids(&s), ["b", "c", "a"]);
+        move_mod(&mut s, "g", "a", &OrderSpec::Down(usize::MAX)).unwrap();
+        assert_eq!(uids(&s), ["a", "b", "c"]);
+        move_mod(&mut s, "g", "a", &OrderSpec::Position(usize::MAX)).unwrap();
+        assert_eq!(uids(&s), ["b", "c", "a"]);
     }
 
     #[test]

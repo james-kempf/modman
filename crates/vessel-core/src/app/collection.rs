@@ -873,7 +873,10 @@ mod revision_tests {
                     author: Some("A".into()),
                     mod_id: Some(1),
                     size: 100,
-                    optional: true
+                    optional: true,
+                    card: None,
+                    installed: false,
+                    loader: None
                 },
                 RevisionMod {
                     name: "f2".into(),
@@ -881,7 +884,10 @@ mod revision_tests {
                     author: None,
                     mod_id: Some(2),
                     size: 5,
-                    optional: false
+                    optional: false,
+                    card: None,
+                    installed: false,
+                    loader: None
                 },
             ]
         );

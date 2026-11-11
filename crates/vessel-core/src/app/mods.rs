@@ -54,17 +54,28 @@ pub fn move_mod(
 ) -> R<MoveResult> {
     let spec = OrderSpec::parse(spec, arg)?;
     let (m, mv) = mods::move_mod(cx.store, &game.id, reference, &spec)?;
-    cx.ui.success(&format!(
-        "{}: #{} → #{}  (of {})",
-        m.uid, mv.from, mv.to, mv.of
-    ));
-    let after = after_change(cx, game)?;
+    // Nothing moved (already first/last or same slot): no success, no deploy.
+    let after = if mv.from == mv.to {
+        let at = match mv.to {
+            1 => "already first".to_string(),
+            t if t == mv.of => "already last".to_string(),
+            t => format!("already #{t}"),
+        };
+        cx.ui.info(&format!("{}: {at}", m.uid));
+        AfterChangeView::default()
+    } else {
+        cx.ui.success(&format!(
+            "{}: #{} → #{}  (of {})",
+            m.uid, mv.from, mv.to, mv.of
+        ));
+        after_change(cx, game)?.into()
+    };
     Ok(MoveResult {
         uid: m.uid,
         from: mv.from,
         to: mv.to,
         of: mv.of,
-        after: after.into(),
+        after,
     })
 }
 
