@@ -57,7 +57,7 @@ function Jobs() {
             {list.map((j) => {
               const o = jobOutcome(j);
               return (
-                <li key={j.id} className="flex flex-wrap items-center gap-3 rounded-control px-3 py-2.5">
+                <li key={j.id} className="flex flex-wrap items-center gap-3 rounded-inner px-3 py-2.5">
                   <StatusDot tone={o === "running" ? "accent" : o === "failed" ? "rose" : "zinc"} live={o === "running"} />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-body text-zinc-200">{jobLabel(j.kind)}</span>
@@ -176,7 +176,7 @@ function DownloadsCard() {
         ) : (
           <ul className="rows" aria-label="Downloads">
             {liveOnly.map((d) => (
-              <li key={d.name} tabIndex={0} className="grid gap-2 rounded-control py-3">
+              <li key={d.name} tabIndex={0} className="grid gap-2 rounded-inner py-3">
                 <span className="flex items-center gap-2.5 text-[14.5px] text-zinc-100">
                   <StatusDot live />
                   {d.name}
@@ -193,7 +193,7 @@ function DownloadsCard() {
               const done = l?.done ?? r.bytes_done;
               const size = l?.total ?? r.size;
               return (
-                <li key={r.id} tabIndex={0} className="grid gap-2 rounded-control py-3">
+                <li key={r.id} tabIndex={0} className="grid gap-2 rounded-inner py-3">
                   <span className="flex flex-wrap items-center gap-2">
                     <span className="min-w-0 flex-1 truncate text-[14.5px] text-zinc-100">
                       {r.file_name ?? (r.nexus_mod_id ? `mod ${r.nexus_mod_id}` : r.collection_slug ?? `#${r.id}`)}

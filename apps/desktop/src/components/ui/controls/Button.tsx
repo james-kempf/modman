@@ -14,11 +14,11 @@ const TONES: Record<Tone, string> = {
 };
 type Size = "icon" | "sm" | "md" | "lg";
 const SIZES: Record<Size, string> = {
-  // Square, glyph only (IconButton).
-  icon: "size-control rounded-control",
-  sm: "min-h-control-sm px-3.5 text-label gap-1.5 rounded-control",
-  md: "min-h-control px-4 text-body gap-2 rounded-control",
-  lg: "min-h-control-lg px-7 text-lead gap-2.5 rounded-card",
+  // Square, glyph only (IconButton): rounded-pill makes it a circle.
+  icon: "size-control rounded-pill",
+  sm: "min-h-control-sm px-3.5 text-label gap-1.5 rounded-pill",
+  md: "min-h-control px-5 text-body gap-2 rounded-pill",
+  lg: "min-h-control-lg px-7 text-lead gap-2.5 rounded-pill",
 };
 
 export function Button({

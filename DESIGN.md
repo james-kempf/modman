@@ -29,17 +29,17 @@ Values marked **(gap)** are not in code yet. They fill a section this document m
 primitives            ->  semantic                    ->  component
 --color-zinc-400          --color-dim (text.muted)        CARD_SHELL, .input, Button TONES
 --color-accent-400        --color-ink-2 (bg.surface)      --focus-text (per control)
---radius-card             --radius-control                rounded-card on Dialog
+--radius-pill             rounded-pill (every control)    rounded-card on Dialog
 ```
 
 | Layer | Where | Examples |
 |---|---|---|
 | Primitives | Tailwind default palette (`zinc`, `amber`, `rose`) plus `@theme` ramps | `--color-accent-50..950`, `--color-mono-0..7`, `--spacing` (0.25rem) |
-| Semantic | `@theme` role names | `--color-ink`, `--color-ink-2`, `--color-ink-3`, `--color-dim`, `--color-hairline`, `--color-line`, `--color-fill-1..3`, `--color-focus*`, `--radius-control`, `--spacing-control`, `--text-body`, `--transition-duration-base` |
+| Semantic | `@theme` role names | `--color-ink`, `--color-ink-2`, `--color-ink-3`, `--color-dim`, `--color-hairline`, `--color-line`, `--color-fill-1..3`, `--color-focus*`, `--radius-pill`, `--radius-inner`, `--spacing-control`, `--text-body`, `--transition-duration-base` |
 | Component | `styles.ts` constants, `@layer components` classes, per-control custom properties | `CARD_SHELL`, `TILE`, `PILL`, `LIST_ROW`, `.glass`, `.input`, `.eyebrow`, `--focus-text` |
 
 Rules:
-- Components reference **semantic** tokens only (`bg-ink-2`, `text-dim`, `border-hairline`, `rounded-control`, `min-h-control`).
+- Components reference **semantic** tokens only (`bg-ink-2`, `text-dim`, `border-hairline`, `rounded-pill`, `min-h-control`).
 - A component that needs a value no semantic token covers gets a new semantic token first (see Conventions).
 - Current exceptions: status hues (`text-amber-300`, `text-rose-300`) and neutral text steps (`text-zinc-100..400`) are still used as primitives in components. They are mapped to semantic names in section 3. New code uses the semantic aliases `text-fg` (text.primary, zinc-100) and `text-fg-2` (text.secondary, zinc-400); the other steps get aliases when a screen needs them.
 
@@ -199,17 +199,22 @@ Tabular numbers: there is no `tabular-nums` usage yet **(gap)**. Use `tabular-nu
 
 ## 6. Shape and depth
 
-### Radius (scaled from `--radius-card`)
+### Radius (circle design: controls round, containers rectangular)
+
+Controls are fully round; containers are rounded rectangles on a 4px grid. A pill-shaped card, dialog or picture reads as broken, so the split is by role, not size.
 
 | Token | Value | Use |
 |---|---|---|
-| `rounded-control-sm` | card × 0.5 = 4.8px | options inside a control, badges, checks |
-| `rounded-control` | card × 0.75 = 7.2px | buttons, inputs, thumbs, menus, list rows, nav items, notes nested in a card |
-| `rounded-card` | 0.6rem = 9.6px | cards, tiles, dialogs, notices, wells, lg buttons |
-| `rounded-card-lg` | card × 1.0 = 9.6px | large media tiles (game posters, collection art) |
-| `rounded-pill` | 9999px | dots, switches, progress, counters, tabs, segmented track and segments, job island |
+| `rounded-pill` | 9999px | **every control**: buttons of all sizes (a circle on the square `icon` size), inputs and select triggers, select options, tabs, segmented track and segments, toggle hit box and track, badges, `PILL` chips, kbd glyphs, the account avatar (a circle), dots, counters, progress, job island |
+| `rounded-inset` | 4px | a picture or skeleton bone inset in a padded tile; checkboxes (square, so they stay distinct from round radios) |
+| `rounded-inner` | 8px | blocks inside a card or dialog: list rows (`LIST_ROW`), `Thumb`, notes, dialog pictures, game posters, collection art |
+| `rounded-card` | 12px | cards (`CARD_SHELL`), wells (`TILE`), dialogs, notices/toasts, error notes, option cards, code blocks |
+| `rounded-card-lg` | 16px | activatable media tiles (`CARD_TILE`) |
+| `rounded-menu` | 26px (`control-sm / 2 + 4px`) | the select list: concentric with its 44px pill options at `p-1` (off the 4px grid by design) |
 
-Nest radii: inner radius = outer radius − padding; when that is off the scale, the inner element takes the next step down. Segmented is a `rounded-pill` track (`p-1`) around `rounded-pill` segments: a pill minus the padding is still a pill, so the corners are exactly concentric. A picture inside an activatable card (`CARD_TILE`, `rounded-card-lg` with `p-3`) is `rounded-control-sm`: outer radius minus the padding is below zero, so it takes the smallest step rather than the card's radius. A picture in a dialog body (Browse details) is `rounded-control`, one step below the dialog's `rounded-card`. Components use no raw `rounded-sm..3xl/full`.
+Assumption (pill restyle, 2026-11): controls move to fully round; containers keep rounded-rectangle radii snapped to 4/8/12/16. A short, control-like container is judged case by case: the job island is a pill (one line, fixed `min-h-14`, status only); notices stay `rounded-card` because their text wraps to several lines.
+
+Nest radii: inner radius = outer radius − padding; when that is off the scale, the inner element takes the next step down. Segmented is a `rounded-pill` track (`p-1`) around `rounded-pill` segments: a pill minus the padding is still a pill, so the corners are exactly concentric; the toggle's pill hit box (48px, `px-2.5`) holds its 28px pill track the same way. The select list is the reverse case: a rectangle holding pills, so its radius is the option's half height plus the list padding (`rounded-menu`). A picture inside an activatable card (`CARD_TILE`, 16px with `p-3`) is `rounded-inset`: 16 − 12 = 4, exactly concentric. A game poster (`CARD_TILE` with `p-2`) is `rounded-inner`: 16 − 8 = 8. A picture in a dialog body (Browse details) is `rounded-inner`, one step below the dialog's `rounded-card`. Pills inside a container that do not sit at its inset edge (buttons in a card or dialog footer) need no concentric radius. Components use no raw `rounded-sm..3xl/full` and no `rounded-control*` (retired).
 
 ### Opacity
 
@@ -328,10 +333,12 @@ Shared states for every interactive component:
 
 | Size | Height | Padding / text | Radius |
 |---|---|---|---|
-| `icon` | 48 square | n/a | control |
-| `sm` | 44 | `px-3.5 text-label gap-1.5` | control |
-| `md` | 48 | `px-4 text-body gap-2` | control |
-| `lg` | 56 | `px-7 text-lead gap-2.5` | card |
+| `icon` | 48 square | n/a | pill (a circle) |
+| `sm` | 44 | `px-3.5 text-label gap-1.5` | pill |
+| `md` | 48 | `px-5 text-body gap-2` | pill |
+| `lg` | 56 | `px-7 text-lead gap-2.5` | pill |
+
+`md` padding is `px-5` so the label clears the pill's curve; `sm` keeps `px-3.5` (Browse's filter row has under 10px to spare at 1024px, see Segmented) and `lg` already pads by half its height. The nav highlight (inset box-shadow) and Segmented's outline rim follow the pill radius.
 
 Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; use it instead of `disabled` on any button that focus returns to).
 
@@ -342,11 +349,11 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 
 ### Input: TextField, SearchField (`.input`)
 
-- `.input`: `min-h-control rounded-control border-line-control bg-ink px-3.5 text-lead text-zinc-100`, `placeholder:text-dim` (lighter than the zinc-100 text, AA on ink and ink-3), `focus:bg-ink-3`. The edge stays `--color-line-control` under the white highlight (the inset fill paints inside the border).
+- `.input`: `min-h-control rounded-pill border-line-control bg-ink px-4 text-lead text-zinc-100`, `placeholder:text-dim` (lighter than the zinc-100 text, AA on ink and ink-3), `focus:bg-ink-3`. The edge stays `--color-line-control` under the white highlight (the inset fill paints inside the border).
 - Label above in `text-label font-medium text-zinc-300` (`hideLabel` makes it `sr-only`). Helper text in `text-label text-dim`.
 - Error: `aria-invalid`, plus `<p class="text-label text-rose-300">` linked through `aria-describedby`.
-- SearchField: `role=search` form, `w-96`, `MagnifyingGlassIcon` 18 at `left-3.5`, `pl-10`. Enter submits when `onSubmit` is set; without it the field filters as you type.
-  - `pending` (with `onSubmit`): the typed text differs from the submitted one. A trailing `↵ Enter` hint shows (`font-mono text-caption text-dim` at `right-3.5`, input `pr-20`; `aria-hidden`, not a control; hidden in controller mode, where the on-screen keyboard's Search key submits; `focus-ink-muted` on the nav highlight). Browse submits on Enter rather than as you type so each keystroke does not query Nexus.
+- SearchField: `role=search` form, `w-96`, `MagnifyingGlassIcon` 18 at `left-4`, `pl-11`. Enter submits when `onSubmit` is set; without it the field filters as you type.
+  - `pending` (with `onSubmit`): the typed text differs from the submitted one. A trailing `↵ Enter` hint shows (`font-mono text-caption text-dim` at `right-4`, input `pr-20`; `aria-hidden`, not a control; hidden in controller mode, where the on-screen keyboard's Search key submits; `focus-ink-muted` on the nav highlight). Browse submits on Enter rather than as you type so each keystroke does not query Nexus.
 - States: default; hover (no highlight on fields); focus (`bg-ink-3`, white highlight under nav input); disabled (no dedicated style yet **(gap)**: use `opacity-disabled`); error (as above).
 
 ```tsx
@@ -356,12 +363,12 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 ### Select / dropdown (`controls/Select.tsx`)
 
 - The trigger uses the `.input` look with `CaretDownIcon` 16 zinc-400. `inline` puts an eyebrow label on the same row.
-- The list is `.glass rounded-control p-1`, `z-30`, `max-h-72`. Options are `min-h-control-sm rounded-control-sm text-body`. The selected option is `bg-fill-3 text-zinc-50` with a `CheckIcon` 15 accent-300 (accent-700 under the highlight).
+- The list is `.glass rounded-menu p-1`, `z-30`, `max-h-72`. Options are `min-h-control-sm rounded-pill px-4 text-body`. The selected option is `bg-fill-3 text-zinc-50` with a `CheckIcon` 15 accent-300 (accent-700 under the highlight).
 - Keys: Enter/A opens; arrows, Home and End move; Esc/B closes and returns focus. `busy` shows a spinner and the list does not open.
 
 ### Toggle (`controls/Toggle.tsx`)
 
-- `role=switch`, 48px hit box. Track `h-7 w-12 rounded-pill`: on `bg-accent-500/90`, off `bg-fill-hover`. Knob `size-icon`: on white, off zinc-400. Both move with `duration-slow ease-spring`.
+- `role=switch`, 48px `rounded-pill` hit box (`px-2.5`, the highlight's shape). Track `h-7 w-12 rounded-pill`: on `bg-accent-500/90`, off `bg-fill-hover`. Knob `size-icon`: on white, off zinc-400. Both move with `duration-slow ease-spring`.
 - Under the highlight the on track becomes accent-700 and the off track zinc-500, keeping ≥3:1. `busy` uses `aria-disabled`.
 
 ### Tabs (`controls/Tabs.tsx`)
@@ -382,7 +389,7 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 
 ### Badge (`display/Badge.tsx`)
 
-- `h-badge rounded-control-sm border px-2 font-mono text-micro`.
+- `h-badge rounded-pill border px-2 font-mono text-micro`.
 - Tones: `zinc` (fill-2), `accent`, `amber`, `rose` (each `{hue}-400/10` fill, `/15` border, `-300` text).
 - Not interactive. `SupportBadge` is an amber badge with `FlaskIcon` 12 bold and the text "Experimental".
 
@@ -395,7 +402,7 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 - Shell: `CARD_SHELL` = `rounded-card border-hairline bg-ink-2`. Sections are split by `divide-hairline`, with `p-section` padding.
 - Header outside the shell: `CARD_TITLE` (`text-title font-medium tracking-tight text-zinc-50`) plus `MUTED_NOTE` intro plus actions. `inset` puts an eyebrow title inside the shell instead.
 - `Row`: title (`text-body text-zinc-100`) and description on the left, controls on the right, wrapping when narrow.
-- Activatable card (`CARD_TILE`): the whole `<button>` is one control with `rounded-card-lg`, and it takes the highlight. Padding is per use: Browse tiles `p-3` (vertical tiles `pb-4`), game tiles `p-2.5 pb-3.5` (legacy, see Drift). The text column sits `px-1` in from the picture's edge on both (a 4px optical inset). Browse tiles are named by their title (`aria-labelledby`) and described by byline, stats and status badges (`aria-describedby`), never an `aria-label`.
+- Activatable card (`CARD_TILE`): the whole `<button>` is one control with `rounded-card-lg`, and it takes the highlight. Padding is per use: Browse tiles `p-3` (vertical tiles `pb-4`), game tiles `p-2 pb-3.5` (`p-2` makes the `rounded-inner` poster concentric; `pb-3.5` is legacy, see Drift). The text column sits `px-1` in from the picture's edge on both (a 4px optical inset). Browse tiles are named by their title (`aria-labelledby`) and described by byline, stats and status badges (`aria-describedby`), never an `aria-label`.
   - States: rest; hover and nav focus (the white highlight); active/pressed `enabled:not-aria-disabled:active:translate-y-px scale-99` (transform only; the highlight stays on while pressed); inert (Browse's dimmed `<div aria-disabled>` at `opacity-stale`): no highlight and no press. Gamepad A activates by `click()` without `:active`, so there is no press there, as with buttons.
 
 ```tsx
@@ -441,7 +448,7 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 
 ### Skeleton (`browse/Tile.tsx`, `TileSkeleton`)
 
-- Bones: `rounded-control-sm bg-fill-2 motion-safe:animate-pulse` (the picture's radius), laid out like the real tile. `aria-hidden`. Shown only on an uncached fetch, and only after the 300ms loading delay (see Motion).
+- Bones: `rounded-inset bg-fill-2 motion-safe:animate-pulse` (the picture's radius), laid out like the real tile. `aria-hidden`. Shown only on an uncached fetch, and only after the 300ms loading delay (see Motion).
 - Count: as many as the page will hold when the total is known from another page of the same filters (`min(PAGE_SIZE, total − first)`), else a full page.
 
 ### Progress (`<progress>`, base layer)
@@ -450,11 +457,11 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 
 ### Other primitives
 
-- `Thumb`: 16:9 at `h-thumb`, `rounded-control`. Monogram fallback uses `.mono-N` with `text-white/75 text-micro` mono initials.
+- `Thumb`: 16:9 at `h-thumb`, `rounded-inner` (media, so a rectangle; a 16:9 pill would crop the picture). Monogram fallback uses `.mono-N` with `text-white/75 text-micro` mono initials.
 - `Fact`: eyebrow key plus `font-mono text-label text-zinc-300` value.
 - `.eyebrow`: `font-mono text-micro tracking-eyebrow uppercase text-dim`.
-- `PILL`: mono log and status chips.
-- `LIST_ROW`: free-standing rows.
+- `PILL`: mono log and status chips (`rounded-pill`).
+- `LIST_ROW`: free-standing rows (`rounded-inner`: multi-line, so a container, not a pill).
 - `ListToggle`: an `sm` button with a rotating caret, labeled "List (n)".
 
 ---
@@ -508,8 +515,8 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 | Icon `size={15}` | 16 | Select check, Games, dialogs (Browse pager fixed) | 16 |
 | Icon `size={17}` / `{19}` | 5 / 2 | various | 16 / 20 |
 | Icon `size={18}` | 7 | Notice, SearchField | 20 (or 16 inline) |
-| Half-step spacing `*-0.5/1.5/2.5/3.5` | 20 / 21 / 14 / 10 | throughout (e.g. `px-3.5`, `p-2.5`, `mt-1.5`; Games tile `p-2.5 pb-3.5`, Browse tiles moved to `p-3 pb-4` and their text inset to `px-1`) | nearest 4px step; `px-3.5` on `.input` and `sm` buttons is a deliberate legacy match |
-| Radii 4.8 / 7.2 / 9.6px | n/a | `--radius-card: 0.6rem` and multiples | 4 / 8 / 8–12 on a 4px grid. `card-lg` equals `card` (×1.0), so the step is redundant. |
+| Half-step spacing `*-0.5/1.5/2.5/3.5` | 20 / 21 / 14 / 10 | throughout (e.g. `px-3.5`, `p-2.5`, `mt-1.5`; Games tile `pb-3.5` (its `p-2.5` snapped to `p-2` in the pill pass), Browse tiles moved to `p-3 pb-4` and their text inset to `px-1`) | nearest 4px step; `px-3.5` on `sm` buttons is kept for the 1024px filter row (`.input` snapped to `px-4`) |
+| `--radius-menu` 26px | 1 | Select list | keep: off the 4px grid by design (44px pill option / 2 + `p-1`), so the list stays concentric with its options |
 | `--spacing-rail: 3px` | n/a | job bars | 4 (or keep as a hairline exception) |
 | `border-white/5`, `/6`, `/8`, `/10`, `/15`, `bg-white/8` | 5, 1, 1, 1, 1, 1 | App header, GameRepair, Settings, Notice, JobIsland | `border-hairline` (5%), `border-line` (8%), `border-line-strong` (10%), `bg-fill-3` |
 | `text-emerald-300`, `text-sky-300` | 4, 5 | `rich/bbcode.tsx` colour map | `text-accent-300`; sky has no token (BBCode content colour, acceptable) |

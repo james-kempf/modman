@@ -108,7 +108,7 @@ export function Select<T extends string>({
           aria-labelledby={`${id}-label`}
           data-nav-scope
           onKeyDown={onKeyDown}
-          className="glass absolute top-full right-0 left-0 z-30 mt-1.5 grid max-h-72 gap-0.5 overflow-y-auto rounded-control p-1"
+          className="glass absolute top-full right-0 left-0 z-30 mt-1.5 grid max-h-72 gap-0.5 overflow-y-auto rounded-menu p-1"
         >
           {options.map((o) => (
             <button
@@ -118,7 +118,7 @@ export function Select<T extends string>({
               aria-selected={o.value === value}
               onClick={() => pick(o.value)}
               className={cx(
-                "flex min-h-control-sm items-center justify-between gap-3 rounded-control-sm px-3 text-left text-body transition-colors duration-fast",
+                "flex min-h-control-sm items-center justify-between gap-3 rounded-pill px-4 text-left text-body transition-colors duration-fast",
                 o.value === value ? "bg-fill-3 text-zinc-50" : "text-zinc-300",
               )}
             >

@@ -14,7 +14,7 @@ export function Badge({ tone = "zinc", children }: { tone?: BadgeTone; children:
   return (
     <span
       className={cx(
-        "inline-flex h-badge items-center gap-1 rounded-control-sm border px-2 font-mono text-micro whitespace-nowrap",
+        "inline-flex h-badge items-center gap-1 rounded-pill border px-2 font-mono text-micro whitespace-nowrap",
         BADGE[tone],
       )}
     >

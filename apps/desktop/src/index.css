@@ -60,14 +60,18 @@
    *   --text-display           view titles (md and up)
    *   (Tailwind text-lg/xl/2xl/3xl remain the heading steps.)
    * Tracking: --tracking-eyebrow (plus tracking-tight/tighter)
-   * Radius (scaled from --radius-card; no raw rounded-sm..3xl/full in components)
-   *   --radius-control-sm      options inside a control, badges, checks
-   *   --radius-control         buttons, inputs, thumbs, menus, list rows, nav items,
-   *                            notes nested in a card
-   *   --radius-card            cards, tiles, dialogs, notes, notices, wells
-   *   --radius-card-lg         large media tiles (game posters, featured install
-   *                            results, collection art)
-   *   --radius-pill            dots, switches, progress, counters, job island
+   * Radius (4px grid; no raw rounded-sm..3xl/full in components). Controls are
+   * fully round, containers are rounded rectangles.
+   *   --radius-pill            every control: buttons (a circle on the square icon
+   *                            button), inputs, select triggers and options, tabs,
+   *                            segmented, toggles, badges, chips, kbd glyphs, dots,
+   *                            progress, avatar, job island
+   *   --radius-inset    4px    a picture or bone inset in a padded tile, checkboxes
+   *   --radius-inner    8px    blocks inside a card or dialog: list rows, thumbs,
+   *                            notes, pictures, collection art
+   *   --radius-card     12px   cards, wells, dialogs, notices, option cards
+   *   --radius-card-lg  16px   activatable media tiles (CARD_TILE)
+   *   --radius-menu     26px   the select list: its pill options (44px) + its p-1
    * Spacing / sizing
    *   --spacing-section        padding of every card section
    *   --spacing-control-xs     compact pill height (tab bars: wide pills, a
@@ -128,10 +132,12 @@
 
   --tracking-eyebrow: 0.14em;
 
-  --radius-control-sm: calc(var(--radius-card) * 0.5);
-  --radius-control: calc(var(--radius-card) * 0.75);
-  --radius-card: 0.6rem;
-  --radius-card-lg: calc(var(--radius-card) * 1.0);
+  --radius-inset: 0.25rem;
+  --radius-inner: 0.5rem;
+  --radius-card: 0.75rem;
+  --radius-card-lg: 1rem;
+  /* Concentric with the pill options it holds: option height / 2 + the list's p-1 (off the 4px grid by design). */
+  --radius-menu: calc(var(--spacing-control-sm) / 2 + 0.25rem);
   --radius-pill: 9999px;
 
   --spacing-section: 1rem;
@@ -335,7 +341,7 @@
     @apply font-mono text-micro tracking-eyebrow text-dim uppercase;
   }
   .input {
-    @apply min-h-control w-full rounded-control border border-line-control bg-ink px-3.5 text-lead text-zinc-100 transition-colors duration-base placeholder:text-dim focus:bg-ink-3;
+    @apply min-h-control w-full rounded-pill border border-line-control bg-ink px-4 text-lead text-zinc-100 transition-colors duration-base placeholder:text-dim focus:bg-ink-3;
   }
   /* Divided row list (inside a Card section, lists). */
   .rows > * + * {

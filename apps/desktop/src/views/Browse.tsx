@@ -483,9 +483,9 @@ function BrowseCard({ game }: { game: string }) {
 // The monogram fallback takes the same box, so a picture arriving never shifts the grid.
 // self-start: the horizontal tile's row stretches its items to the text column's (or grid row's) height, and a
 // stretched cross size overrides aspect-ratio when the width is fixed, so the picture would grow past 4:5.
-// rounded-control-sm: one step below the tile's rounded-card-lg (as MOD_PICTURE), so the corners nest.
+// rounded-inset: the tile's rounded-card-lg minus its p-3 (as MOD_PICTURE), so the corners nest.
 const COLLECTION_PICTURE = cx(
-  "aspect-[4/5] shrink-0 self-start rounded-control-sm",
+  "aspect-[4/5] shrink-0 self-start rounded-inset",
   "w-[calc((100cqw-1.5rem-2px)*9/16)]",
   "sm:w-[calc(((100cqw-1rem)/2-1.5rem-2px)*9/16)]",
   "xl:w-[calc(((100cqw-2rem)/3-1.5rem-2px)*9/16)]",

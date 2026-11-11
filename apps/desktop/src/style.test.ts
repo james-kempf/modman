@@ -3,7 +3,8 @@
 // glow (no coloured box-shadow / halo).
 import { describe, expect, it } from "vitest";
 import css from "./index.css?raw";
-import { CARD_TILE } from "./components/ui/styles";
+import { CARD_SHELL, CARD_TILE, LIST_ROW, PILL, TILE } from "./components/ui/styles";
+import { MOD_PICTURE } from "./components/browse/Tile";
 
 const sources = import.meta.glob(["./**/*.tsx", "!./**/*.test.tsx"], {
   query: "?raw",
@@ -38,6 +39,38 @@ describe("flat look", () => {
 });
 
 describe("radius tokens", () => {
+  const src = (f: string) => sources[`./components/${f}`];
+  const radii = (cls: string) => cls.match(/\brounded-[\w-]+/g) ?? [];
+  // Fails when a control loses its full rounding (back to a rounded square) or a container turns into a pill
+  // (a pill-shaped card or picture reads as broken): controls round with rounded-pill only, containers never do.
+  it("rounds controls fully and containers as rectangles", () => {
+    const sizes = src("ui/controls/Button.tsx").match(/const SIZES[\s\S]*?\n\};/)![0];
+    expect(sizes.match(/^\s+\w+: "[^"]*"/gm)!.map(radii)).toEqual([["rounded-pill"], ["rounded-pill"], ["rounded-pill"], ["rounded-pill"]]);
+    expect(cssFile.match(/\.input \{\s*@apply ([^;]*);/)![1]).toMatch(/\brounded-pill\b/);
+    for (const f of ["ui/display/Badge.tsx", "ui/controls/Toggle.tsx", "ui/display/PadGlyph.tsx", "ui/controls/Tabs.tsx", "ui/controls/Segmented.tsx"])
+      expect(src(f), f).toMatch(/\brounded-pill\b/);
+    // Select: pill options inside a list rounded to match them (option height / 2 + its p-1).
+    expect(src("ui/controls/Select.tsx")).toMatch(/role="option"[\s\S]*?\brounded-pill\b/);
+    expect(src("ui/controls/Select.tsx")).toMatch(/\brounded-menu p-1\b/);
+    expect(radii(PILL)).toEqual(["rounded-pill"]);
+    for (const c of [CARD_SHELL, TILE, CARD_TILE, LIST_ROW, MOD_PICTURE]) {
+      expect(radii(c), c).toHaveLength(1);
+      expect(radii(c)[0], c).not.toBe("rounded-pill");
+    }
+    expect(src("dialogs/Dialog.tsx")).toMatch(/"glass w-full animate-pop rounded-card /);
+  });
+
+  // Fails when the retired control radii come back (rounded squares on controls) or a radius leaves the 4px grid.
+  it("keeps the radius scale on the 4px grid with no control-square radius", () => {
+    for (const [file, s] of Object.entries(sources)) expect(s, file).not.toMatch(/\brounded-control\b|\brounded-control-sm\b/);
+    expect(cssFile).not.toMatch(/--radius-control/);
+    for (const name of ["inset", "inner", "card", "card-lg"]) {
+      const rem = Number(cssFile.match(new RegExp(`--radius-${name}: ([\\d.]+)rem;`))?.[1]);
+      expect((rem * 16) % 4, name).toBe(0);
+    }
+    expect(cssFile).toMatch(/--radius-menu: calc\(var\(--spacing-control-sm\) \/ 2 \+ 0\.25rem\);/);
+  });
+
   // Fails when a component uses Tailwind's raw radius scale (or an arbitrary radius) instead of the
   // --radius-* tokens, so changing --radius-card in index.css no longer reaches it.
   it("rounds only with the theme radius tokens", () => {

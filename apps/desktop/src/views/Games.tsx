@@ -26,7 +26,7 @@ const SWITCH = "Switch game";
 /** Same label as the add-game dialog: one add at a time across both. */
 const ADD = "Add game";
 
-const TILE = cx(CARD_TILE, "flex-col p-2.5 pb-3.5");
+const TILE = cx(CARD_TILE, "flex-col p-2 pb-3.5");
 /** auto-fill: 2 columns at 900px wide up to 6 at 1920px; tiles stay large gamepad targets. */
 const GRID = "grid grid-cols-[repeat(auto-fill,minmax(176px,1fr))] gap-5";
 
@@ -149,7 +149,7 @@ function Art({ name, artKey, load }: { name: string; artKey: readonly unknown[] 
   const src = q.data && q.data.startsWith("data:image/") ? q.data : null;
   const m = monogram(name);
   return (
-    <span aria-hidden className="relative block aspect-2/3 w-full overflow-hidden rounded-card bg-ink-3">
+    <span aria-hidden className="relative block aspect-2/3 w-full overflow-hidden rounded-inner bg-ink-3">
       {src ? (
         <img src={src} alt="" data-testid="game-art" className="size-full object-cover" />
       ) : (

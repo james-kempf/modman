@@ -24,7 +24,7 @@ export function Thumb({
   });
   const src = q.data && q.data.startsWith("data:") ? q.data : null;
   // 16:9 at the row's thumb height; the monogram shares the box so loading the picture never shifts the row.
-  const box = "h-thumb aspect-video shrink-0 rounded-control";
+  const box = "h-thumb aspect-video shrink-0 rounded-inner";
   if (src) return <img src={src} alt="" data-testid="mod-thumb" className={cx(box, "object-cover", className)} />;
   const m = monogram(name ?? "");
   return (

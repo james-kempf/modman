@@ -16,7 +16,7 @@ export const TILE = "rounded-card border border-hairline bg-ink";
 /**
  * An activatable card (a <button>: game tiles, Browse results): the whole card is one control and takes the
  * shared highlight. Add the direction (flex-col / flex-row), padding, border colour and fill per use; an
- * inner picture rounds one step below rounded-card-lg (rounded-control-sm) so the corners nest.
+ * inner picture is rounded-inset (rounded-card-lg 16px minus the p-3 padding = 4px) so the corners nest.
  * Press: Button's translate-y-px with scale-99, not 98 (98 pulls a ~300px card's edges in ~3px each). Transform
  * only (Tailwind v4 emits the translate/scale properties, hence the transition list), so the grid does not move.
  * `enabled:` skips disabled buttons and non-button shells (the inert Browse <div aria-disabled>);
@@ -25,9 +25,9 @@ export const TILE = "rounded-card border border-hairline bg-ink";
 export const CARD_TILE =
   "group flex h-full w-full min-w-0 gap-3 rounded-card-lg border text-left transition-[background-color,border-color,color,translate,scale] duration-base enabled:not-aria-disabled:active:translate-y-px enabled:not-aria-disabled:active:scale-99";
 /** A compact status pill / chip row (mono log lines, repair steps). */
-export const PILL = "rounded-control border border-hairline bg-ink px-3 py-1.5 text-label";
+export const PILL = "rounded-pill border border-hairline bg-ink px-3 py-1.5 text-label";
 /** A free-standing list row (jobs, entries); the shared highlight shows when it is interactive. */
-export const LIST_ROW = "rounded-control px-3 py-2.5 transition-colors duration-base";
+export const LIST_ROW = "rounded-inner px-3 py-2.5 transition-colors duration-base";
 /** Width of a settings row's control (input + Save group, dropdown): grows to fill the row, wraps below 14rem. */
 export const SETTING_CONTROL = "min-w-0 flex-[1_1_14rem]";
 /** A view's outer frame (ViewFrame): one column that never widens past <main>, blocks 1.5rem apart. */

@@ -36,7 +36,7 @@ export function SearchField({
         onSubmit?.();
       }}
     >
-      <MagnifyingGlassIcon aria-hidden size={18} className="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 text-zinc-400" />
+      <MagnifyingGlassIcon aria-hidden size={18} className="pointer-events-none absolute top-1/2 left-4 -translate-y-1/2 text-zinc-400" />
       <input
         type="search"
         aria-label={label}
@@ -45,7 +45,7 @@ export function SearchField({
         enterKeyHint="search"
         {...{ [SEARCH_ATTR]: "" }}
         {...rest}
-        className={cx("peer input w-full pl-10", hint && "pr-20")}
+        className={cx("peer input w-full pl-11", hint && "pr-20")}
       />
       {/* Not a control: Enter (or the on-screen keyboard's Search key, hence hidden in controller mode) submits.
           On the field's nav-focus highlight (white) it takes the highlight's muted ink, like the placeholder. */}
@@ -53,7 +53,7 @@ export function SearchField({
         <span
           aria-hidden="true"
           data-search-hint
-          className="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 font-mono text-caption text-dim pad:hidden in-[html[data-input=nav]]:peer-focus:text-focus-ink-muted"
+          className="pointer-events-none absolute top-1/2 right-4 -translate-y-1/2 font-mono text-caption text-dim pad:hidden in-[html[data-input=nav]]:peer-focus:text-focus-ink-muted"
         >
           ↵ Enter
         </span>

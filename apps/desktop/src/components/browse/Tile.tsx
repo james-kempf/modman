@@ -43,9 +43,9 @@ export const RESULTS_GRID = "@container grid gap-4 sm:grid-cols-2";
 export const MOD_GRID = cx(RESULTS_GRID, "xl:grid-cols-3");
 /**
  * Mod pictures fill the tile's width at 16:9 (Nexus tile art); the monogram fallback takes the same box.
- * rounded-control-sm: one step below the tile's rounded-card-lg, so the corners nest inside its padding.
+ * rounded-inset: the tile's rounded-card-lg (16px) minus its p-3 padding, so the corners nest exactly.
  */
-export const MOD_PICTURE = "aspect-video w-full shrink-0 rounded-control-sm";
+export const MOD_PICTURE = "aspect-video w-full shrink-0 rounded-inset";
 
 /** The tile's shell: CARD_TILE with its padding (p-3; a vertical tile 4px more at the bottom). */
 const tileShell = (horizontal: boolean) => cx(CARD_TILE, "border-hairline bg-ink", horizontal ? "flex-row p-3" : "flex-col p-3 pb-4");
@@ -165,10 +165,10 @@ export function Tile({
 }
 
 /**
- * Grey block of a skeleton tile (surface token; the pulse stops under prefers-reduced-motion). rounded-control-sm:
+ * Grey block of a skeleton tile (surface token; the pulse stops under prefers-reduced-motion). rounded-inset:
  * the picture's own radius (no competing radius on its bone), and the text bars nest inside the tile like it.
  */
-const BONE = "block rounded-control-sm bg-fill-2 motion-safe:animate-pulse";
+const BONE = "block rounded-inset bg-fill-2 motion-safe:animate-pulse";
 
 /**
  * A loading placeholder shaped like a Tile (same shell, picture box and text lines). Hidden from

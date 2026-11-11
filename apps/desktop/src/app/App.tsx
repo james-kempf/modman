@@ -168,7 +168,7 @@ function TopBar() {
         <button
           type="button"
           onClick={() => void ipc.quitApp()}
-          className="inline-flex min-h-control shrink-0 items-center gap-2 rounded-control px-3 text-body text-zinc-400 transition-colors duration-150"
+          className="inline-flex min-h-control shrink-0 items-center gap-2 rounded-pill px-4 text-body text-zinc-400 transition-colors duration-150"
         >
           <PowerIcon aria-hidden size={20} />
           <span>Quit</span>
@@ -213,7 +213,7 @@ function AccountChip() {
     <div className="flex max-w-56 min-w-0 shrink-0 items-center gap-3">
       <div
         aria-hidden
-        className="grid size-8 shrink-0 place-items-center rounded-control bg-accent-950 font-mono text-caption font-semibold text-accent-50"
+        className="grid size-8 shrink-0 place-items-center rounded-pill bg-accent-950 font-mono text-caption font-semibold text-accent-50"
       >
         {(a.user ?? "?").slice(0, 2).toUpperCase()}
       </div>

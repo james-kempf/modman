@@ -31,7 +31,7 @@ export function Toggle({
       className={cx(
         // px-2.5 matches the 10px above/below the h-7 track in min-h-control, so the nav highlight pads it evenly;
         // the negative margin keeps the track where it sat before (px-2 with a label, flush without one).
-        "inline-flex min-h-control min-w-control shrink-0 items-center justify-center gap-3 rounded-control px-2.5 text-body text-zinc-200",
+        "inline-flex min-h-control min-w-control shrink-0 items-center justify-center gap-3 rounded-pill px-2.5 text-body text-zinc-200",
         showLabel ? "-mx-0.5" : "-mx-2.5",
       )}
     >

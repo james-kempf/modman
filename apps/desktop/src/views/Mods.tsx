@@ -603,7 +603,7 @@ function Conflicts({ game }: { game: string }) {
                 <li
                   key={c.rel_path}
                   tabIndex={0}
-                  className="flex items-start gap-3 rounded-control py-3"
+                  className="flex items-start gap-3 rounded-inner py-3"
                 >
                   <SwordIcon
                     aria-hidden
@@ -634,7 +634,7 @@ function Conflicts({ game }: { game: string }) {
                 <li
                   key={p.name}
                   tabIndex={0}
-                  className="flex flex-wrap items-center gap-3 rounded-control py-2.5"
+                  className="flex flex-wrap items-center gap-3 rounded-inner py-2.5"
                 >
                   <span className="w-9 text-right font-mono text-caption text-dim">
                     {p.load_index ?? "–"}
@@ -727,7 +727,7 @@ function Updates({ game }: { game: string }) {
                   <li
                     key={u.mod.id}
                     tabIndex={0}
-                    className="flex flex-wrap items-center gap-2 rounded-control py-3"
+                    className="flex flex-wrap items-center gap-2 rounded-inner py-3"
                   >
                     <span className="text-[14.5px] text-zinc-100">
                       {u.mod.name}

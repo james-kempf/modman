@@ -123,7 +123,7 @@ function Installed({ game }: { game: string }) {
                   </span>
                 </div>
                 {c.failed.length > 0 && (
-                  <div className="mt-4 rounded-control border border-amber-400/15 bg-amber-400/5 px-3.5 py-2.5 text-label text-amber-200">
+                  <div className="mt-4 rounded-inner border border-amber-400/15 bg-amber-400/5 px-3.5 py-2.5 text-label text-amber-200">
                     <div className="flex items-center gap-2 font-medium">
                       <WarningIcon aria-hidden size={14} /> {c.failed.length} failed
                     </div>
@@ -260,7 +260,7 @@ export function CollectionArt({ game, slug, name }: { game: string; slug: string
   });
   const src = q.data && q.data.startsWith("data:image/") ? q.data : null;
   // Portrait 9:16 sized by width, so the tall tile stays modest beside the row's text.
-  const tile = "w-16 aspect-[9/16] shrink-0 rounded-card-lg";
+  const tile = "w-16 aspect-[9/16] shrink-0 rounded-inner";
   if (src) return <img src={src} alt="" aria-hidden data-testid="collection-art" className={cx(tile, "object-cover")} />;
   const m = monogram(name);
   return (

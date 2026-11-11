@@ -225,7 +225,7 @@ function Review({ preview: p, acked, busy, onAck }: { preview: Preview; acked: b
             <span
               aria-hidden
               className={cx(
-                "mt-0.5 grid size-icon shrink-0 place-items-center rounded-control-sm border-2",
+                "mt-0.5 grid size-icon shrink-0 place-items-center rounded-inset border-2",
                 acked
                   ? "border-accent-400 bg-accent-400 text-accent-950 in-highlight:border-accent-700 in-highlight:bg-accent-700 in-highlight:text-white"
                   : "border-zinc-500",

@@ -252,8 +252,8 @@ describe("Browse", () => {
         expect(el.className).toMatch(aspect);
         expect(el.className).toMatch(width);
         expect(el.className).toMatch(/\bshrink-0\b/);
-        // Nested inside the tile's padding: one radius step below its rounded-card-lg.
-        expect(el.className).toMatch(/\brounded-control-sm\b/);
+        // Nested inside the tile's padding: the tile's rounded-card-lg minus its p-3.
+        expect(el.className).toMatch(/\brounded-inset\b/);
       }
       expect(img.className).toMatch(/\bobject-cover\b/);
       // The monogram takes exactly the picture's box.

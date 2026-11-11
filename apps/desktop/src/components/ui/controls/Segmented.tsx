@@ -10,7 +10,7 @@ const TRACK = "flex max-w-full flex-wrap gap-1 rounded-pill border border-hairli
 // A 2px outline in the fill colour is invisible at rest; under the white highlight (an inset box-shadow, which an
 // outline does not override) it turns accent-700 (5.2:1; accent-400 would be 1.7:1) and the text keeps accent-700
 // (--focus-text, as on Play), so "selected + focused" differs from "focused" by more than hue.
-// rounded-pill overrides the sm size's rounded-control (Tailwind orders same-property utilities by name).
+// rounded-pill repeats the sm size's own radius so the segment stays a pill if the Button sizes change.
 const SEGMENT =
   "rounded-pill aria-pressed:bg-accent-400 aria-pressed:text-accent-950 aria-pressed:outline-2 aria-pressed:-outline-offset-2 aria-pressed:outline-accent-400 aria-pressed:highlighted:outline-accent-700 aria-pressed:[--focus-text:var(--color-accent-700)]";
 
