@@ -159,8 +159,9 @@ function Brand() {
  */
 function TopBar() {
   return (
-    <header aria-label="App" className="shrink-0 border-b border-white/5 bg-ink">
-      <div className="flex min-w-0 items-center gap-4 px-6 pt-4 pb-2 lg:gap-6 lg:px-10">
+    // The side padding is on the header, so row 1 and the view tabs share one inset.
+    <header aria-label="App" className="shrink-0 border-b border-white/5 bg-ink px-6 lg:px-10">
+      <div className="flex min-w-0 items-center gap-4 pt-4 pb-2 lg:gap-6">
         <Brand />
         <span aria-hidden className="h-8 w-px shrink-0 bg-hairline" />
         <GameContext />
@@ -241,12 +242,12 @@ function ViewTabs() {
     icon: ICON[v.id],
     badge:
       v.id === "activity" && running + prompts > 0 ? (
-        <span className="rounded-pill bg-accent-400 px-2 font-mono text-micro font-semibold text-accent-950">{running + prompts}</span>
+        <span className="min-w-4 rounded-pill bg-accent-400 px-1 text-center font-mono text-micro leading-4 font-semibold text-accent-950">{running + prompts}</span>
       ) : undefined,
   }));
   return (
     // data-view-tabs = VIEW_TABS_ATTR: scopes the shell's tab lookups (nav/actions.ts) to these tabs.
-    <div data-view-tabs className="px-3 lg:px-7">
+    <div data-view-tabs>
       <Tabs
         label="Views"
         focusable

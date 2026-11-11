@@ -116,6 +116,38 @@ describe("Tabs", () => {
     expect(tab("a")).toHaveAttribute("aria-selected", "false");
   });
 
+  // Fails when the pill's padding stops being equal on all sides: a px-*/py-* pair or a breakpoint override
+  // (e.g. the old px-3 xl:px-4) makes the sides differ from the top/bottom; p-2 with leading-5 gives 8px all
+  // round on a 20px line (36px, above the min-h-control-xs floor).
+  it("pill tabs: padding equal on all sides", () => {
+    render(<Harness />);
+    for (const t of screen.getAllByRole("tab")) {
+      const c = cls(t);
+      expect(c).toEqual(expect.arrayContaining(["p-2", "leading-5", "min-h-control-xs"]));
+      expect(c.filter((k) => /^([a-z0-9-]+:)*p[xytrbl]?-/.test(k))).toEqual(["p-2"]);
+    }
+  });
+
+  // Fails when the tablist stops filling the bar (left-aligned again) or tabs stop sharing equal columns:
+  // flex/shrink-0 tabs size to their labels; auto-cols-fr (minmax(0,1fr)) would squeeze a long label out of its cell.
+  it("tabs fill the bar in equal-width columns that never go below a label's width", () => {
+    render(<Harness start="LB" end="RB" />);
+    const list = screen.getByRole("tablist");
+    expect(cls(list)).toEqual(expect.arrayContaining(["grid", "grid-flow-col", "auto-cols-[1fr]", "flex-1", "min-w-0"]));
+    expect(cls(list)).not.toContain("auto-cols-fr");
+    expect(cls(list)).not.toContain("flex");
+    // Fails when the 8px space between pills drifts (gap-1 was 4px).
+    expect(cls(list)).toContain("gap-2");
+    expect(cls(list)).not.toContain("gap-1");
+    expect(cls(list.parentElement!)).toContain("w-full");
+    for (const t of screen.getAllByRole("tab")) {
+      expect(cls(t)).toContain("justify-center");
+      expect(cls(t)).not.toContain("shrink-0");
+      // The pill and its focus ring cover the whole (wider) tab.
+      expect(cls(t.querySelector("[data-tab-highlight]")!)).toEqual(expect.arrayContaining(["absolute", "inset-0", "rounded-pill"]));
+    }
+  });
+
   // Fails when tabindex 0 follows focus (automatic activation) or does not follow activation.
   it("focusable: one tabindex=0 on the selected tab; focus moves alone; activation moves both", async () => {
     const user = userEvent.setup();
@@ -177,6 +209,18 @@ describe("Tabs", () => {
     }
     expect(screen.queryByText("LB")).not.toBeNull();
     expect(screen.getAllByRole("tab")).toHaveLength(3);
+  });
+
+  // Fails when the glyph spacing moves back onto the bar row (gap-* adds space beside hidden glyphs outside
+  // gamepad mode) or drops off the adornments (glyphs butt against the pills in gamepad mode).
+  it("adornment spacing lives on the adornments, only in gamepad mode", () => {
+    render(<Harness focusable start="LB" end="RB" />);
+    const wrap = screen.getByRole("tablist").parentElement!;
+    expect(wrap.className).not.toMatch(/(^|\s)gap-/);
+    const [first, , last] = Array.from(wrap.children);
+    expect(first.className.split(/\s+/)).toContain("pad:me-2");
+    expect(last.className.split(/\s+/)).toContain("pad:ms-2");
+    for (const el of [first, last]) expect(el.className).not.toMatch(/(^|\s)m[se]-2/);
   });
 
   // Fails when the LB/RB listener attaches outside a dialog scope (it would hijack the app's view tabs).

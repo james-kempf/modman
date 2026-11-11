@@ -126,6 +126,21 @@ describe("header game title", () => {
     expect(group.className).not.toMatch(/\bborder\b|bg-ink-2/);
   });
 
+  // Fails when the view tabs get their own side inset again (a padded wrapper or padding on row 1 only),
+  // which puts the tab bar out of line with the brand and Quit above it.
+  it("shares one side inset with the view tabs", async () => {
+    const { renderApp } = await setup();
+    renderApp();
+    const header = screen.getByRole("banner", { name: "App" });
+    const list = await screen.findByRole("tablist", { name: "Views" });
+    expect(header.contains(list)).toBe(true);
+    expect(header.className).toMatch(/(^|\s)px-6(\s|$)/);
+    expect(header.className).toMatch(/(^|\s)lg:px-10(\s|$)/);
+    const sidePad = /(^|\s)([a-z]+:)?(p|px|pl|pr)-/;
+    for (let el = list.parentElement; el && el !== header; el = el.parentElement) expect(el.className).not.toMatch(sidePad);
+    for (const row of header.children) expect(row.className).not.toMatch(sidePad);
+  });
+
   // Fails when the experimental badge comes back next to the header title (the user removed it there).
   it("shows no experimental badge, even for an experimental game", async () => {
     const { renderApp } = await setup({}, [experimentalGame()]);

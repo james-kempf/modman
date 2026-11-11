@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // A tab strip (role=tablist) with an optional panel for the selected tab.
-// One look everywhere (the app's view bar and the dialogs): left-aligned tabs on one line (horizontal
-// scroll when narrow), icons, badges. Tabs are pills; the selected one sits on an accent-tinted pill
+// One look everywhere (the app's view bar and the dialogs): full-width, equal-width tabs on one line
+// (horizontal scroll when narrow), icons, badges. Tabs are pills; the selected one sits on an accent-tinted pill
 // that animates scale + opacity only, driven by aria-selected classes (no inline styles: CSP).
 // Tabs are not focus stops by default (tabindex -1); `focusable` makes them a roving-tabindex group
 // following the APG manual-activation pattern. Start/end adornments (e.g. LB/RB glyphs) are siblings
@@ -21,14 +21,21 @@ export interface TabItem<T extends string> {
   badge?: ReactNode;
 }
 
-// One line, never wraps: overflows into a horizontal scroll (scrollbar hidden) at narrow widths.
-const LIST = "flex min-w-0 flex-1 items-stretch gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden";
-// Tighter padding below xl (1280) so the 8 view tabs fit a 1024 window before the list has to scroll.
+// One line over the full width of the bar, every tab the same width: one grid column per tab, each `1fr`.
+// Not Tailwind's auto-cols-fr: that is minmax(0, 1fr) and would squeeze a long label out of its cell;
+// `1fr` (minmax(auto, 1fr)) never goes below a label's min-content. If the equal share is narrower than
+// the longest label, that one tab keeps its min-content and the rest share what is left (the row still fits);
+// past that, a horizontal scroll (scrollbar hidden).
+const LIST =
+  "grid min-w-0 flex-1 grid-flow-col auto-cols-[1fr] gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden";
+// Padding equal on all sides: p-2 (8px) around a 20px line (leading-5) makes a 36px pill, on the 4px grid and
+// above the min-h-control-xs floor. No breakpoint padding: the 8 view tabs fit a 1024 window at p-2.
+// p-2 is the minimum inset: the tab fills its (equal) column and centres its label in the extra width.
 // Selected: accent text on an accent tint (the Badge accent look), apart from the app's white nav-focus/hover
 // highlight. Under that highlight the selected tab keeps accent text (--focus-text, AA on white, as primary
 // buttons do) and its pill turns into an accent ring, so "selected + focused" differs from "focused".
 const TAB =
-  "group relative inline-flex min-h-control-xs shrink-0 items-center rounded-pill px-3 text-body font-medium whitespace-nowrap text-zinc-400 transition-[color,transform] duration-base active:scale-98 aria-selected:text-accent-200 aria-selected:[--focus-text:var(--color-accent-700)] xl:px-4";
+  "group relative inline-flex min-h-control-xs items-center justify-center rounded-pill p-2 text-body leading-5 font-medium whitespace-nowrap text-zinc-400 transition-[color,transform] duration-base active:scale-98 aria-selected:text-accent-200 aria-selected:[--focus-text:var(--color-accent-700)]";
 // The selected tab's pill: scale + opacity only, spring easing, none under reduced motion.
 const HIGHLIGHT =
   "pointer-events-none absolute inset-0 scale-95 rounded-pill bg-accent-400/15 opacity-0 transition-[transform,opacity] duration-[250ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-aria-selected:scale-100 group-aria-selected:opacity-100 motion-reduce:transition-none in-highlight:ring-2 in-highlight:ring-accent-600 in-highlight:ring-inset";
@@ -123,9 +130,11 @@ export function Tabs<T extends string>({
     all[to].focus();
   };
 
-  const adornment = (node: ReactNode) =>
+  // The glyphs only show in gamepad mode, so their 8px space to the list does too (a gap on the row would
+  // leave a stray 8px beside the hidden glyphs).
+  const adornment = (node: ReactNode, space: string) =>
     node == null ? null : (
-      <span aria-hidden="true" className="shrink-0">
+      <span aria-hidden="true" className={cx("shrink-0", space)}>
         {node}
       </span>
     );
@@ -133,8 +142,8 @@ export function Tabs<T extends string>({
   const bar = (
     // pb-1.5: the pills clear the separator under the bar. A panel below gets a hairline (the view bar's
     // separator is the app header's border).
-    <div className={cx("flex w-full shrink-0 items-center gap-2 pb-1.5", hasPanel && "border-b border-hairline")}>
-      {adornment(start)}
+    <div className={cx("flex w-full shrink-0 items-center pb-1.5", hasPanel && "border-b border-hairline")}>
+      {adornment(start, "pad:me-2")}
       <div
         ref={list}
         role="tablist"
@@ -172,7 +181,7 @@ export function Tabs<T extends string>({
           );
         })}
       </div>
-      {adornment(end)}
+      {adornment(end, "pad:ms-2")}
     </div>
   );
 

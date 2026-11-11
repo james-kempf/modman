@@ -297,7 +297,7 @@ Controls are sized for gamepad and touch as well as the mouse.
 
 | Token | Height | Use |
 |---|---|---|
-| `--spacing-control-xs` | 32px | tab pills (LB/RB also switch tabs) |
+| `--spacing-control-xs` | 32px | tab pill floor (they render at 36px with `p-2`; LB/RB also switch tabs) |
 | `--spacing-control-sm` | 44px | small buttons, listbox options; the minimum touch target |
 | `--spacing-control` | 48px | default buttons, inputs, Select, Toggle, icon buttons (`min-w-control` too) |
 | `--spacing-control-lg` | 56px | large buttons |
@@ -373,7 +373,13 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 
 ### Tabs (`controls/Tabs.tsx`)
 
-- Pills: `min-h-control-xs rounded-pill px-3 xl:px-4 text-body font-medium text-zinc-400`, on one line, scrolling sideways when narrow.
+- Pills: `min-h-control-xs rounded-pill p-2 text-body leading-5 font-medium text-zinc-400 justify-center`, on one line, scrolling sideways when narrow. 8px padding on a 20px line: 36px tall, above the 32px `control-xs` floor.
+- Rule: tab padding is equal on all sides (one `p-N`, never a `px`/`py` pair or a breakpoint override). `p-2` is the minimum inset: a tab is usually wider than its label and centres it. The guard is in `Tabs.test.tsx`.
+- Full width, equal width: the tablist fills the bar (`flex-1 min-w-0` beside the LB/RB glyphs in a `w-full` row with no `gap-*`) as a `grid grid-flow-col auto-cols-[1fr]`, one equal column per tab. Not `auto-cols-fr`: Tailwind's is `minmax(0,1fr)` and lets a long label spill out of its cell; `1fr` keeps each column at least its label's min-content. When the equal share is narrower than the longest label (the 8 view tabs at a 1024 window: a 944px list less 7 × 8px gaps leaves 111px a share, against Overview's 109px, Collections' 120px and Requirements' 137px), Collections and Requirements keep their min-content width and the other six share the rest (Overview 109px, the other five 104.4px), so the row still fits. All eight become equal once the list reaches 8 × 137 + 7 × 8 = 1152px (a 1232px window); at 1280 they are equal (143px). Under gamepad input the LB/RB glyphs (32px each, plus 8px to the list) take 80px: the min-content row (885px) then needs a 1045px window, so at 1024 the view list (864px) scrolls 21px sideways (focus scrolls the tab into view); at the 1280 Deck size it fits (1120px list, 132.4px tabs, Requirements 137px).
+- Adornment spacing: the 8px between a glyph and the list belongs to the adornment, not the row: the start wrapper carries `pad:me-2`, the end wrapper `pad:ms-2`. The glyphs are `hidden pad:inline-flex`, so outside gamepad mode the wrappers are 0px with no margin and the list starts at the bar edge; never put `gap-*` on the bar row.
+- Placement: the bar has no side padding; it takes its container's inset, the same one as the header above it. The view bar sits inside the app `<header>` under row 1, and the header carries the side padding (`px-6 lg:px-10`) for both rows, so the tabs line up with the brand and Quit. Dialog tabs sit in the dialog body, inside the panel's `p-5 sm:p-7`, the same inset as the title.
+- Count badge in a tab (the Activity counter): `min-w-4 px-1 leading-4 text-center text-micro`, a 16px circle for one digit and a pill for more, with about 4px of space around the glyph on every side.
+- No track: the tablist has no fill or padding, only `gap-2` (8px) between pills. The selected pill and its focus ring (`inset-0`, `ring-inset`) share the tab's `rounded-pill` box, so they span the whole equal-width tab and the ring stays inside the pill.
 - Selected: `text-accent-200` on a `bg-accent-400/15` pill (scale .95 to 1 plus opacity, 250ms spring).
 - Selected + highlighted: accent-700 text and a `ring-2 ring-accent-600` inset ring.
 - Keys: roving tabindex with APG manual activation (arrows, Home, End). LB/RB switch tabs.
@@ -415,7 +421,7 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 
 - Portal on `<body>`. Backdrop: `fixed inset-0 z-50 bg-scrim backdrop-blur-sm animate-fade p-4 sm:p-6`.
 - Panel: `.glass rounded-card p-5 sm:p-7 animate-pop`, `max-w-2xl` (`wide`: `max-w-5xl`), height `100vh - 2rem/3rem`.
-- Title: `text-xl font-medium tracking-tight text-zinc-50`. Subtitle: `text-body text-zinc-400`. Body `mt-6`. Pinned footer `pt-4`.
+- Title: `text-xl font-medium tracking-tight text-zinc-50`. Subtitle: `text-body text-zinc-400`. Body `mt-6`. Pinned footer `pt-4`. Title, body (tab bars included) and footer share the panel's padding as one inset; no section adds its own.
 - Behavior: focus trap, everything else `inert`, Esc/B closes, focus returns to the opener chain.
 
 ### Notice / toast (`feedback/Notice.tsx`)
