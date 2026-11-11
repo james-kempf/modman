@@ -109,27 +109,48 @@ describe("Button nav focus", () => {
   // Fails when a neutral button overrides the shared dark focus ink.
   it.each(["default", "ghost"] as const)("%s uses the shared focus ink", (tone) => {
     render(<Button tone={tone}>Go</Button>);
-    // Only unconditional overrides count: a pressed ghost (a segment) keeps the accent like the selected tab.
     expect(cls("Go")).not.toMatch(/(^|\s)\[--focus-text/);
   });
 
-  // Fails when a pressed segment falls back to a fill that barely differs from its track (below 3:1), or stops
-  // matching the selected tab (accent-200 on an accent-400/15 tint, accent text on the highlight).
-  it("a pressed ghost (Segmented) takes the selected-tab look with an accent-600 edge", () => {
-    render(<Segmented label="Show" value="a" options={[{ value: "a", label: "A" }, { value: "b", label: "B" }]} onChange={() => {}} />);
+  // Fails when the selected segment falls back to a tint that barely differs from its track (the old accent-400/15
+  // is 1.3:1), drifts from the Overview Play button's green (Button tone="primary"), or loses the rim that keeps
+  // "selected + highlighted" apart from "highlighted" under the white fill. accent-400 fill vs ink track 10.3:1,
+  // accent-950 text on it 8.5:1; the rim is accent-400 at rest (invisible) and accent-700 under the highlight
+  // (5.2:1; accent-400 there would be 1.7:1).
+  it("a selected segment is a solid Play-green thumb (>= 3:1 vs track) with a darker rim under the highlight", () => {
+    render(
+      <>
+        <Button tone="primary">Play</Button>
+        <Segmented label="Show" value="a" options={[{ value: "a", label: "A" }, { value: "b", label: "B" }]} onChange={() => {}} />
+      </>,
+    );
     const on = screen.getByRole("button", { name: "A" });
     expect(on).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "B" })).toHaveAttribute("aria-pressed", "false");
+    const play = cls("Play").split(" ");
+    for (const c of ["bg-accent-400", "text-accent-950", "[--focus-text:var(--color-accent-700)]"]) {
+      expect(play).toContain(c);
+      expect(on.className.split(" ")).toContain(`aria-pressed:${c}`);
+    }
     expect(on.className.split(" ")).toEqual(
       expect.arrayContaining([
-        "aria-pressed:bg-accent-400/15",
-        "aria-pressed:text-accent-200",
-        "aria-pressed:outline",
-        "aria-pressed:outline-accent-600",
-        "aria-pressed:[--focus-text:var(--color-accent-700)]",
+        "rounded-pill",
+        "aria-pressed:outline-2",
+        "aria-pressed:-outline-offset-2",
+        "aria-pressed:outline-accent-400",
+        "aria-pressed:highlighted:outline-accent-700",
       ]),
     );
-    expect(on.className).not.toMatch(/aria-pressed:bg-fill-3/);
+    // A translucent fill (bg-accent-400/15, bg-fill-3) is below 3:1 on the ink track; ring-* would replace the highlight shadow.
+    expect(on.className).not.toMatch(/aria-pressed:bg-[\w-]+\/\d+|aria-pressed:bg-fill-|\bring-/);
+    // Concentric: pill segments in a pill track with a 4px gap.
+    expect(on.parentElement?.className.split(" ")).toEqual(expect.arrayContaining(["rounded-pill", "p-1", "gap-1"]));
+  });
+
+  // Fails when a plain ghost button picks up the segment's selected look.
+  it("keeps the ghost tone free of aria-pressed styles", () => {
+    render(<Button tone="ghost">Go</Button>);
+    expect(cls("Go")).not.toMatch(/aria-pressed:/);
   });
 
   // Fails when danger goes back to a saturated or ring-bordered fill at rest.

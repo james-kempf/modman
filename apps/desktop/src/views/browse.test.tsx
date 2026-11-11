@@ -646,7 +646,7 @@ describe("Browse toolbar and collection details layout (T3)", () => {
     expect(manual).toHaveTextContent("Not on Nexus");
     const card = manual.firstElementChild!;
     expect(card).toHaveAttribute("aria-disabled", "true");
-    expect(card.className.split(" ")).toContain("opacity-60");
+    expect(card.className.split(" ")).toContain("opacity-stale");
     expect(focusables(dlg)).not.toContain(card);
   });
 

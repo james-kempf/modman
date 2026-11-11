@@ -91,16 +91,19 @@
    *   --color-fill-1           resting option fill, row hover
    *   --color-hairline         card borders and dividers
    *   --color-fill-2           default button, track, hover
-   *   --color-line             input, well and dashed borders
+   *   --color-line             well and dashed borders
    *   --color-fill-3           selected option
    *   --color-line-strong      overlay (glass) border
    *   --color-fill-hover       hover on a filled control, switch off
    *   --color-surface-overlay  glass overlays
    *   --color-scrim            dialog backdrop
+   * Form control edge (opaque, not white-on-ink)
+   *   --color-line-control     input, search field and Select trigger border
+   *                            (>= 3:1 against ink, ink-2, ink-3 and overlays)
    * Shadow: --shadow-overlay (dialogs, menus, notices via .glass)
    * Duration: --transition-duration-fast, -base, -slow
    * Opacity: --opacity-disabled, --opacity-stale (content kept up while its
-   *   replacement loads), --opacity-grain
+   *   replacement loads, or a result that cannot open), --opacity-grain
    * Highlight (nav focus and mouse hover), one look for every control:
    *   --color-focus            the solid white fill
    *   --color-focus-ink        text and icons on it
@@ -167,6 +170,8 @@
   --color-hairline: rgb(255 255 255 / 0.05);
   --color-line: rgb(255 255 255 / 0.08);
   --color-line-strong: rgb(255 255 255 / 0.1);
+  /* Field boundary at >= 3:1 (WCAG 1.4.11) on every surface a field sits on: 3.69 ink, 3.52 ink-2, 3.23 ink-3. */
+  --color-line-control: oklch(0.53 0.012 286);
   --color-fill-1: rgb(255 255 255 / 0.03);
   --color-fill-2: rgb(255 255 255 / 0.06);
   --color-fill-3: rgb(255 255 255 / 0.08);
@@ -330,7 +335,7 @@
     @apply font-mono text-micro tracking-eyebrow text-dim uppercase;
   }
   .input {
-    @apply min-h-control w-full rounded-control border border-line bg-ink px-3.5 text-lead text-zinc-100 transition-colors duration-base placeholder:text-zinc-500 focus:bg-ink-3;
+    @apply min-h-control w-full rounded-control border border-line-control bg-ink px-3.5 text-lead text-zinc-100 transition-colors duration-base placeholder:text-dim focus:bg-ink-3;
   }
   /* Divided row list (inside a Card section, lists). */
   .rows > * + * {

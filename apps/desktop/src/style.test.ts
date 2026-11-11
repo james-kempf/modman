@@ -3,6 +3,7 @@
 // glow (no coloured box-shadow / halo).
 import { describe, expect, it } from "vitest";
 import css from "./index.css?raw";
+import { CARD_TILE } from "./components/ui/styles";
 
 const sources = import.meta.glob(["./**/*.tsx", "!./**/*.test.tsx"], {
   query: "?raw",
@@ -76,7 +77,7 @@ describe("focus and hover highlight", () => {
 
   // Fails when any highlight drifts from the one shared solid white (tints, per-control fills, an outline or ring).
   it("paints the highlight with the one solid white token, no outline", () => {
-    expect(token("--color-focus")).toBe("var(--color-zinc-200)");
+    expect(token("--color-focus")).toBe("var(--color-zinc-100)");
     expect(css).toMatch(/\* \{\s*@variant highlighted \{\s*box-shadow: inset 0 0 0 100vmax var\(--color-focus\);\s*\}/);
     expect(css).not.toMatch(/--color-focus-fill/);
   });
@@ -129,5 +130,40 @@ describe("focus and hover highlight", () => {
     for (const [file, src] of Object.entries(sources)) {
       expect(src, file).not.toMatch(/(nav-focus|highlighted):scale-/);
     }
+  });
+});
+
+describe("form control contrast", () => {
+  const css = cssFile;
+  const token = (name: string) => css.match(new RegExp(`${name}:\\s*([^;]+);`))?.[1] ?? "";
+  const input = css.match(/\.input \{\s*@apply ([^;]+);/)?.[1] ?? "";
+
+  // Fails when the placeholder drops back to zinc-500 (4.05:1 on ink, 3.54:1 on the focused ink-3), below AA.
+  it("draws placeholders in --color-dim (>= 4.5:1 on ink, ink-2 and ink-3)", () => {
+    expect(input).toMatch(/(?<![\w-])placeholder:text-dim(?![\w-])/);
+    expect(input).not.toMatch(/placeholder:text-zinc-/);
+  });
+
+  // Fails when the field edge goes back to the 8% white hairline (1.19:1), or the control token is lost or
+  // turned translucent (its 3:1 against ink-3 is computed for an opaque colour).
+  it("outlines fields with the opaque --color-line-control token (>= 3:1 boundary)", () => {
+    expect(input).toMatch(/(?<![\w-])border-line-control(?![\w-])/);
+    expect(input).not.toMatch(/(?<![\w-])border-line(?![\w-])/);
+    expect(token("--color-line-control")).toBe("oklch(0.53 0.012 286)");
+  });
+});
+
+describe("activatable card press", () => {
+  const cls = CARD_TILE.split(/\s+/);
+
+  // Fails when a game or Browse tile gives no press feedback (buttons and tabs do), when the press stops being a
+  // transform (a fill or size change would fight the highlight or shift the grid), or when it reaches an inert
+  // tile (the dimmed Browse <div aria-disabled>) or a disabled/aria-disabled card.
+  it("presses enabled cards with a small transform only", () => {
+    const press = cls.filter((c) => c.includes("active:"));
+    expect(press.sort()).toEqual(
+      ["enabled:not-aria-disabled:active:scale-99", "enabled:not-aria-disabled:active:translate-y-px"].sort(),
+    );
+    expect(cls).toContain("transition-[background-color,border-color,color,translate,scale]");
   });
 });

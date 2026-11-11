@@ -96,8 +96,8 @@ export function ModTile({
       summary={m.summary}
       stats={
         <>
-          {m.downloads !== null && <Stat icon={<DownloadSimpleIcon aria-hidden size={13} />} value={compact(m.downloads)} label="downloads" />}
-          {m.endorsements !== null && <Stat icon={<ThumbsUpIcon aria-hidden size={13} />} value={compact(m.endorsements)} label="endorsements" />}
+          {m.downloads !== null && <Stat icon={<DownloadSimpleIcon aria-hidden size={12} />} value={compact(m.downloads)} label="downloads" />}
+          {m.endorsements !== null && <Stat icon={<ThumbsUpIcon aria-hidden size={12} />} value={compact(m.endorsements)} label="endorsements" />}
           {extraStats}
         </>
       }
@@ -170,7 +170,7 @@ export function ModDetailsDialog({
       <Tabs label="Mod" tabs={MOD_TABS} value={tab} onChange={setTab} start={LB} end={RB}>
         {tab === "details" ? (
           <>
-            <Picture url={m.thumbnailUrl} name={name} className="aspect-video w-full max-w-md rounded-card" />
+            <Picture url={m.thumbnailUrl} name={name} className="aspect-video w-full max-w-md rounded-control" />
             <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-4 md:grid-cols-3">
               <Fact k="Author" v={m.author ?? "?"} />
               <Fact k="Version" v={m.version ?? "?"} />
@@ -221,7 +221,7 @@ export function CollectionDetailsDialog({ game, c, onClose, actions, returnFocus
           <>
             {/* Picture left, facts right; stacked below sm. */}
             <div className="flex flex-col gap-6 sm:flex-row sm:items-start">
-              <Picture url={c.image_url} name={c.name} className="aspect-[4/5] w-40 shrink-0 rounded-card" />
+              <Picture url={c.image_url} name={c.name} className="aspect-[4/5] w-40 shrink-0 rounded-control" />
               <dl className="grid min-w-0 flex-1 grid-cols-2 gap-x-6 gap-y-4 lg:grid-cols-3">
                 <Fact k="Author" v={r?.author ?? c.author ?? "?"} />
                 <Fact k="Category" v={c.category ?? "?"} />
@@ -248,7 +248,7 @@ export function CollectionDetailsDialog({ game, c, onClose, actions, returnFocus
                 game={game}
                 m={revisionHit(m)}
                 inert={m.mod_id === null}
-                extraStats={m.size ? <Stat icon={<HardDrivesIcon aria-hidden size={13} />} value={bytes(m.size)} label="size" /> : null}
+                extraStats={m.size ? <Stat icon={<HardDrivesIcon aria-hidden size={12} />} value={bytes(m.size)} label="size" /> : null}
                 extraBadges={
                   <>
                     {m.optional && <Badge>Optional</Badge>}
@@ -259,10 +259,10 @@ export function CollectionDetailsDialog({ game, c, onClose, actions, returnFocus
             ))}
           </ul>
         ) : (
-          !q.isPending && !q.isError && <p className="text-label text-zinc-400">No mods listed for this revision.</p>
+          !q.isPending && !q.isError && <p className="text-label text-fg-2">No mods listed for this revision.</p>
         )}
       </Tabs>
-      {q.isPending && <p className="mt-4 text-label text-zinc-400">Loading revision details…</p>}
+      {q.isPending && <p className="mt-4 text-label text-fg-2">Loading revision details…</p>}
       {q.isError && (
         <div className="mt-4">
           <ErrorNote>Could not load revision details: {errMsg(q.error)}</ErrorNote>

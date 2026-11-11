@@ -10,12 +10,7 @@ const TONES: Record<Tone, string> = {
   default: "bg-fill-2 text-zinc-100 border border-hairline",
   // Tonal: a muted rose wash with rose text (no saturated fill, no coloured border); transparent border keeps the size of default.
   danger: "bg-rose-500/15 text-rose-200 border border-transparent [--focus-text:var(--color-rose-700)]",
-  // A toggle (aria-pressed, e.g. a segment) takes the selected tab's look while pressed (accent-200 on an
-  // accent-400/15 tint, as Tabs) plus a 1px inset accent-600 edge: 4.8:1 against the ink track (3.7:1 on the
-  // white highlight), so the pressed segment is told apart by more than its hue. Under the highlight it keeps
-  // accent text (--focus-text) and the edge, apart from a focused unpressed segment.
-  ghost:
-    "text-zinc-300 aria-pressed:bg-accent-400/15 aria-pressed:text-accent-200 aria-pressed:outline aria-pressed:-outline-offset-1 aria-pressed:outline-accent-600 aria-pressed:[--focus-text:var(--color-accent-700)]",
+  ghost: "text-zinc-300",
 };
 type Size = "icon" | "sm" | "md" | "lg";
 const SIZES: Record<Size, string> = {

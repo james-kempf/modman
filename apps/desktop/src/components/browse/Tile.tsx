@@ -132,10 +132,10 @@ export function Tile({
         // it, so a long summary never makes the card taller; it shrinks (clipped, ellipsis) between the fixed
         // title/byline and the stats/badges row.
         <span className="relative min-w-0 flex-1 self-stretch">
-          <span className="absolute inset-0 flex flex-col overflow-hidden px-1.5 py-1">{text}</span>
+          <span className="absolute inset-0 flex flex-col overflow-hidden px-1 py-1">{text}</span>
         </span>
       ) : (
-        <span className="flex min-w-0 flex-1 flex-col self-stretch px-1.5">{text}</span>
+        <span className="flex min-w-0 flex-1 flex-col self-stretch px-1">{text}</span>
       )}
     </>
   );
@@ -155,7 +155,7 @@ export function Tile({
           {body}
         </button>
       ) : (
-        <div aria-disabled="true" aria-describedby={`${bylineId} ${statsId} ${statusId}`} className={cx(shell, "opacity-60")}>
+        <div aria-disabled="true" aria-describedby={`${bylineId} ${statsId} ${statusId}`} className={cx(shell, "opacity-stale")}>
           {body}
         </div>
       )}
@@ -164,8 +164,11 @@ export function Tile({
   );
 }
 
-/** Grey block of a skeleton tile (surface token; the pulse stops under prefers-reduced-motion). */
-const BONE = "block rounded-control bg-fill-2 motion-safe:animate-pulse";
+/**
+ * Grey block of a skeleton tile (surface token; the pulse stops under prefers-reduced-motion). rounded-control-sm:
+ * the picture's own radius (no competing radius on its bone), and the text bars nest inside the tile like it.
+ */
+const BONE = "block rounded-control-sm bg-fill-2 motion-safe:animate-pulse";
 
 /**
  * A loading placeholder shaped like a Tile (same shell, picture box and text lines). Hidden from
@@ -176,7 +179,7 @@ export function TileSkeleton({ picture, horizontal = false }: { picture: string;
     <li aria-hidden="true" data-testid="tile-skeleton" className="min-w-0">
       <div className={tileShell(horizontal)}>
         <span className={cx(BONE, picture)} />
-        <span className={cx("flex min-w-0 flex-1 flex-col gap-2 self-stretch", horizontal ? "px-1.5 py-1" : "px-1.5")}>
+        <span className={cx("flex min-w-0 flex-1 flex-col gap-2 self-stretch", horizontal ? "px-1 py-1" : "px-1")}>
           <span className={cx(BONE, "h-4 w-3/4")} />
           <span className={cx(BONE, "h-3 w-1/3")} />
           <span className={cx(BONE, "mt-2 h-3 w-full")} />

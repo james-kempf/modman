@@ -51,14 +51,14 @@ Rules:
 
 | Step | Token | OKLCH | sRGB approx. | Use |
 |---|---|---|---|---|
-| 50 | `--color-accent-50` | 0.97 0.03 165 | #E4FCF0 | rare tint text |
+| 50 | `--color-accent-50` | 0.97 0.03 165 | #E4FCF0 | selected segment text, rare tint text |
 | 100 | `--color-accent-100` **(gap)** | 0.94 0.05 165 | n/a | not used |
 | 200 | `--color-accent-200` | 0.90 0.08 165 | #ACEFD1 | selected tab text |
 | 300 | `--color-accent-300` | 0.84 0.11 165 | #80E2B9 | accent text, success text, badge |
-| 400 | `--color-accent-400` | 0.78 0.12 165 | #62D0A4 | **brand.primary**: primary button fill, progress, tints |
+| 400 | `--color-accent-400` | 0.78 0.12 165 | #62D0A4 | **brand.primary**: primary button fill (Play), selected segment fill, progress, tints |
 | 500 | `--color-accent-500` | 0.70 0.12 165 | #46B68C | toggle on track |
 | 600 | `--color-accent-600` | 0.58 0.11 165 | #258E6A | selected-tab ring under highlight |
-| 700 | `--color-accent-700` | 0.50 0.10 165 | #117555 | accent on the white highlight (AA) |
+| 700 | `--color-accent-700` | 0.50 0.10 165 | #117555 | accent on the white highlight (AA); selected segment rim and text under the highlight |
 | 800 | `--color-accent-800` **(gap)** | 0.42 0.08 165 | n/a | not used |
 | 900 | `--color-accent-900` **(gap)** | 0.34 0.06 165 | n/a | not used |
 | 950 | `--color-accent-950` | 0.24 0.04 165 | #09251A | text on primary fill |
@@ -75,7 +75,8 @@ Rules:
 | `--color-fg-2` | `var(--color-zinc-400)` | #9F9FA9 | text.secondary alias: summaries, empty-state text (muted ink under the highlight, like `text-dim`) |
 | `--color-zinc-50..400` | Tailwind | #FAFAFA..#9F9FA9 | text steps |
 | `--color-hairline` | white / 5% | n/a | card borders, dividers |
-| `--color-line` | white / 8% | n/a | input, well, dashed borders |
+| `--color-line` | white / 8% | n/a | well, dashed borders |
+| `--color-line-control` | oklch(0.53 0.012 286) | n/a | form control edge: `.input` (TextField, SearchField, Select trigger); opaque so it holds ≥3:1 on every surface |
 | `--color-line-strong` | white / 10% | n/a | overlay border |
 | `--color-fill-1/2/3` | white / 3, 6, 8% | n/a | rest option, default button and track, selected option |
 | `--color-fill-hover` | white / 10% | n/a | toggle off track |
@@ -95,11 +96,11 @@ The app ships **dark only**: there is no `prefers-color-scheme` or `data-theme` 
 | bg.surface | `--bg-surface` | `--color-ink-2` | white |
 | bg.raised | `--bg-raised` | `--color-ink-3` (focused fields), `--color-surface-overlay` (overlays) | zinc-100 |
 | border.default | `--border-default` | `--color-hairline` | zinc-200 |
-| border.input | `--border-input` | `--color-line` | zinc-500 |
+| border.input | `--border-input` | `--color-line-control` | zinc-500 |
 | text.primary | `--text-primary` | zinc-100 = `--color-fg` (titles zinc-50, body zinc-200) | zinc-900 |
 | text.secondary | `--text-secondary` | zinc-300 / zinc-400 = `--color-fg-2` | zinc-700 |
 | text.muted | `--text-muted` | `--color-dim` | zinc-600 |
-| text.placeholder | `--text-placeholder` | zinc-500 | zinc-500 |
+| text.placeholder | `--text-placeholder` | `--color-dim` | zinc-500 |
 | brand.primary | `--brand-primary` | accent-400 (fill), accent-300 (text) | accent-700 |
 | brand.on-primary | `--brand-on-primary` | accent-950 | white |
 | status.success | `--status-success` | accent-300 | accent-700 |
@@ -122,6 +123,8 @@ Pass (text 4.5:1, large/UI 3:1):
 |---|---|
 | zinc-100 on ink / ink-2 / ink-3 | 17.8 / 16.9 / 15.6 |
 | dim on ink / ink-2 / ink-3 / overlay | 6.3 / 6.0 / 5.5 / 5.7 |
+| Placeholder `--color-dim` on ink (field rest) / ink-2 / ink-3 (focused field) | 6.27 / 5.98 / 5.49 |
+| Field edge `--color-line-control` vs ink / ink-2 / ink-3 / overlay (UI) | 3.69 / 3.52 / 3.23 / 3.35 |
 | zinc-400 on ink-2 | 7.1 |
 | accent-300 on ink-2 | 11.9 |
 | amber-300 on ink-2 | 12.9 |
@@ -130,7 +133,9 @@ Pass (text 4.5:1, large/UI 3:1):
 | rose-200 on rose-500/15 (danger button) | 11.6 |
 | Badge text on its tint (accent, amber, rose) | 10.1 / 10.8 / 8.6 |
 | Selected tab: accent-200 on accent-400/15 | 11.6 |
-| Pressed segment edge: accent-600 vs ink track / vs highlight fill (UI) | 4.8 / 3.7 |
+| Selected segment fill accent-400 (Play green) vs ink track and unselected segments / vs ink-2 card (UI) | 10.3 / 9.8 |
+| Selected segment text accent-950 on accent-400 (as on Play) | 8.5 |
+| Selected segment rim and text accent-700 on the highlight fill (UI / text); accent-400 there would be 1.7 | 5.2 / 5.2 |
 | Highlight ink zinc-900 / ink-muted zinc-600 on zinc-100 | 16.1 / 7.0 |
 | `--focus-text` accent-700 / rose-700 on zinc-100 | 5.2 / 5.5 |
 | Highlight fill vs page (UI) | 17.8 |
@@ -141,11 +146,8 @@ Failures and notes:
 
 | Pair | Ratio | Needs | Note |
 |---|---|---|---|
-| Placeholder zinc-500 on ink | 4.05 | 4.5 | WCAG exempts placeholders, but they still carry hints. Moving to `--color-dim` gives 6.3. |
-| Placeholder zinc-500 on ink-3 (focused input) | 3.54 | 4.5 | Same fix. |
-| Input border `--color-line` vs ink | 1.19 | 3 (UI boundary) | The `.input` edge is hard to see. The field is identified by its label and position. |
-| Toggle off track `--color-fill-hover` vs ink-2 | 1.30 | 3 | Passes in practice: the zinc-400 knob (7.1:1) carries the state. |
-| Pressed segment / selected tab fill accent-400/15 vs ink | 1.3 | 3 | The tint alone does not carry the state. Segmented adds a 1px inset accent-600 edge (4.8:1); Tabs rely on the accent-200 text and, under the highlight, an accent-600 ring. |
+| Toggle off track `--color-fill-hover` vs ink-2 | 1.30 | 3 | Passes in practice: the zinc-400 knob (7.1:1) carries the state. Not moved to `--color-line-control`: the off knob (zinc-400) would drop to about 2.1:1 on it, so the fix needs a knob change too. |
+| Selected tab fill accent-400/15 vs ink | 1.3 | 3 | The tint alone does not carry the state. Tabs rely on the accent-200 text and, under the highlight, an accent-600 ring **(gap)**. Segmented no longer uses the tint (solid accent-400, the Play green, 10.3:1). |
 | Card border `--color-hairline` vs ink-2 | 1.12 | n/a | Decorative. Cards are not controls. |
 | Light (gap) border zinc-200 vs white | 1.27 | n/a | Decorative only. Use zinc-500 (≥4.5) for input edges, not zinc-400 (2.6). |
 | Disabled (`opacity 0.45`) zinc-100 text on ink-2 | 4.2 | exempt | Disabled controls are exempt. |
@@ -203,18 +205,18 @@ Tabular numbers: there is no `tabular-nums` usage yet **(gap)**. Use `tabular-nu
 |---|---|---|
 | `rounded-control-sm` | card × 0.5 = 4.8px | options inside a control, badges, checks |
 | `rounded-control` | card × 0.75 = 7.2px | buttons, inputs, thumbs, menus, list rows, nav items, notes nested in a card |
-| `rounded-card` | 0.6rem = 9.6px | cards, tiles, dialogs, notices, wells, segmented track, lg buttons |
+| `rounded-card` | 0.6rem = 9.6px | cards, tiles, dialogs, notices, wells, lg buttons |
 | `rounded-card-lg` | card × 1.0 = 9.6px | large media tiles (game posters, collection art) |
-| `rounded-pill` | 9999px | dots, switches, progress, counters, tabs, job island |
+| `rounded-pill` | 9999px | dots, switches, progress, counters, tabs, segmented track and segments, job island |
 
-Nest radii: an inner element takes the next step down (Segmented: `rounded-card` track around `rounded-control` segments). A picture inside an activatable card (`CARD_TILE`, `rounded-card-lg` with `p-3`) is `rounded-control-sm`: outer radius minus the padding is below zero, so it takes the smallest step rather than the card's radius. Components use no raw `rounded-sm..3xl/full`.
+Nest radii: inner radius = outer radius − padding; when that is off the scale, the inner element takes the next step down. Segmented is a `rounded-pill` track (`p-1`) around `rounded-pill` segments: a pill minus the padding is still a pill, so the corners are exactly concentric. A picture inside an activatable card (`CARD_TILE`, `rounded-card-lg` with `p-3`) is `rounded-control-sm`: outer radius minus the padding is below zero, so it takes the smallest step rather than the card's radius. A picture in a dialog body (Browse details) is `rounded-control`, one step below the dialog's `rounded-card`. Components use no raw `rounded-sm..3xl/full`.
 
 ### Opacity
 
 | Token | Value | Use |
 |---|---|---|
 | `opacity-disabled` | 0.45 | disabled and `aria-disabled` controls (base layer) |
-| `opacity-stale` | 0.6 | content kept on screen while its replacement loads (Browse's previous page during the skeleton delay); pair with `inert` |
+| `opacity-stale` | 0.6 | content kept on screen but not actionable: Browse's previous page during the skeleton delay (pair with `inert`), and a result tile that cannot open (no Nexus id; `aria-disabled`). Lighter than `opacity-disabled` so the badge saying why stays readable |
 | `--opacity-grain` | 0.035 | film grain (`body::after`) |
 
 ### Depth: surface steps (chosen)
@@ -278,7 +280,7 @@ Hit area: icon buttons are `size-control` (48px). Any icon control is at least `
 - Animations: `animate-rise` (view and list entrance, 4px), `animate-fade` (scrim), `animate-pop` (dialog, 16px + scale .97), `animate-island` (toasts and job island, 24px, 240ms), `animate-breathe` (live status dot, 2.8s loop), `animate-bar` (job bars, 0.9s loop).
 - Stagger: `.stagger` children delay by `--stagger-step` (15ms), capped at 7 steps. Browse's results grid uses it.
 - Loading delay: a load replaces what is on screen with skeletons only after 300ms (the `slow` step, `SKELETON_DELAY_MS` in `views/Browse.tsx`). Until then the previous content stays up at `opacity-stale`, `inert`.
-- Press: `active:translate-y-px active:scale-98` on buttons and tabs.
+- Press: `active:translate-y-px active:scale-98` on buttons, `active:scale-98` on tabs. Activatable cards (`CARD_TILE`) use `translate-y-px scale-99`: at 98 a ~300px card's edges would move ~3px. Transform only, so nothing reflows; under reduced motion the press applies without the transition, like buttons.
 - The highlight never animates. `html[data-input] *` limits transitions to transform, translate, scale, rotate and opacity, so the white fill snaps on and off.
 - Reduced motion: a global `@media (prefers-reduced-motion: reduce)` rule sets animation and transition durations to 0.01ms. Skeleton pulse uses `motion-safe:animate-pulse`. The tab pill uses `motion-reduce:transition-none`.
 
@@ -310,7 +312,7 @@ Controls are sized for gamepad and touch as well as the mouse.
 Shared states for every interactive component:
 - **Hover** (pointer, `@media (hover: hover)`): the white highlight (`--color-focus` fill, `--color-focus-ink` text). It applies to `button`, `a[href]`, `[role=option]` and `li[tabindex]`, and only to the innermost hovered control.
 - **Focus** (keyboard or gamepad, `html[data-input="nav"] :focus`): the same white highlight. The outline stays transparent and is drawn only in forced-colors mode. Text fields show the highlight on nav focus only.
-- **Active**: `translate-y-px scale-98`.
+- **Active**: `translate-y-px scale-98` (cards: `scale-99`, see `CARD_TILE`).
 - **Disabled**: native `disabled` or `aria-disabled="true"` gives `opacity: var(--opacity-disabled)` (0.45), `cursor: not-allowed` and no highlight.
 - **Busy/loading**: `aria-busy` + `aria-disabled`. The control stays focusable and clicks are ignored. A spinner (`CircleNotchIcon` 16 bold `animate-spin`) replaces the leading icon.
 - Muted text inside the highlight switches to `--color-focus-ink-muted`. A control can keep its tone with `--focus-text`.
@@ -322,7 +324,7 @@ Shared states for every interactive component:
 | `primary` | `bg-accent-400 text-accent-950 font-semibold` | accent-700 |
 | `default` | `bg-fill-2 text-zinc-100 border-hairline` | focus-ink |
 | `danger` | `bg-rose-500/15 text-rose-200`, transparent border | rose-700 |
-| `ghost` | `text-zinc-300`; when `aria-pressed`: `bg-fill-3 text-zinc-50` | focus-ink |
+| `ghost` | `text-zinc-300` (no pressed look of its own; Segmented adds its selected style) | focus-ink |
 
 | Size | Height | Padding / text | Radius |
 |---|---|---|---|
@@ -340,7 +342,7 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 
 ### Input: TextField, SearchField (`.input`)
 
-- `.input`: `min-h-control rounded-control border-line bg-ink px-3.5 text-lead text-zinc-100`, placeholder zinc-500, `focus:bg-ink-3`.
+- `.input`: `min-h-control rounded-control border-line-control bg-ink px-3.5 text-lead text-zinc-100`, `placeholder:text-dim` (lighter than the zinc-100 text, AA on ink and ink-3), `focus:bg-ink-3`. The edge stays `--color-line-control` under the white highlight (the inset fill paints inside the border).
 - Label above in `text-label font-medium text-zinc-300` (`hideLabel` makes it `sr-only`). Helper text in `text-label text-dim`.
 - Error: `aria-invalid`, plus `<p class="text-label text-rose-300">` linked through `aria-describedby`.
 - SearchField: `role=search` form, `w-96`, `MagnifyingGlassIcon` 18 at `left-3.5`, `pl-10`. Enter submits when `onSubmit` is set; without it the field filters as you type.
@@ -372,8 +374,10 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 
 ### Segmented (`controls/Segmented.tsx`)
 
-- An eyebrow label, then a `rounded-card border-hairline bg-ink p-1` track holding `ghost sm` buttons with `aria-pressed`.
-- Pressed: the selected-tab look (`bg-accent-400/15 text-accent-200`) plus a 1px inset `outline-accent-600` edge (`-outline-offset-1`) so the state reads at ≥3:1 against the track. Under the highlight the text stays accent-700 (`--focus-text`) and the edge stays.
+- An eyebrow label, then a `rounded-pill border-hairline bg-ink p-1 gap-1` track holding `ghost sm` buttons with `aria-pressed` and `rounded-pill` (classes in `SEGMENT`, `Segmented.tsx`). The 4px gap shows between a lit segment and its neighbour.
+- Selected: one solid thumb in the Overview Play button's green, `bg-accent-400 text-accent-950` with `--focus-text: accent-700` (the `primary` Button tone's colours; a test keeps the two in step). The fill alone is 10.3:1 against the ink track and the unselected segments, text 8.5:1. Unlike Play it stays `font-medium`, so the label width does not change as the selection moves. It shares the accent with the selected tab (same hue, accent text under the highlight) but is solid rather than a tint: a filter value, not a place.
+- A `outline-2 -outline-offset-2 outline-accent-400` rim matches the fill, so it is invisible at rest. Under the highlight (an inset box-shadow, which an outline does not replace; no `ring-*`, which would) the rim turns accent-700 (`highlighted:outline-accent-700`; accent-400 on the white would be 1.7:1) and the text stays accent-700 (`--focus-text`), both 5.2:1, so selected + highlighted differs from highlighted by shape and text, not hue alone.
+- States: default (`text-zinc-300` on the track); hover and nav focus on an unselected segment (the white highlight, focus-ink text); selected (accent-400 thumb); selected + hover or focus (white fill, accent-700 rim and text); active (the button press, `translate-y-px scale-98`); disabled/busy: not exposed by the API (the Button styles apply if added). The thumb snaps between segments (colours never animate, see Motion).
 - Exception: Browse's Sort is a `Select inline`, not a third Segmented. Show + Created + Sort as segments need about 1060px; the card row has about 910px at the 1024px minimum window, so it would wrap.
 
 ### Badge (`display/Badge.tsx`)
@@ -391,7 +395,8 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 - Shell: `CARD_SHELL` = `rounded-card border-hairline bg-ink-2`. Sections are split by `divide-hairline`, with `p-section` padding.
 - Header outside the shell: `CARD_TITLE` (`text-title font-medium tracking-tight text-zinc-50`) plus `MUTED_NOTE` intro plus actions. `inset` puts an eyebrow title inside the shell instead.
 - `Row`: title (`text-body text-zinc-100`) and description on the left, controls on the right, wrapping when narrow.
-- Activatable card (`CARD_TILE`): the whole `<button>` is one control with `rounded-card-lg`, and it takes the highlight. Padding is per use: Browse tiles `p-3` (vertical tiles `pb-4`), game tiles `p-2.5 pb-3.5` (legacy, see Drift). Browse tiles are named by their title (`aria-labelledby`) and described by byline, stats and status badges (`aria-describedby`), never an `aria-label`.
+- Activatable card (`CARD_TILE`): the whole `<button>` is one control with `rounded-card-lg`, and it takes the highlight. Padding is per use: Browse tiles `p-3` (vertical tiles `pb-4`), game tiles `p-2.5 pb-3.5` (legacy, see Drift). The text column sits `px-1` in from the picture's edge on both (a 4px optical inset). Browse tiles are named by their title (`aria-labelledby`) and described by byline, stats and status badges (`aria-describedby`), never an `aria-label`.
+  - States: rest; hover and nav focus (the white highlight); active/pressed `enabled:not-aria-disabled:active:translate-y-px scale-99` (transform only; the highlight stays on while pressed); inert (Browse's dimmed `<div aria-disabled>` at `opacity-stale`): no highlight and no press. Gamepad A activates by `click()` without `:active`, so there is no press there, as with buttons.
 
 ```tsx
 <Card title="Deployment" intro="How mods reach the game folder.">
@@ -436,7 +441,7 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 
 ### Skeleton (`browse/Tile.tsx`, `TileSkeleton`)
 
-- Bones: `rounded-control bg-fill-2 motion-safe:animate-pulse`, laid out like the real tile. `aria-hidden`. Shown only on an uncached fetch, and only after the 300ms loading delay (see Motion).
+- Bones: `rounded-control-sm bg-fill-2 motion-safe:animate-pulse` (the picture's radius), laid out like the real tile. `aria-hidden`. Shown only on an uncached fetch, and only after the 300ms loading delay (see Motion).
 - Count: as many as the page will hold when the total is known from another page of the same filters (`min(PAGE_SIZE, total − first)`), else a full page.
 
 ### Progress (`<progress>`, base layer)
@@ -499,14 +504,13 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 | `ease-[cubic-bezier(0.16,1,0.3,1)]` | 1 | Tabs | `ease-spring` (same curve, tokenized) |
 | `duration-150` (raw) | 2 | various (`CARD_TILE`'s `duration-200` fixed) | `duration-fast` |
 | `animate-island` 240ms, `animate-rise` 140ms, `animate-fade` 120ms | n/a | `@theme` | 200 / 100 / 100 on the motion scale |
-| Icon `size={13}` | 4 | BrowseDetails (mod tile stats), Requirements | 12 |
+| Icon `size={13}` | 1 | Requirements (BrowseDetails mod tile stats fixed) | 12 |
 | Icon `size={15}` | 16 | Select check, Games, dialogs (Browse pager fixed) | 16 |
 | Icon `size={17}` / `{19}` | 5 / 2 | various | 16 / 20 |
 | Icon `size={18}` | 7 | Notice, SearchField | 20 (or 16 inline) |
-| Half-step spacing `*-0.5/1.5/2.5/3.5` | 20 / 21 / 14 / 10 | throughout (e.g. `px-3.5`, `p-2.5`, `mt-1.5`; Games tile `p-2.5 pb-3.5`, Browse tiles moved to `p-3 pb-4`) | nearest 4px step; `px-3.5` on `.input` and `sm` buttons is a deliberate legacy match |
+| Half-step spacing `*-0.5/1.5/2.5/3.5` | 20 / 21 / 14 / 10 | throughout (e.g. `px-3.5`, `p-2.5`, `mt-1.5`; Games tile `p-2.5 pb-3.5`, Browse tiles moved to `p-3 pb-4` and their text inset to `px-1`) | nearest 4px step; `px-3.5` on `.input` and `sm` buttons is a deliberate legacy match |
 | Radii 4.8 / 7.2 / 9.6px | n/a | `--radius-card: 0.6rem` and multiples | 4 / 8 / 8–12 on a 4px grid. `card-lg` equals `card` (×1.0), so the step is redundant. |
 | `--spacing-rail: 3px` | n/a | job bars | 4 (or keep as a hairline exception) |
 | `border-white/5`, `/6`, `/8`, `/10`, `/15`, `bg-white/8` | 5, 1, 1, 1, 1, 1 | App header, GameRepair, Settings, Notice, JobIsland | `border-hairline` (5%), `border-line` (8%), `border-line-strong` (10%), `bg-fill-3` |
 | `text-emerald-300`, `text-sky-300` | 4, 5 | `rich/bbcode.tsx` colour map | `text-accent-300`; sky has no token (BBCode content colour, acceptable) |
 | Primitive neutrals in components (`text-zinc-400`, `text-zinc-300`, `text-zinc-100`) | n/a | throughout (Browse tiles moved to `text-fg` / `text-fg-2`) | `text-fg` (zinc-100), `text-fg-2` (zinc-400); zinc-300 has no alias yet |
-| Placeholder zinc-500 | 1 | `.input` | `--color-dim` (fixes the 4.05 / 3.54 contrast) |
