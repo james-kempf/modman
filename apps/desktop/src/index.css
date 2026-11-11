@@ -27,6 +27,9 @@
     }
   }
 }
+/* Controller mode (html[data-pad], nav/modality.ts): set by gamepad input, cleared by keyboard
+ * nav keys or the mouse. For controller-only hints, e.g. `hidden pad:inline-flex`. */
+@custom-variant pad (html[data-pad] &);
 @custom-variant in-highlight {
   html[data-input="nav"] :focus & {
     @slot;
@@ -67,6 +70,8 @@
    *   --radius-pill            dots, switches, progress, counters, job island
    * Spacing / sizing
    *   --spacing-section        padding of every card section
+   *   --spacing-control-xs     compact pill height (tab bars: wide pills, a
+   *                            32px-tall target; LB/RB also switch them)
    *   --spacing-control-sm     small control height (minimum touch target)
    *   --spacing-control        control height and icon-button size
    *   --spacing-control-lg     large control height
@@ -76,7 +81,6 @@
    *   --spacing-icon           switch knob, radio/check mark
    *   --spacing-dot            status dot
    *   --spacing-rail           thin activity bars and their gaps
-   *   --spacing-sidebar        navigation sidebar width
    *   --container-content      page content max width
    *   --container-prose        long text measure
    *   --container-prose-sm     short text measure (empty states)
@@ -124,6 +128,7 @@
   --radius-pill: 9999px;
 
   --spacing-section: 1rem;
+  --spacing-control-xs: 2rem;
   --spacing-control-sm: 2.75rem;
   --spacing-control: 3rem;
   --spacing-control-lg: 3.5rem;
@@ -133,7 +138,6 @@
   --spacing-icon: 1.25rem;
   --spacing-dot: 0.625rem;
   --spacing-rail: 3px;
-  --spacing-sidebar: 268px;
   --container-content: 1400px;
   --container-prose: 65ch;
   --container-prose-sm: 52ch;

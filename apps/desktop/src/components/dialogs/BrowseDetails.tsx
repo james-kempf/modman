@@ -13,15 +13,13 @@ import { errMsg } from "../../app/bridge";
 import * as ipc from "../../ipc/commands";
 import type { CollectionHit, RevisionMod, SearchHit } from "../../ipc/types";
 import { DownloadSimpleIcon, HardDrivesIcon, ThumbsUpIcon } from "@phosphor-icons/react";
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { TAB_EVENT, type TabEventDetail } from "../../nav/actions";
-import { focusables } from "../../nav/spatial";
+import { useState, type ReactNode } from "react";
 import { useBusy } from "../../app/run";
 import { installKey } from "../../views/Requirements";
 import { ModActions } from "../browse/ModActions";
 import { InstalledBadge, MOD_GRID, MOD_PICTURE, Stat, Tile, WorkingBadge, compact, useDetails } from "../browse/Tile";
 import { About } from "../rich/About";
-import { Badge, Button, ErrorNote, Fact, Picture, bytes } from "../ui";
+import { Badge, Button, ErrorNote, Fact, PadGlyph, Picture, Tabs, bytes } from "../ui";
 import { Dialog } from "./Dialog";
 
 const num = (n: number | null) => (n === null ? "?" : n.toLocaleString());
@@ -127,95 +125,9 @@ const MOD_TABS = [
   { value: "about", label: "About" },
 ] as const;
 
-/**
- * The dialog's tabs, full width with an underline on the selected one, and the selected tab's panel. Tabs are
- * not focus stops (tabindex -1: spatial nav and Tab skip them): LB/RB (the dialog's TAB_EVENT) or a click
- * switch them, wrapping like the app's view tabs. Focus inside the old panel moves into the new one.
- */
-function DialogTabs<T extends string>({
-  label,
-  tabs,
-  value,
-  onChange,
-  children,
-}: {
-  label: string;
-  tabs: readonly { value: T; label: string }[];
-  value: T;
-  onChange: (t: T) => void;
-  /** The selected tab's panel content. */
-  children: ReactNode;
-}) {
-  const id = useId();
-  const list = useRef<HTMLDivElement>(null);
-  const panel = useRef<HTMLDivElement>(null);
-  const refocus = useRef(false);
-  const latest = useRef({ tabs, value, onChange });
-  latest.current = { tabs, value, onChange };
-  const [select] = useState(() => (t: T) => {
-    const cur = latest.current;
-    if (t === cur.value) return;
-    // The focused control goes away with its panel: focus the new panel once it is rendered.
-    refocus.current = !!panel.current?.contains(document.activeElement);
-    cur.onChange(t);
-  });
-
-  useEffect(() => {
-    const scope = list.current?.closest<HTMLElement>("[data-nav-scope]");
-    if (!scope) return;
-    const onTab = (e: Event) => {
-      const { tabs: all, value: cur } = latest.current;
-      const i = all.findIndex((t) => t.value === cur);
-      const { delta } = (e as CustomEvent<TabEventDetail>).detail;
-      select(all[(i + delta + all.length) % all.length].value);
-    };
-    scope.addEventListener(TAB_EVENT, onTab);
-    return () => scope.removeEventListener(TAB_EVENT, onTab);
-  }, [select]);
-
-  useEffect(() => {
-    if (!refocus.current) return;
-    refocus.current = false;
-    const scope = list.current?.closest<HTMLElement>("[data-nav-scope]");
-    const target = (panel.current && focusables(panel.current)[0]) ?? scope?.querySelector<HTMLElement>("[data-autofocus]");
-    target?.focus();
-  }, [value]);
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div ref={list} role="tablist" aria-label={label} className="flex w-full shrink-0 border-b border-hairline">
-        {tabs.map((t) => (
-          <button
-            key={t.value}
-            type="button"
-            role="tab"
-            tabIndex={-1}
-            id={`${id}-tab-${t.value}`}
-            aria-selected={t.value === value}
-            aria-controls={`${id}-panel-${t.value}`}
-            // No focus on click either: the tabs stay out of the focus order.
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => select(t.value)}
-            className="-mb-px min-w-0 flex-1 truncate border-b-2 border-transparent px-3 py-3 text-body font-medium text-zinc-400 aria-selected:border-accent-400 aria-selected:text-zinc-50"
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-      {/* The tab's contents are the only part that scrolls (the tabs, title and actions stay in place). */}
-      <div
-        ref={panel}
-        data-scroll-pane
-        role="tabpanel"
-        id={`${id}-panel-${value}`}
-        aria-labelledby={`${id}-tab-${value}`}
-        className="mt-5 min-h-0 flex-1 overflow-y-auto overscroll-contain"
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
+// LB/RB switch the dialog tabs too (TAB_EVENT): the same controller-mode keycaps as the view bar.
+const LB = <PadGlyph>LB</PadGlyph>;
+const RB = <PadGlyph>RB</PadGlyph>;
 
 /** The short summary under the facts, when there is one (the full description is the About tab). */
 function Summary({ text }: { text: string | null | undefined }) {
@@ -255,7 +167,7 @@ export function ModDetailsDialog({
       fixedHeight
       footer={<ActionRow actions={<ModActions game={game} m={m} onAccepted={onClose} />} onClose={onClose} />}
     >
-      <DialogTabs label="Mod" tabs={MOD_TABS} value={tab} onChange={setTab}>
+      <Tabs label="Mod" tabs={MOD_TABS} value={tab} onChange={setTab} start={LB} end={RB}>
         {tab === "details" ? (
           <>
             <Picture url={m.thumbnailUrl} name={name} className="aspect-video w-full max-w-md rounded-card" />
@@ -274,7 +186,7 @@ export function ModDetailsDialog({
         ) : (
           <About game={game} target={m.modId !== null ? { kind: "mod", mod_id: m.modId } : null} summary={m.summary} />
         )}
-      </DialogTabs>
+      </Tabs>
     </Dialog>
   );
 }
@@ -304,7 +216,7 @@ export function CollectionDetailsDialog({ game, c, onClose, actions, returnFocus
       fixedHeight
       footer={<ActionRow actions={actions} onClose={onClose} />}
     >
-      <DialogTabs label="Collection" tabs={tabs} value={tab} onChange={setTab}>
+      <Tabs label="Collection" tabs={tabs} value={tab} onChange={setTab} start={LB} end={RB}>
         {tab === "details" ? (
           <>
             {/* Picture left, facts right; stacked below sm. */}
@@ -349,7 +261,7 @@ export function CollectionDetailsDialog({ game, c, onClose, actions, returnFocus
         ) : (
           !q.isPending && !q.isError && <p className="text-label text-zinc-400">No mods listed for this revision.</p>
         )}
-      </DialogTabs>
+      </Tabs>
       {q.isPending && <p className="mt-4 text-label text-zinc-400">Loading revision details…</p>}
       {q.isError && (
         <div className="mt-4">

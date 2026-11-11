@@ -56,7 +56,7 @@ const collInfo = (installed: { revision: number } | null) => ({
 afterEach(() => vi.restoreAllMocks());
 
 describe("CT2 D01 dialogs", () => {
-  // Fails when the dialog renders inside the view (a transformed ancestor traps its fixed backdrop) and the sidebar stays live.
+  // Fails when the dialog renders inside the view (a transformed ancestor traps its fixed backdrop) and the header stays live.
   it("render in a portal on <body>, fixed, and make the app inert", async () => {
     const m = mod({ name: "SkyUI" });
     const { user } = await open("mods", { mods_list: () => ({ mods: [m], changed_since_deploy: false }), mod_detail: () => ({ mod: m, collections: [], fomod: [], wins: 0, loses: 0, url: null }) });
@@ -107,7 +107,7 @@ describe("CT2 D02/D04 deploy-due per game", () => {
   });
 
   // D02: fails when the backend's per-game changed_since_deploy is not used for the deploy state.
-  // U02: deploying is offered on the Overview only (no sidebar "Deploy changes").
+  // U02: deploying is offered on the Overview only (no header "Deploy changes").
   it("follows the game's changed_since_deploy", async () => {
     await open("overview", { mods_list: () => ({ mods: [], changed_since_deploy: true }) });
     expect(await within(main()).findByText("Changes waiting to be deployed")).toBeInTheDocument();
@@ -145,8 +145,8 @@ describe("CT2 D04 deploy progress", () => {
 
 describe("CT2 D03/D07 collection install", () => {
   // D03: fails when a collection install with deploy off does not offer the deploy (CollectionResult has no needs_deploy).
-  // U02: the deploy now due is recorded (Overview, game tile) without a notice or a sidebar button.
-  it("deploy off: marks the game out of sync, with no notice or sidebar button", async () => {
+  // U02: the deploy now due is recorded (Overview, game tile) without a notice or a header button.
+  it("deploy off: marks the game out of sync, with no notice or header button", async () => {
     let dirty = false;
     const { user } = await open("collections", {
       collection_info: () => collInfo(null),

@@ -90,22 +90,35 @@ describe("spatial navigation", () => {
   });
 });
 
-/** Settings at 1280x800 (signed out, no key typed) as measured by T16; `dy` = main scroll. */
-function settings(dy = 0) {
-  const nav = document.createElement("nav");
-  nav.setAttribute("data-nav-rail", "");
+/** The app's top tab bar (a roving group in the shell <header>); `selected` holds the tabindex=0 stop. */
+function topBar(selected = 7) {
+  const header = document.createElement("header");
+  const list = document.createElement("div");
+  list.setAttribute("role", "tablist");
+  list.setAttribute("data-nav-roving", "");
+  header.appendChild(list);
   const main = document.createElement("main");
-  document.body.append(nav, main);
-  const tabs = ["overview", "mods", "install", "collections", "requirements", "activity", "settings"].map((t, i) =>
-    btn(t, 12, 68 + 52 * i, 199, 48, nav),
-  );
+  document.body.append(header, main);
+  const quit = btn("Quit", 1180, 12, 80, 48, header);
+  const tabs = ["games", "overview", "browse", "mods", "collections", "requirements", "activity", "settings"].map((t, i) => {
+    const b = btn(t, 24 + 130 * i, 68, 120, 48, list);
+    b.setAttribute("role", "tab");
+    b.tabIndex = i === selected ? 0 : -1;
+    return b;
+  });
+  return { header, main, quit, tabs };
+}
+
+/** Settings at 1280x800 (signed out, no key typed) under the top bar; `dy` = main scroll. */
+function settings(dy = 0) {
+  const { main, tabs } = topBar();
   return {
     tabs,
-    input: btn("key", 281, 313 - dy, 942, 48, main, "input"),
-    paste: btn("Paste", 281, 373 - dy, 83, 48, main),
-    keyboard: btn("Keyboard", 376, 373 - dy, 114, 48, main),
-    toggle: btn("Auto-update off", 1022, 495 - dy, 201, 48, main),
-    config: btn("config", 281, 919 - dy, 853, 48, main, "input"),
+    input: btn("key", 40, 313 - dy, 942, 48, main, "input"),
+    paste: btn("Paste", 40, 373 - dy, 83, 48, main),
+    keyboard: btn("Keyboard", 135, 373 - dy, 114, 48, main),
+    toggle: btn("Auto-update off", 781, 495 - dy, 201, 48, main),
+    config: btn("config", 40, 919 - dy, 853, 48, main, "input"),
   };
 }
 
@@ -114,19 +127,90 @@ describe("spatial scoring on the Settings layout (T16 F2a/F3)", () => {
     const s = settings();
     expect(findNext(s.keyboard, "right")).toBe(s.toggle);
   });
-  it("Up from a scrolled config field reaches the toggle, not the tab rail", () => {
+  it("Up from a scrolled config field reaches the offscreen toggle, not the tab bar", () => {
     const s = settings(511);
     expect(findNext(s.config, "up")).toBe(s.toggle);
   });
-  it("Down from Keyboard/Paste stays in content instead of jumping to the rail", () => {
+  it("Down from Keyboard/Paste stays in content", () => {
     const s = settings();
     expect(findNext(s.keyboard, "down")).toBe(s.config);
     expect(findNext(s.paste, "down")).toBe(s.config);
   });
-  it("Down still moves along the rail and the rail is left horizontally", () => {
-    const s = settings();
-    expect(findNext(s.tabs[5], "down")).toBe(s.tabs[6]);
-    expect(findNext(s.tabs[6], "right")).toBe(s.paste);
+});
+
+describe("top tab bar (roving group)", () => {
+  // Fails when the roving tabs (tabindex=-1 except the selected one) drop out of spatial nav.
+  it("Left/Right move between tabs (past the tabindex=-1 ones) and on to the header controls", () => {
+    const { quit, tabs } = topBar(0);
+    expect(findNext(tabs[0], "right")).toBe(tabs[1]);
+    expect(findNext(tabs[3], "left")).toBe(tabs[2]);
+    // Past the last tab: the header row's controls.
+    expect(findNext(tabs[7], "right")).toBe(quit);
+  });
+
+  // Fails when Up from the view picks the tab above it instead of the selected one (APG: enter at the stop).
+  it("Up from the top of the view lands on the selected tab, not the nearest one", () => {
+    const { main, tabs } = topBar(5);
+    const first = btn("first", 24, 160, 120, 48, main);
+    btn("second", 24, 240, 120, 48, main);
+    expect(findNext(first, "up")).toBe(tabs[5]);
+  });
+
+  it("Down from the bar enters the view; Up from the bar reaches the header row", () => {
+    const { main, quit, tabs } = topBar(2);
+    const first = btn("first", 24, 160, 120, 48, main);
+    expect(findNext(tabs[2], "down")).toBe(first);
+    expect(findNext(tabs[2], "up")).toBe(quit);
+    // Into the bar from the header row: the selected tab, too.
+    expect(findNext(quit, "down")).toBe(tabs[2]);
+  });
+
+  // Fails when a view's own <header> is a separate region from <main>: scrolled above the viewport, its
+  // controls lose to the shell's tabs and Up skips them; or when either header traps Up/Down.
+  it("a view's own <header> next to the shell <header> traps neither Up nor Down", () => {
+    // The selected tab sits right above the view's controls (in their beam).
+    const { main, tabs } = topBar(0);
+    const viewHeader = document.createElement("header");
+    main.appendChild(viewHeader);
+    let dy = 300;
+    const at = (el: HTMLButtonElement, y: number) => {
+      const r = el.getBoundingClientRect();
+      el.getBoundingClientRect = () => ({ ...r, top: y - dy, bottom: y - dy + 48, y: y - dy }) as DOMRect;
+    };
+    const action = btn("view action", 24, 0, 120, 48, viewHeader);
+    const content = btn("content", 24, 0, 120, 48, main);
+    at(action, 140);
+    at(content, 440);
+    // Main scrolled: the view header sits above the viewport, behind the shell bar.
+    expect(findNext(content, "up")).toBe(action);
+    // Scrolled back (focus scrolls it into view).
+    dy = 0;
+    expect(findNext(action, "up")).toBe(tabs[0]);
+    expect(findNext(tabs[0], "down")).toBe(action);
+    expect(findNext(action, "down")).toBe(content);
+    expect(findNext(content, "up")).toBe(action);
+  });
+
+  // Fails when Up/Down in the layout-free fallback (jsdom) walk the bar instead of leaving it.
+  it("without layout, Up/Down leave the bar and entering it lands on the selected tab", () => {
+    const header = document.createElement("header");
+    const list = document.createElement("div");
+    list.setAttribute("data-nav-roving", "");
+    header.appendChild(list);
+    const main = document.createElement("main");
+    document.body.append(header, main);
+    const tabs = [0, 1, 2].map((i) => {
+      const b = document.createElement("button");
+      b.setAttribute("role", "tab");
+      b.tabIndex = i === 1 ? 0 : -1;
+      list.appendChild(b);
+      return b;
+    });
+    const inView = document.createElement("button");
+    main.appendChild(inView);
+    expect(findNext(tabs[1], "down")).toBe(inView);
+    expect(findNext(tabs[0], "right")).toBe(tabs[1]);
+    expect(findNext(inView, "up")).toBe(tabs[1]);
   });
 });
 

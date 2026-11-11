@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Shell in the legacy layout: left sidebar (brand + active game header, the
-// tab rail with icons, account), the current view (the Games library first),
-// and a bottom stack with notices and the job island. Prompt dialogs and the on-screen keyboard sit
-// on top. Installs keyboard + gamepad nav.
+// Shell: a two-row top header (row 1: brand, active game, deploy progress, account, Quit; row 2: the
+// view tabs, LB/RB glyphs at their ends in controller mode), the current view (the Games library
+// first) scrolling in <main> below it, and a bottom stack with notices and the job island. Prompt
+// dialogs and the on-screen keyboard sit on top. Installs keyboard + gamepad nav.
 
 import {
   BooksIcon,
@@ -23,9 +23,9 @@ import { ViewBoundary } from "../components/shell/ErrorBoundary";
 import { OskHost } from "../components/shell/Osk";
 import { PromptHost } from "../components/dialogs/PromptDialog";
 import { LoaderConsentHost } from "../components/loaders/LoaderConsent";
-import { Button, JobIsland, Notice, cx } from "../components/ui";
+import { Button, JobIsland, Notice, PadGlyph, Tabs, cx, type TabItem } from "../components/ui";
 import * as ipc from "../ipc/commands";
-import { installKeyboardNav, performNav } from "../nav/actions";
+import { focusCurrentTab, installKeyboardNav, performNav } from "../nav/actions";
 import { startGamepadLoop } from "../nav/gamepad";
 import { installModalityTracking } from "../nav/modality";
 import { installFocusRecovery } from "../nav/spatial";
@@ -53,16 +53,21 @@ const VIEW: Record<ViewId, () => JSX.Element> = {
   settings: Settings,
 };
 
+// The selected tab's icon takes the accent (the tab is the Tabs `group`); dark on the white focus highlight.
+const ICON_CLASS = "shrink-0 transition-colors duration-150 group-aria-selected:text-accent-300 in-highlight:text-accent-700";
 const ICON: Record<ViewId, ReactNode> = {
-  games: <GameControllerIcon aria-hidden size={20} weight="duotone" />,
-  overview: <SquaresFourIcon aria-hidden size={20} weight="duotone" />,
-  mods: <StackIcon aria-hidden size={20} weight="duotone" />,
-  browse: <CompassIcon aria-hidden size={20} weight="duotone" />,
-  collections: <BooksIcon aria-hidden size={20} weight="duotone" />,
-  requirements: <PuzzlePieceIcon aria-hidden size={20} weight="duotone" />,
-  activity: <TerminalWindowIcon aria-hidden size={20} weight="duotone" />,
-  settings: <GearSixIcon aria-hidden size={20} weight="duotone" />,
+  games: <GameControllerIcon aria-hidden size={20} weight="duotone" className={ICON_CLASS} />,
+  overview: <SquaresFourIcon aria-hidden size={20} weight="duotone" className={ICON_CLASS} />,
+  mods: <StackIcon aria-hidden size={20} weight="duotone" className={ICON_CLASS} />,
+  browse: <CompassIcon aria-hidden size={20} weight="duotone" className={ICON_CLASS} />,
+  collections: <BooksIcon aria-hidden size={20} weight="duotone" className={ICON_CLASS} />,
+  requirements: <PuzzlePieceIcon aria-hidden size={20} weight="duotone" className={ICON_CLASS} />,
+  activity: <TerminalWindowIcon aria-hidden size={20} weight="duotone" className={ICON_CLASS} />,
+  settings: <GearSixIcon aria-hidden size={20} weight="duotone" className={ICON_CLASS} />,
 };
+
+/** id of <main>, the element the view tabs control. */
+const VIEW_ID = "view";
 
 /**
  * Bottom padding of the view: with nothing in the bottom stack it equals
@@ -92,8 +97,8 @@ export function App() {
     const stopPad = startGamepadLoop((a) => performNav(a));
     const stopRecovery = installFocusRecovery();
     const stopModality = installModalityTracking();
-    // Start on the tab rail so arrows/D-pad work right away.
-    document.querySelector<HTMLElement>("[data-tab][aria-current='page']")?.focus();
+    // Start on the selected view tab so arrows/D-pad work right away.
+    focusCurrentTab();
     return () => {
       stopKeys();
       stopPad();
@@ -109,12 +114,12 @@ export function App() {
   return (
     <>
       {/* Dialogs render in a portal on <body> and make everything else inert while open. */}
-      <div className="flex h-full">
-        <Sidebar />
+      <div className="flex h-full flex-col">
+        <TopBar />
         {/* The Overview's hero art sits behind the scrolling view, not in it: it stays put while the view scrolls. */}
         <div className="relative isolate min-h-0 min-w-0 flex-1">
           {view === "overview" && <HeroBackdrop />}
-          <main className={cx("relative h-full scroll-pt-32 overflow-y-auto", STACK_ROOM[stack] ?? STACK_ROOM[4])}>
+          <main id={VIEW_ID} className={cx("relative h-full scroll-pt-32 overflow-y-auto", STACK_ROOM[stack] ?? STACK_ROOM[4])}>
             {/* key: each view enters with the short legacy fade/rise. */}
             <div key={view} className="mx-auto w-full max-w-content animate-rise px-10 pt-10">
               <ViewBoundary name={VIEWS.find((v) => v.id === view)?.label ?? view}>
@@ -146,125 +151,112 @@ function Brand() {
   );
 }
 
-function Sidebar() {
+/**
+ * The app header, above (not in) the scrolling <main>, so it never scrolls away. Row 1: brand, the
+ * active game (picked in the Games view; plain text, the Games tab is the way to switch) and its deploy
+ * progress, the Nexus account, Quit. Row 2: the view tabs. Deploying is done from the Overview's
+ * Deployment card.
+ */
+function TopBar() {
   return (
-    // Scrolls by itself on short windows, so the app never grows past the viewport.
-    <aside
-      aria-label="Sidebar"
-      className="flex h-full min-h-0 w-sidebar shrink-0 flex-col overflow-y-auto border-r border-white/5 bg-ink"
-    >
-      <GameHeader />
-      <TabRail />
-      <div data-nav-rail className="mt-auto px-4 pb-4">
+    <header aria-label="App" className="shrink-0 border-b border-white/5 bg-ink">
+      <div className="flex min-w-0 items-center gap-4 px-6 pt-4 pb-2 lg:gap-6 lg:px-10">
+        <Brand />
+        <span aria-hidden className="h-8 w-px shrink-0 bg-hairline" />
+        <GameContext />
+        <AccountChip />
         <button
           type="button"
           onClick={() => void ipc.quitApp()}
-          className="flex min-h-12 w-full items-center gap-3 rounded-control px-3 text-left text-[14.5px] text-zinc-400 transition-colors duration-150"
+          className="inline-flex min-h-control shrink-0 items-center gap-2 rounded-control px-3 text-body text-zinc-400 transition-colors duration-150"
         >
           <PowerIcon aria-hidden size={20} />
-          <span className="flex-1">Quit</span>
+          <span>Quit</span>
         </button>
       </div>
-      <AccountFooter />
-    </aside>
-  );
-}
-
-/**
- * Brand + the active game's name (picked in the Games view; plain text, the
- * Games tab is the way to switch) and its deploy progress. Deploying is done
- * from the Overview's Deployment card. Pinned at the top of the scrolling
- * sidebar. Part of the rail for spatial navigation: Down from here reaches
- * the tabs, not the view.
- */
-function GameHeader() {
-  const { game, isLoading } = useActiveGame();
-  // Progress of a deploy of another game is not shown under this one (the job island shows it).
-  const progress = useUi((s) => (s.deployGame && s.deployGame !== game?.id ? null : s.deployProgress));
-  return (
-    <header className="sticky top-0 z-10 grid grid-cols-[minmax(0,1fr)] gap-5 bg-ink px-6 pt-6 pb-4">
-      <Brand />
-      <div data-nav-rail className="grid grid-cols-[minmax(0,1fr)] gap-2">
-        {isLoading ? (
-          <span className="text-body text-zinc-400">Loading…</span>
-        ) : game ? (
-          <span className="min-w-0 truncate text-title font-semibold tracking-tight text-zinc-100" title={game.name}>
-            {game.name}
-          </span>
-        ) : (
-          <span className="text-body text-zinc-400">No game selected</span>
-        )}
-        {progress && (
-          <span className="grid gap-1.5 pt-1 font-mono text-micro text-dim">
-            <progress aria-label="Deploy progress" max={progress.total || 1} value={progress.done} />
-            deploying {progress.done}/{progress.total}
-          </span>
-        )}
-      </div>
+      <ViewTabs />
     </header>
   );
 }
 
-function TabRail() {
+function GameContext() {
+  const { game, isLoading } = useActiveGame();
+  // Progress of a deploy of another game is not shown under this one (the job island shows it).
+  const progress = useUi((s) => (s.deployGame && s.deployGame !== game?.id ? null : s.deployProgress));
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-4">
+      {isLoading ? (
+        <span className="text-body text-zinc-400">Loading…</span>
+      ) : game ? (
+        <span className="min-w-0 truncate text-lead font-semibold tracking-tight text-zinc-100" title={game.name}>
+          {game.name}
+        </span>
+      ) : (
+        <span className="text-body text-zinc-400">No game selected</span>
+      )}
+      {progress && (
+        <span className="flex shrink-0 items-center gap-2 font-mono text-micro whitespace-nowrap text-dim">
+          <progress aria-label="Deploy progress" className="w-24" max={progress.total || 1} value={progress.done} />
+          deploying {progress.done}/{progress.total}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function AccountChip() {
+  const q = useAccount();
+  const a = q.data;
+  if (q.isError) return <p className="max-w-56 shrink-0 text-label text-rose-300">Could not read the Nexus account. See Settings.</p>;
+  if (!a?.key_source) return <p className="max-w-56 shrink-0 text-label text-zinc-400">Not signed in to Nexus Mods. See Settings.</p>;
+  return (
+    <div className="flex max-w-56 min-w-0 shrink-0 items-center gap-3">
+      <div
+        aria-hidden
+        className="grid size-8 shrink-0 place-items-center rounded-control bg-accent-950 font-mono text-caption font-semibold text-accent-50"
+      >
+        {(a.user ?? "?").slice(0, 2).toUpperCase()}
+      </div>
+      <div className="min-w-0 leading-tight">
+        <div className="truncate text-[13.5px] text-zinc-200">{a.user ?? "Signed in"}</div>
+        <div className="font-mono text-[10.5px] text-dim">{a.premium ? "Premium" : "Free account"}</div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The view tabs: one line over the full width (tighter padding first, then a horizontal scroll on narrow
+ * windows). A roving-tabindex tablist: the selected tab is the stop; arrows/D-pad move between tabs,
+ * A/Enter/click activate; LB/RB and PageUp/PageDown select directly (performNav "tab").
+ */
+function ViewTabs() {
   const view = useUi((s) => s.view);
   const setView = useUi((s) => s.setView);
   const running = useUi((s) => Object.values(s.jobs).filter((j) => j.state === "started").length);
   const prompts = useUi((s) => s.prompts.length);
+  const tabs: TabItem<ViewId>[] = VIEWS.map((v) => ({
+    value: v.id,
+    label: v.label,
+    icon: ICON[v.id],
+    badge:
+      v.id === "activity" && running + prompts > 0 ? (
+        <span className="rounded-pill bg-accent-400 px-2 font-mono text-micro font-semibold text-accent-950">{running + prompts}</span>
+      ) : undefined,
+  }));
   return (
-    <nav aria-label="Views" data-nav-rail className="grid gap-0.5 px-4">
-      {VIEWS.map((v) => {
-        const on = v.id === view;
-        return (
-          <button
-            key={v.id}
-            type="button"
-            data-tab={v.id}
-            aria-current={on ? "page" : undefined}
-            onClick={() => setView(v.id)}
-            className={cx(
-              "flex min-h-12 w-full items-center gap-3 rounded-control px-3 text-left text-[14.5px] transition-colors duration-150",
-              on ? "bg-white/[0.07] text-zinc-50" : "text-zinc-400",
-            )}
-          >
-            <span className={cx("transition-colors duration-150", on && "text-accent-300 in-highlight:text-accent-700")}>{ICON[v.id]}</span>
-            <span className="flex-1">{v.label}</span>
-            {v.id === "activity" && running + prompts > 0 && (
-              <span className="rounded-pill bg-accent-400 px-2 font-mono text-micro font-semibold text-accent-950">
-                {running + prompts}
-              </span>
-            )}
-          </button>
-        );
-      })}
-    </nav>
-  );
-}
-
-function AccountFooter() {
-  const q = useAccount();
-  const a = q.data;
-  const signedIn = !!a?.key_source;
-  return (
-    <div className="grid gap-4 border-t border-white/5 px-6 py-5">
-      {q.isError ? (
-        <p className="text-label text-rose-300">Could not read the Nexus account. See Settings.</p>
-      ) : signedIn ? (
-        <div className="flex items-center gap-3">
-          <div
-            aria-hidden
-            className="grid size-9 place-items-center rounded-control bg-accent-950 font-mono text-caption font-semibold text-accent-50"
-          >
-            {(a?.user ?? "?").slice(0, 2).toUpperCase()}
-          </div>
-          <div className="min-w-0 leading-tight">
-            <div className="truncate text-[13.5px] text-zinc-200">{a?.user ?? "Signed in"}</div>
-            <div className="font-mono text-[10.5px] text-dim">{a?.premium ? "Premium" : "Free account"}</div>
-          </div>
-        </div>
-      ) : (
-        <p className="text-label text-zinc-400">Not signed in to Nexus Mods. See Settings.</p>
-      )}
-      <p className="font-mono text-[10.5px] leading-relaxed text-dim">LB/RB or PgUp/PgDn switch tabs · A/Enter select · B/Esc back</p>
+    // data-view-tabs = VIEW_TABS_ATTR: scopes the shell's tab lookups (nav/actions.ts) to these tabs.
+    <div data-view-tabs className="px-3 lg:px-7">
+      <Tabs
+        label="Views"
+        focusable
+        tabs={tabs}
+        value={view}
+        onChange={setView}
+        controls={VIEW_ID}
+        start={<PadGlyph>LB</PadGlyph>}
+        end={<PadGlyph>RB</PadGlyph>}
+      />
     </div>
   );
 }
@@ -299,7 +291,7 @@ function BottomStack({ island }: { island: JobEntry | null }) {
   const deploy = useDeploy();
   if (!notices.length && !island) return null;
   return (
-    <div className="pointer-events-none fixed inset-y-auto right-0 bottom-5 left-sidebar z-40 flex flex-col items-center gap-2 px-6">
+    <div className="pointer-events-none fixed inset-y-auto right-0 bottom-5 left-0 z-40 flex flex-col items-center gap-2 px-6">
       {notices.length > 0 && (
         <aside aria-label="Notices" aria-live="polite" className="grid w-full max-w-xl gap-2">
           {notices.map((n) => (

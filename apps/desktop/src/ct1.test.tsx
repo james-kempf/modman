@@ -62,13 +62,13 @@ describe("CT1 D01 Overview long names", () => {
 
 describe("CT1 D02 render errors", () => {
   // Fails when a throwing view unmounts the whole window (no error boundary).
-  it("a view that throws shows an error note with Try again; the sidebar stays", async () => {
+  it("a view that throws shows an error note with Try again; the view tabs stay", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const bad = { ...mod({ name: "Broken" }), collections: null as unknown as string[] };
     const mods = [bad];
     await open("mods", { mods_list: () => ({ mods, changed_since_deploy: false }) });
     expect(await screen.findByText(/This view hit an error/)).toBeInTheDocument();
-    expect(screen.getByRole("navigation", { name: "Views" })).toBeInTheDocument();
+    expect(screen.getByRole("tablist", { name: "Views" })).toBeInTheDocument();
     // The other views still work.
     act(() => useUi.getState().setView("overview"));
     expect(await within(main()).findByRole("heading", { level: 2, name: "Skyrim Special Edition" })).toBeInTheDocument();
@@ -312,23 +312,34 @@ describe("CT1 D07 deploy-due notice", () => {
 });
 
 describe("CT1 D08/D09/D11/D18 layout guards", () => {
-  // D08: fails when a long game name widens a library tile or the sidebar header instead of truncating.
-  it("long game names truncate in the library tiles and the sidebar header", async () => {
+  // D08: fails when a long game name widens a library tile or the app header instead of truncating.
+  it("long game names truncate in the library tiles and the app header", async () => {
     await open("games", {}, [game({ name: "x".repeat(120) }), experimentalGame({ active: false })]);
     const tile = await within(main()).findByRole("button", { name: "x".repeat(120) });
     expect(tile.className).toMatch(/\bmin-w-0\b/);
     expect(tile.closest("li")!.className).toMatch(/\bmin-w-0\b/);
     expect(within(tile).getByText("x".repeat(120)).className).toMatch(/\btruncate\b/);
-    const sidebar = screen.getByRole("complementary", { name: "Sidebar" });
-    expect(within(sidebar).getByText("x".repeat(120)).className).toMatch(/\btruncate\b/);
+    const header = screen.getByRole("banner", { name: "App" });
+    const name = within(header).getByText("x".repeat(120));
+    expect(name.className).toMatch(/\btruncate\b/);
+    expect(name.className).toMatch(/\bmin-w-0\b/);
+    expect(name.parentElement!.className).toMatch(/\bmin-w-0\b/);
   });
 
-  // D09: fails when the sidebar grows the page past the viewport on short windows.
-  it("sidebar scrolls internally", async () => {
+  // D09: fails when the header grows the page past the viewport on short windows, or scrolls with the view
+  // (<main> must stay the only scroll container), or the view tabs wrap instead of scrolling sideways.
+  it("header stays put above the scrolling <main>; the tabs keep one line", async () => {
     await open("overview");
-    const aside = screen.getByRole("complementary", { name: "Sidebar" });
-    expect(aside.className).toMatch(/\bmin-h-0\b/);
-    expect(aside.className).toMatch(/\boverflow-y-auto\b/);
+    const header = screen.getByRole("banner", { name: "App" });
+    const main = screen.getByRole("main");
+    expect(header.className).toMatch(/\bshrink-0\b/);
+    expect(main.contains(header)).toBe(false);
+    expect(main.className).toMatch(/\boverflow-y-auto\b/);
+    expect(main.parentElement!.className).toMatch(/\bmin-h-0\b/);
+    const list = screen.getByRole("tablist", { name: "Views" });
+    expect(list.className).toMatch(/\boverflow-x-auto\b/);
+    expect(list.className).not.toMatch(/\bflex-wrap\b/);
+    for (const t of within(list).getAllByRole("tab")) expect(t.className).toMatch(/\bwhitespace-nowrap\b/);
   });
 
   // D11: fails when unbroken requirement names, config keys or dialog titles overflow their box.

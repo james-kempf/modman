@@ -8,8 +8,11 @@ import { VIEWS, useUi } from "./store";
 
 const heading = (name: string) => screen.findByRole("heading", { level: 1, name });
 
+const viewTabs = () => screen.getByRole("tablist", { name: "Views" });
+
 describe("keyboard-only navigation", () => {
-  it("reaches all 8 views from the tab rail with arrows + Enter", async () => {
+  // Fails when a view is unreachable from the top tabs with arrows + Enter, or Enter does not select it.
+  it("reaches all 8 views from the top tabs with arrows + Enter", async () => {
     const { renderApp } = await setup();
     renderApp();
     const user = userEvent.setup();
@@ -17,43 +20,94 @@ describe("keyboard-only navigation", () => {
     expect(document.activeElement).toHaveAttribute("data-tab", "games");
     await heading("Games");
     for (const v of VIEWS.slice(1)) {
-      await user.keyboard("{ArrowDown}");
+      await user.keyboard("{ArrowRight}");
       expect(document.activeElement).toHaveAttribute("data-tab", v.id);
       await user.keyboard("{Enter}");
       await heading(v.label);
-      expect(document.activeElement).toHaveAttribute("aria-current", "page");
+      expect(document.activeElement).toHaveAttribute("aria-selected", "true");
     }
   });
 
-  it("PageDown/PageUp switch tabs; arrows enter the view; Escape returns to the tab", async () => {
+  // Fails when PageDown/PageUp (LB/RB under Steam Input) stop cycling views, do not wrap at either end,
+  // leave focus behind, or Escape from the view no longer returns to the selected tab.
+  it("PageDown/PageUp switch tabs with wrap-around; arrows enter the view; Escape returns to the tab", async () => {
     const { renderApp } = await setup();
     renderApp();
     const user = userEvent.setup();
     await user.keyboard("{PageDown}{PageDown}");
-    await heading("Mods");
-    expect(document.activeElement).toHaveAttribute("data-tab", "mods");
+    await heading(VIEWS[2].label);
+    expect(document.activeElement).toHaveAttribute("data-tab", VIEWS[2].id);
+    // First -> last.
     await user.keyboard("{PageUp}{PageUp}{PageUp}");
     await heading("Settings");
-    // Walk past the remaining tabs into the Settings content.
-    const main = screen.getByRole("main");
-    for (let i = 0; i < 20 && !main.contains(document.activeElement); i++) await user.keyboard("{ArrowDown}");
-    expect(main).toContainElement(document.activeElement as HTMLElement);
-    await user.keyboard("{Escape}");
     expect(document.activeElement).toHaveAttribute("data-tab", "settings");
+    // Last -> first, and back.
+    await user.keyboard("{PageDown}");
+    await heading("Games");
+    expect(document.activeElement).toHaveAttribute("data-tab", "games");
+    await user.keyboard("{PageUp}");
+    await heading("Settings");
+    // Down leaves the tab bar for the Settings content.
+    const main = screen.getByRole("main");
+    await user.keyboard("{ArrowDown}");
+    expect(main).toContainElement(document.activeElement as HTMLElement);
+    await user.keyboard("{ArrowDown}{Escape}");
+    expect(document.activeElement).toHaveAttribute("data-tab", "settings");
+    expect(document.activeElement).toHaveAttribute("aria-selected", "true");
   });
 
-  it("has a visible focus target on every tab (buttons, no hover-only controls)", async () => {
+  // Fails when the top tabs lose tab semantics or the roving tabindex (exactly one stop: the selected tab).
+  it("is a tablist of 8 tabs with one roving stop on the selected tab", async () => {
     const { renderApp } = await setup();
     renderApp();
-    const tabs = within(screen.getByRole("navigation", { name: "Views" })).getAllByRole("button");
+    const user = userEvent.setup();
+    const tabs = within(viewTabs()).getAllByRole("tab");
     expect(tabs).toHaveLength(8);
-    tabs.forEach((t) => expect(t.className).toMatch(/min-h-12/));
+    tabs.forEach((t) => expect(t.className).toMatch(/\bmin-h-control-xs\b/));
+    const stops = () => within(viewTabs()).getAllByRole("tab").filter((t) => t.tabIndex === 0);
+    expect(stops()).toEqual([viewTabs().querySelector("[data-tab=games]")]);
+    await user.keyboard("{PageDown}");
+    await heading("Overview");
+    expect(stops()).toEqual([viewTabs().querySelector("[data-tab=overview]")]);
+    expect(viewTabs().querySelector("[data-tab=overview]")).toHaveAttribute("aria-controls", screen.getByRole("main").id);
+  });
+
+  // Fails when the LB/RB glyphs end up inside the tablist, become focusable or announced, or show
+  // without controller mode (html[data-pad], the pad: variant).
+  it("LB/RB glyphs flank the tablist, hidden from AT and focus, shown only in controller mode", async () => {
+    const { renderApp } = await setup();
+    renderApp();
+    const list = viewTabs();
+    const glyphs = Array.from(screen.getByRole("banner", { name: "App" }).querySelectorAll("kbd"));
+    expect(glyphs.map((g) => g.textContent)).toEqual(["LB", "RB"]);
+    const [lb, rb] = glyphs;
+    expect(lb.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(rb.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    for (const g of glyphs) {
+      expect(list.contains(g)).toBe(false);
+      expect(g.parentElement!.parentElement).toBe(list.parentElement);
+      expect(g.closest("[aria-hidden='true']")).not.toBeNull();
+      expect(g).not.toHaveAttribute("tabindex");
+      expect(g.closest("button")).toBeNull();
+      expect(g.className).toMatch(/(^|\s)hidden(\s|$)/);
+      expect(g.className).toMatch(/(^|\s)pad:inline-flex(\s|$)/);
+    }
+  });
+
+  // Fails when the Activity tab loses its running-jobs + prompts badge.
+  it("badges the Activity tab with running jobs and prompts", async () => {
+    const { renderApp } = await setup();
+    renderApp();
+    const activity = () => viewTabs().querySelector("[data-tab=activity]")!;
+    expect(activity().textContent).toBe("Activity");
+    act(() => useUi.getState().onPrompt({ id: 1, job: null, prompt: { type: "confirm", question: "Sure?", default_yes: true } }));
+    await waitFor(() => expect(activity().textContent).toBe("Activity1"));
   });
 });
 
-describe("sidebar game title", () => {
+describe("header game title", () => {
   // Fails when the active game's name goes back into a card with a status dot and mod count, loses its
-  // full-name tooltip, or scrolls away with the tabs (the header must stay pinned in the scrolling sidebar).
+  // full-name tooltip, or scrolls away with the view (the header must sit outside the scrolling <main>).
   it("is plain pinned text: no card, dot or count", async () => {
     const { renderApp } = await setup();
     renderApp();
@@ -62,13 +116,17 @@ describe("sidebar game title", () => {
     expect(name.className).toMatch(/\btruncate\b/);
     expect(name.className).toMatch(/\btext-zinc-100\b/);
     const header = name.closest("header")!;
-    expect(header.className).toMatch(/\bsticky\b/);
-    expect(header.className).toMatch(/\btop-0\b/);
-    expect(header.querySelector(".rounded-pill, [title$=' mods']")).toBeNull();
-    expect(header.querySelector(".border, [class*='bg-ink-2']")).toBeNull();
+    expect(header).toBe(screen.getByRole("banner", { name: "App" }));
+    expect(screen.getByRole("main").contains(header)).toBe(false);
+    expect(header.className).toMatch(/\bshrink-0\b/);
+    // The name's own group (the header also holds the bordered LB/RB keycaps and the Activity badge).
+    const group = name.parentElement!;
+    expect(group.querySelector(".rounded-pill, [title$=' mods']")).toBeNull();
+    expect(group.querySelector(".border, [class*='bg-ink-2']")).toBeNull();
+    expect(group.className).not.toMatch(/\bborder\b|bg-ink-2/);
   });
 
-  // Fails when the experimental badge comes back next to the sidebar title (the user removed it there).
+  // Fails when the experimental badge comes back next to the header title (the user removed it there).
   it("shows no experimental badge, even for an experimental game", async () => {
     const { renderApp } = await setup({}, [experimentalGame()]);
     renderApp();
@@ -78,8 +136,8 @@ describe("sidebar game title", () => {
 });
 
 describe("experimental badge", () => {
-  // Fails when the badge drops off Overview, or comes back in the sidebar header or the Mods header (removed there).
-  it("is shown on Overview for a game with support=experimental, not in the sidebar or Mods", async () => {
+  // Fails when the badge drops off Overview, or comes back in the app header or the Mods header (removed there).
+  it("is shown on Overview for a game with support=experimental, not in the app header or Mods", async () => {
     const { renderApp } = await setup({}, [experimentalGame()]);
     renderApp();
     const name = await screen.findByText("Cyberpunk 2077", { selector: "header span" });
@@ -102,7 +160,7 @@ describe("experimental badge", () => {
 
 describe("structured results", () => {
   // U02: fails when a mod change (enable, move) brings back the "not in the game yet" toast or the
-  // sidebar "Deploy changes" button; the deploy stays on the Overview's Deployment card.
+  // header "Deploy changes" button; the deploy stays on the Overview's Deployment card.
   it("AfterChange.needs_deploy marks the game out of sync without a notice; Overview deploys", async () => {
     const [a, b] = [mod({ name: "SkyUI", enabled: true }), mod({ name: "USSEP", enabled: true, position: 2 })];
     const { renderApp, t } = await setup({

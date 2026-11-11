@@ -186,7 +186,11 @@ describe("Browse dialogs close on install/uninstall (T9)", () => {
 
   // Fails when a collection's Install or Remove leaves its dialog open.
   it("collection Install and Remove close the dialog and focus the card", async () => {
-    const inst = slow({ ...installResult });
+    // A real CollectionResult (core collection.rs: `failed` is always sent).
+    const inst = slow({
+      game: null, slug: "new", revision: 3, cancelled: false, download_only: false, installed: 1, present: 0, failed: [],
+      removed: 0, up_to_date: false, deployed: null,
+    });
     const rm = slow({ removed: true, uninstalled: 1, after: { deployed: null, needs_deploy: false } });
     const { t, user } = await open("browse", { browse: browseBoth, collection_install: inst.handler, collection_remove: rm.handler });
     await showCollections(user);
@@ -537,10 +541,11 @@ describe("Browse toolbar and collection details layout (T3)", () => {
     expect(within(dlg).getByRole("tabpanel")).toHaveAccessibleName("Details");
     expect(within(dlg).queryByRole("region", { name: "About" })).toBeNull();
     expect(within(dlg).queryByRole("list", { name: "Collection mods" })).toBeNull();
-    // Tab look: an underlined strip across the dialog, equal-width tabs.
-    expect(tablist.className.split(" ")).toEqual(expect.arrayContaining(["flex", "w-full", "border-b"]));
+    // Tab look: the view bar's pill tabs (left-aligned, one line, animated selected pill) over a hairline.
+    expect(tablist.parentElement!.className.split(" ")).toEqual(expect.arrayContaining(["border-b", "border-hairline"]));
     for (const tab of within(tablist).getAllByRole("tab")) {
-      expect(tab.className.split(" ")).toEqual(expect.arrayContaining(["flex-1", "border-b-2", "aria-selected:border-accent-400"]));
+      expect(tab.className.split(" ")).toEqual(expect.arrayContaining(["group", "whitespace-nowrap", "rounded-pill", "aria-selected:text-accent-200"]));
+      expect(tab.querySelector("[data-tab-highlight]")).not.toBeNull();
       expect(tab).not.toHaveAttribute("aria-pressed");
     }
     // Picture and facts share a row from sm up, stacked below; the facts column can shrink (no horizontal scroll).

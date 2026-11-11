@@ -18,7 +18,7 @@ async function open(view: ViewId, handlers: Record<string, Handler> = {}, games 
 }
 
 describe("Overview", () => {
-  // Fails when the old games list comes back on Overview (games live in the sidebar picker now).
+  // Fails when the old games list comes back on Overview (games live in the Games library now).
   it("has no games list; cards are about the active game", async () => {
     await open("overview", {}, [game(), experimentalGame({ active: false })]);
     const main = screen.getByRole("main");

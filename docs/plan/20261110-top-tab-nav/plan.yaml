@@ -1,0 +1,158 @@
+plan_id: 20261110-top-tab-nav
+status: pending
+tldr: |
+  Replace the App.tsx left Sidebar with a two-row top header. Row 1 (context): brand, active game name (truncated),
+  deploy progress, account chip, Quit. Row 2: full-width single-line tablist of all 8 VIEWS with LB/RB glyphs at its
+  ends. The tablist is the existing DialogTabs (BrowseDetails.tsx) extracted to components/ui/controls/Tabs.tsx and
+  extended (variant, icon, badge, glyph adornments as siblings of the tablist, focusable roving mode, per-tab
+  scaleX+opacity underline). A separate html[data-pad] flag drives glyph visibility. LB/RB/PageUp/PageDown keep routing
+  through performNav "tab" (dialog scope first, then views; store.cycleView already wraps).
+created_at: 2026-11-10
+created_by: gem-planner
+revision: 2
+replan_count: 0
+planner_revision_used: true
+
+baseline:
+  objective: "In the desktop app (Tauri + React + Tailwind, apps/desktop/src, branch rust-rewrite), replace the left sidebar nav with a top-level tab system, navigable with gamepad LB/RB, showing LB/RB glyphs in controller mode, built by reusing and extending the existing tab component, with a modernized look."
+  acceptance_criteria:
+    - "Sidebar replaced by a top horizontal tab bar covering every top-level destination; game context (GameHeader etc.) moved somewhere sensible."
+    - "Built from the existing tab component, extended; existing usages keep working."
+    - "Gamepad LB/RB cycle tabs; keyboard equivalents kept; wrap-around and dialog-open suppression defined; existing LB/RB meanings resolved explicitly; LT/RT stay Browse paging."
+    - "LB/RB glyphs at the tab bar ends only in controller mode; hidden for mouse/keyboard; aria-hidden; not focusable."
+    - "Spatial nav works with nav/spatial.ts regions; focus return; Escape returns to the tab; role=tablist/tab, aria-selected, roving tabindex."
+    - "Modernized look within existing tokens: transform/opacity-only animated indicator, cubic-bezier(0.16,1,0.3,1) ~200-300ms, reduced motion respected, :active feedback, no emojis/glows/purple gradients, one accent; no new deps unless justified."
+    - "Full width used; views lay out correctly; Browse sticky pager and --main-pb keep working; <main> stays scroll container."
+    - "Tests updated; tsc clean; vitest passes except known pre-existing failures (App.test PageDown/PageUp one to be fixed/replaced); vite build succeeds; WebKitGTK real-geometry check."
+  captured_at: 2026-11-10
+
+decisions:
+  - "Existing tab component = DialogTabs (src/components/dialogs/BrowseDetails.tsx, the only role=tablist). Extract to src/components/ui/controls/Tabs.tsx, export from ui/index.ts, BrowseDetails consumes it. Segmented (pill group, aria-pressed) is a different control and stays untouched (reuse rung: extend existing)."
+  - "Header layout is TWO ROWS (user-selected). Row 1 (context): brand, game name (truncate), deploy progress, account chip, Quit. Row 2: full-width tablist on one line, LB/RB glyphs at its ends."
+  - "Tab-bar fit at narrow widths (1024px): first tighten tab padding/gap (responsive classes) so all 8 tabs keep icon+label on one line; if they still do not fit, the tablist scrolls horizontally (overflow-x-auto, hidden scrollbar) with the selected/focused tab kept in view via scrollIntoView({inline:'nearest'}). Never wrap to a second line, never drop labels."
+  - "Indicator = option B: per-tab underline element that animates transform scaleX plus opacity via classes only (scale-x-0 opacity-0 -> scale-x-100 opacity-100 on aria-selected), transition-[transform,opacity] ease-[cubic-bezier(0.16,1,0.3,1)] duration-[250ms] motion-reduce:transition-none. No measured/sliding indicator (csp.test forbids style={...} and .style.* writes)."
+  - "Controller mode: keep html[data-input] (pointer|nav) unchanged for the focus ring; add orthogonal html[data-pad] set by the gamepad loop on non-scroll actions, cleared by keyboard nav keys and pointer input; Tailwind @custom-variant pad in index.css (owned by T2). Accepted behaviour: data-pad may flicker under Steam Input keyboard/mouse mapping (pad emulating keys/mouse clears it); not mitigated."
+  - "LB/RB semantics explicit: performNav 'tab' -> dialog TAB_EVENT when a dialog scope is open (dialog tabs switch, app views never), else useUi.cycleView. useUi.cycleView (store.ts ~231) already wraps ((i+delta+len)%len): last->first, first->last; no store change expected. No in-view sub-tab uses LB/RB (Segmented has no TAB_EVENT listener), so no clash. PageUp/PageDown map to the same action. LT/RT stay PAGE_EVENT."
+  - "Top tabs: roving tabindex (selected tab tabindex=0, others -1) following the APG manual-activation pattern: tabindex=0 stays on the selected tab and does not follow focus. Arrow/D-pad Left/Right moves focus between tabs, A/Enter/click activates, LB/RB select directly and focus the new tab. spatial.ts gets an explicit exemption (marker attribute, e.g. data-nav-roving) so the -1 tabs remain spatial-nav candidates. Dialog tabs (tabindex=-1, not focus stops) keep current behaviour."
+  - "LB/RB glyphs are siblings of the role=tablist element inside a wrapper (start/end adornments around the tablist), never children of it, so tablist owns only role=tab children."
+  - "No new dependencies: @phosphor-icons/react reused (ICON map); no framer-motion. Glyphs are mono-font keycap spans from existing tokens."
+  - "Header is a non-scrolling sibling above <main>; <main> stays the scroll container so --main-pb/STACK_ROOM and the Browse sticky pager are untouched. HeroBackdrop stays behind <main>."
+  - "Accepted defaults: Quit and account chip move to header row 1; the 'LB/RB or PgUp/PgDn switch tabs' hint line is dropped; dialog tabs get no glyphs (Tabs API supports them)."
+  - "File ownership: T1 owns components (Tabs.tsx, BrowseDetails.tsx, ui/index.ts, ui tests) and must not touch src/index.css; T2 owns nav/modality.ts, nav/gamepad.ts, src/index.css (pad variant plus any easing/keyframe tokens T1 needs); T3 owns App.tsx, nav/actions.ts, nav/spatial.ts, store.ts if needed, and tests."
+  - "No researcher task: discovery already located all owners (see shared_context)."
+
+assumptions:
+  - "Top-level destinations are exactly VIEWS in src/app/store.ts: games, overview, browse, mods, collections, requirements, activity, settings."
+  - "--spacing-sidebar (index.css) becomes unused; T3 may remove that single token line (only index.css edit outside T2, after T2 completes)."
+  - "User is concurrently editing files (Games.tsx, Overview.tsx seen). Working tree was clean at plan time. Every task re-checks git status/diff before editing and merges around user edits; no commits."
+  - "Known pre-existing failures: src/style.test.ts 'paints the highlight...' (out of scope) and src/app/App.test.tsx 'PageDown/PageUp switch tabs...' (in scope: rewritten in T3)."
+  - "Tailwind arbitrary classes (ease-[...], duration-[250ms]) suffice for motion, so T1 likely needs no index.css tokens; if it does, T2 adds them."
+
+shared_context:
+  shell_nav:
+    - "App.tsx: Sidebar() = GameHeader (Brand, game name, deploy progress; sticky top-0 z-10 bg-ink) + TabRail (nav aria-label=Views data-nav-rail, buttons data-tab={id} aria-current=page, ICON map of phosphor duotone icons, Activity badge running+prompts) + Quit (data-nav-rail) + AccountFooter. Initial focus: querySelector('[data-tab][aria-current=page]')."
+    - "nav/actions.ts: focusCurrentTab() selects [data-tab][aria-current='page']; 'tab' case: navScope!=body -> TAB_EVENT on dialog scope, else cycleView(delta) then focus [data-tab='{view}']; keyboard PageUp/PageDown -> {type:'tab'} (lines ~134-153)."
+    - "store.ts: cycleView wraps via (i + delta + VIEWS.length) % VIEWS.length."
+    - "nav/spatial.ts: focusables exclude [tabindex='-1']; region = closest(nav,header,main,aside,[role=dialog]) with same-landmark preference; inRail = closest([data-nav-rail]) - designed for a vertical left rail; must be re-checked for a horizontal top bar."
+    - "nav/modality.ts: html[data-input] pointer|nav; gamepad.ts ~line 194 setModality('nav') on non-scroll actions; BUTTON LB=4 RB=5 emit {type:'tab',delta:+-1}."
+    - "index.css: @custom-variant highlighted / in-highlight keyed on html[data-input=nav]; --spacing-sidebar: 268px."
+    - "csp.test.ts forbids /\\bstyle=\\{/, <style, and .style.* writes in sources."
+    - "Tests referencing sidebar/data-tab/aria-current/nav-rail: src/app/App.test.tsx, src/ct1.test.tsx, src/ct2.test.tsx, src/views/views.test.tsx, src/views/Games.test.tsx, src/nav/spatial.test.ts; src/views/Games.tsx also references one of these selectors."
+
+tasks:
+  - id: T1
+    title: Extract and extend the Tabs component
+    description: "Rung: reuse/extend existing. Move DialogTabs out of BrowseDetails.tsx into src/components/ui/controls/Tabs.tsx (exported via ui/index.ts) and extend it: variant 'underline' (current dialog look, default) and 'nav' (top bar); per-tab icon and badge slots; start/end adornment slots rendered as siblings of the role=tablist inside a wrapper (for glyphs); 'focusable' mode with roving tabindex (APG manual activation) + spatial-nav marker attribute (default stays tabindex=-1, not a focus stop); per-tab data attribute (data-tab) so the shell can target tabs; per-tab underline indicator animating scaleX+opacity by classes only; :active feedback. TAB_EVENT listener stays for the dialog usage only (opt-in or scope-guarded so it never attaches at document/body level). In 'nav' variant, keep the focused/selected tab scrolled into view (inline:'nearest') for the horizontal-scroll fallback."
+    wave: 1
+    depends_on: []
+    agent: gem-implementer
+    status: pending
+    retries_used: 0
+    context_cluster: shell_nav
+    acceptance_criteria:
+      - "src/components/ui/controls/Tabs.tsx exists and is exported from src/components/ui/index.ts; BrowseDetails.tsx imports it and no longer defines its own tablist."
+      - "Default/dialog variant keeps the current dialog tab widths and visuals (flex-1 truncate tabs, border-b-2 accent-400 on selected, same padding/typography); no equal-width-grid layout change; BrowseDetails behaviour unchanged: role=tablist/tab, aria-selected, aria-controls/tabpanel ids, tabindex=-1, mouse-down does not focus, LB/RB via TAB_EVENT wraps, panel refocus on switch; existing BrowseDetails/browse tests pass unchanged or with selector-only updates."
+      - "Focusable mode: exactly one tab has tabindex=0 and it is the selected tab; moving focus to another tab (focus() or arrow) does NOT move tabindex=0 (APG manual activation); activating (click/Enter) moves selection and tabindex=0 together; unit test asserts all three."
+      - "Indicator: a per-tab element with classes scale-x-0 opacity-0 when unselected and scale-x-100 opacity-100 when aria-selected, transition limited to transform and opacity, ease-[cubic-bezier(0.16,1,0.3,1)] duration-[250ms] motion-reduce:transition-none; no style={...} or .style writes (csp.test passes)."
+      - "Start/end adornments render outside the role=tablist element (siblings in a wrapper), aria-hidden=true, no tabindex, not buttons; tablist children are only role=tab elements; unit test asserts this."
+      - "src/index.css is not modified by this task; no new package.json dependencies; only existing tokens (ink, hairline, fill, accent-*, spacing, fonts); no emojis, glows, or gradients."
+      - "New unit tests for Tabs in src/components/ui/ui.test.tsx or a sibling Tabs.test.tsx cover variants, slots, roving tabindex, aria-selected."
+    handoff:
+      constraints:
+        - "Run git status/diff first; do not overwrite concurrent user edits; no commits."
+        - "Do not touch App.tsx, nav/*.ts, store.ts, or src/index.css (owned by T2/T3). If an easing/keyframe token is truly needed, report it so T2/T3 add it."
+        - "csp.test.ts rules apply to all sources."
+      relevant_context:
+        - "DialogTabs: src/components/dialogs/BrowseDetails.tsx ~lines 125-215; MOD_TABS usage above it."
+        - "Segmented.tsx is NOT the tab component and must not change."
+      critic_signals: [architecture]
+
+  - id: T2
+    title: Controller-mode (pad) input signal and index.css variants
+    description: "Rung: extend existing modality tracking (nav/modality.ts). Add html[data-pad] flag: set when the gamepad loop emits a non-scroll action (where setModality('nav') is called in gamepad.ts), cleared on keyboard NAV_KEYS and on pointer press/real mouse movement past the existing threshold. Add Tailwind @custom-variant pad in src/index.css. Sole owner of src/index.css edits in wave 1 (any easing/keyframe tokens go here). data-input semantics unchanged. Flicker under Steam Input keyboard/mouse mapping is accepted behaviour; document it in a code comment."
+    wave: 1
+    depends_on: []
+    agent: gem-implementer
+    status: pending
+    retries_used: 0
+    context_cluster: shell_nav
+    acceptance_criteria:
+      - "Gamepad action sets document.documentElement.dataset.pad; a subsequent NAV_KEYS keydown or pointer press/movement past the existing threshold removes it; covered in src/nav/modality.test.ts and/or gamepad.test.ts."
+      - "Existing data-input behaviour and its tests are unchanged and pass."
+      - "index.css defines a 'pad' custom variant so pad:inline-flex (hidden otherwise) works; no-op attribute writes avoided as with setModality."
+      - "A code comment in modality.ts notes the accepted Steam Input flicker."
+      - "tsc --noEmit clean for touched files."
+    handoff:
+      constraints:
+        - "Run git status/diff first; no commits; do not touch App.tsx, actions.ts, spatial.ts, store.ts, or components/."
+
+  - id: T3
+    title: Two-row top header shell, nav wiring, layout, tests
+    description: "Rung: reuse T1 Tabs + existing App.tsx pieces (Brand, GameHeader content, ICON, badge, AccountFooter, Quit). Replace Sidebar with a two-row <header> above <main>: row 1 brand, active game name (truncate), deploy progress, account chip, Quit; row 2 the T1 Tabs in 'nav' variant, focusable mode, icons + labels, Activity badge, LB/RB keycap glyphs as start/end adornments visible only under the pad variant. Narrow-width rule: tighter padding/gap first, then horizontal scroll of the tablist with the selected/focused tab kept in view; never wrap. Wire nav: focusCurrentTab, performNav 'tab' focus target, initial focus all target the selected top tab (role=tab aria-selected=true). Update spatial.ts for the horizontal bar (honour the roving marker; Up from top of view lands on the SELECTED tab; Down from bar enters view; Left/Right moves between tabs and header controls; shell header and view-internal <header> landmarks do not trap Up/Down). Drop the hint line. Remove --spacing-sidebar if unused. Keep <main> as scroll container and STACK_ROOM/--main-pb intact. cycleView already wraps; if any change to it is made, store.ts joins scope with a store.test unit test. Update all sidebar-referencing tests and replace the failing 'PageDown/PageUp switch tabs...' App test."
+    wave: 2
+    depends_on: [T1, T2]
+    agent: gem-implementer
+    status: pending
+    retries_used: 0
+    context_cluster: shell_nav
+    acceptance_criteria:
+      - "No Sidebar/aside 'Sidebar' remains; header has two rows: row 1 with brand, game name (truncate class + title attr), deploy progress, account status, Quit; row 2 with a single-line role=tablist listing all 8 VIEWS with icons and labels; Activity badge preserved; hint line removed."
+      - "Top tabs are rendered by the T1 Tabs component (no second tablist implementation in App.tsx)."
+      - "Gamepad LB/RB and keyboard PageUp/PageDown cycle views with wrap-around (last->first, first->last via existing store.cycleView); with a dialog open they switch the dialog's tabs (BrowseDetails) and never the view; LT/RT still emit PAGE_EVENT only. Covered by App.test and nav/actions tests. If store.ts is changed, store.test covers wrap-around."
+      - "LB/RB glyphs are siblings of the role=tablist (not children), aria-hidden=true, no tabindex, not reachable by spatial nav or Tab, visible only when html[data-pad] is set (class-based via pad variant); test asserts attributes, DOM position, and class."
+      - "Tab semantics: role=tablist with aria-label, role=tab with aria-selected, exactly one tabindex=0 (the selected tab); spatial nav reaches every tab via Left/Right; Escape/B from inside the view focuses the selected tab; Down from the bar enters the view."
+      - "spatial.test adds: (a) a view containing its own <header> while the shell bar is also a <header>: Up from view content reaches the view's header controls then the shell tabs, and Down from the shell tabs enters the view, with no trap in either direction; (b) Up from the topmost focusable view element lands on the SELECTED tab, not the nearest-by-geometry tab."
+      - "<main> is still the scroll container; STACK_ROOM classes and --main-pb unchanged; csp.test passes."
+      - "The previously failing 'PageDown/PageUp switch tabs...' test is fixed or replaced by an equivalent passing test; App.test, ct1, ct2, views.test, Games.test, spatial.test, actions.test updated and passing."
+      - "npx tsc --noEmit clean; npx vitest run passes except src/style.test.ts 'paints the highlight...'; npx vite build succeeds."
+    handoff:
+      constraints:
+        - "Run git status/diff first; Games.tsx/Overview.tsx may hold concurrent user edits: make minimal selector-only changes there, never revert user hunks; no commits."
+        - "No new dependencies; existing tokens and fonts only; no emojis/glows/gradients; single accent."
+        - "Keep keyboard equivalents PageUp/PageDown."
+        - "src/index.css: only the --spacing-sidebar removal is allowed here."
+      high_risk_signals: [architecture, cross_domain_impact, shared_state]
+      critic_signals: [architecture, cross_domain_impact]
+
+  - id: T4
+    title: WebKitGTK real-geometry and interaction verification
+    description: "Independent verification of layout and motion in the real engine using the scratchpad geo scripts (wk.py, app.py, tiles.py) against vite preview."
+    wave: 3
+    depends_on: [T3]
+    agent: gem-browser-tester
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "At 1280x800 and 1024x640: document and header have scrollWidth <= clientWidth (no page-level horizontal overflow); header is two rows; all 8 tabs are on one line (identical top for every role=tab rect) and each shows its label (label element width > 0, not clipped: scrollWidth <= clientWidth); the game name element truncates (text-overflow ellipsis, its rect does not exceed row 1)."
+      - "If at 1024x640 the tabs exceed the tablist width, the fallback is verified: tighter padding applied, tablist is horizontally scrollable, and after selecting the last and first tab via LB/RB the selected tab rect lies fully within the tablist rect. Otherwise report that the fallback was not triggered."
+      - "Header does not scroll with <main>; views use the freed width up to max-w-content."
+      - "Browse sticky pager stays pinned to the bottom of <main> with 0, 1, and 3+ bottom-stack items (--main-pb mechanism), measured via getBoundingClientRect."
+      - "Selected tab's underline rect lies within the tab rect after switching; computed transition-property of the indicator contains only transform and/or opacity, timing function cubic-bezier(0.16, 1, 0.3, 1), duration 0.25s."
+      - "Reduced motion: in wk.py set Gtk.Settings gtk-enable-animations=False before load (WebKitGTK maps it to prefers-reduced-motion) and assert matchMedia('(prefers-reduced-motion: reduce)').matches and computed transition-duration of the indicator is 0s (or transition-property none). If the media query does not match under that setting, instead verify the built CSS contains the motion-reduce media rule that applies transition-property:none to the indicator class (inspect document.styleSheets), and report which method was used."
+      - "With data-pad set, LB/RB glyphs are visible at both ends of the tab row (outside the tablist); with data-input=pointer or keyboard-only use they are display:none; glyphs never receive focus."
+      - "Overview HeroBackdrop and focus ring (data-input=nav) render correctly with the new header; screenshots saved under the scratchpad geo/ folder and paths reported."
+    handoff:
+      constraints:
+        - "Read-only on src; report defects with selectors, measurements, and screenshot paths; no commits."
+      relevant_context:
+        - "Scripts: /tmp/claude-1000/-home-jkempf-Repositories-modman/2b9a6ce3-39f8-4ff8-8db9-3cb3e363e842/scratchpad/geo/{wk.py,app.py,tiles.py,repro.html}; wk.py uses Gtk.OffscreenWindow with set_default_size (change size per viewport)."

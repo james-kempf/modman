@@ -79,7 +79,7 @@ function refocusView(): void {
   });
 }
 
-/** Per view: the sidebar and the other views keep working. */
+/** Per view: the app header and the other views keep working. */
 export function ViewBoundary({ name, children }: { name: string; children: ReactNode }) {
   const qc = useQueryClient();
   return (

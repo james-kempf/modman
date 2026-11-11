@@ -185,15 +185,15 @@ describe("game library", () => {
     expect(await screen.findByText(/No games yet/)).toBeInTheDocument();
     expect(screen.queryByRole("list", { name: "Game library" })).toBeNull();
     expect(within(screen.getByRole("main")).getByRole("button", { name: "Add game" })).toBeInTheDocument();
-    expect(within(screen.getByRole("complementary", { name: "Sidebar" })).getByText("No game selected")).toBeInTheDocument();
+    expect(within(screen.getByRole("banner", { name: "App" })).getByText("No game selected")).toBeInTheDocument();
   });
 
-  // Fails when the old dropdown comes back in the sidebar.
-  it("the sidebar names the active game without a picker", async () => {
+  // Fails when the old dropdown comes back in the app header.
+  it("the app header names the active game without a picker", async () => {
     await library();
-    const sidebar = screen.getByRole("complementary", { name: "Sidebar" });
-    expect(within(sidebar).getByText("Skyrim Special Edition")).toBeInTheDocument();
-    expect(within(sidebar).queryByRole("button", { name: /^Game:|Choose a game|Add game/ })).toBeNull();
+    const header = screen.getByRole("banner", { name: "App" });
+    expect(within(header).getByText("Skyrim Special Edition")).toBeInTheDocument();
+    expect(within(header).queryByRole("button", { name: /^Game:|Choose a game|Add game/ })).toBeNull();
     expect(screen.queryByRole("menu")).toBeNull();
   });
 });

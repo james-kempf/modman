@@ -7,18 +7,27 @@ export type Dir = "up" | "down" | "left" | "right";
 
 /** Marks the current view's search field, focused by the "search" nav action (gamepad Y). */
 export const SEARCH_ATTR = "data-view-search";
+/** Marks the wrapper of the app's top view tabs (dialog tabs may share `data-tab` values, e.g. "mods"). */
+export const VIEW_TABS_ATTR = "data-view-tabs";
+/** The selected top view tab. */
+export const CURRENT_TAB = `[${VIEW_TABS_ATTR}] [role='tab'][aria-selected='true']`;
 
-// tabindex=-1 opts a control out (e.g. dialog tabs, switched by LB/RB and the mouse only).
+/** A roving-tabindex group (focusable Tabs): its tabindex=-1 members stay spatial-nav stops. */
+const ROVING = "[data-nav-roving]";
+
+// tabindex=-1 opts a control out (e.g. dialog tabs, switched by LB/RB and the mouse only), except
+// inside a roving group, where -1 only means "not the Tab-key stop".
 const FOCUSABLE = [
-  "button:not([disabled])",
-  "a[href]",
-  "input:not([disabled]):not([type=hidden])",
-  "textarea:not([disabled])",
-  "select:not([disabled])",
-  "[tabindex]",
-]
-  .map((s) => `${s}:not([tabindex='-1'])`)
-  .join(",");
+  ...[
+    "button:not([disabled])",
+    "a[href]",
+    "input:not([disabled]):not([type=hidden])",
+    "textarea:not([disabled])",
+    "select:not([disabled])",
+    "[tabindex]",
+  ].map((s) => `${s}:not([tabindex='-1'])`),
+  `${ROVING} [role='tab']:not([disabled])`,
+].join(",");
 
 export function navScope(doc: Document = document): HTMLElement {
   const scopes = doc.querySelectorAll<HTMLElement>("[data-nav-scope]");
@@ -91,12 +100,16 @@ function score(a: Box, c: Box, dir: Dir): number | null {
   return (overlap > 0 ? 0 : OUT_OF_BEAM) + Math.max(0, gap) + Math.max(0, -overlap) * 3;
 }
 
-/** Up/Down prefer staying in the same landmark (offscreen content beats the header). */
+/** Up/Down prefer staying in the same landmark (offscreen content beats the app header). */
 const OTHER_REGION = 2e6;
-/** The tab rail is entered/left horizontally; vertically only when nothing else is there. */
-const RAIL_CROSS = 4e6;
-const region = (el: Element) => el.closest("nav,header,main,aside,[role=dialog]");
-const inRail = (el: Element) => !!el.closest("[data-nav-rail]");
+/**
+ * A landmark nested in <main> (a view's own <header>, an <aside>) is part of the view: otherwise its
+ * controls, scrolled above the viewport, would lose to the app header's tabs and become unreachable.
+ */
+const region = (el: Element) => {
+  const r = el.closest("nav,header,main,aside,[role=dialog]");
+  return r && !r.matches("[role=dialog]") ? (r.closest("main") ?? r) : r;
+};
 
 /**
  * Card sections, opt-in: inside a `data-nav-sections` container (a Card's
@@ -110,8 +123,22 @@ function sectionOf(el: Element, scope: HTMLElement): Element | null {
   return s && scope.contains(s) && s !== scope ? s : null;
 }
 
+/**
+ * Entering a roving group (the top tabs) from outside lands on its current stop (the selected tab),
+ * not the geometrically nearest member (APG tablist).
+ */
+function enter(from: HTMLElement | null, to: HTMLElement | null): HTMLElement | null {
+  const group = to?.closest<HTMLElement>(ROVING);
+  if (!group || (from && group.contains(from))) return to;
+  return group.querySelector<HTMLElement>("[role='tab'][tabindex='0']") ?? to;
+}
+
 /** The element focus would move to from `from` in `dir`, or null. */
 export function findNext(from: HTMLElement | null, dir: Dir, scope = navScope()): HTMLElement | null {
+  return enter(from, pick(from, dir, scope));
+}
+
+function pick(from: HTMLElement | null, dir: Dir, scope: HTMLElement): HTMLElement | null {
   const all = focusables(scope);
   if (!all.length) return null;
   if (!from || !scope.contains(from)) return all[0];
@@ -138,24 +165,23 @@ export function findNext(from: HTMLElement | null, dir: Dir, scope = navScope())
 function nearest(from: HTMLElement, dir: Dir, all: HTMLElement[]): HTMLElement | null {
   const a = box(from);
   const boxes = all.map(box);
+  const vertical = dir === "up" || dir === "down";
   // No layout (jsdom, or a hidden window): fall back to document order.
   if (empty(a) && boxes.every(empty)) {
-    const i = all.indexOf(from);
+    // A roving group is a horizontal bar: Up/Down leave it rather than walk it.
+    const group = vertical ? from.closest(ROVING) : null;
+    const order = group ? all.filter((el) => el === from || !group.contains(el)) : all;
+    const i = order.indexOf(from);
     const j = dir === "down" || dir === "right" ? i + 1 : i - 1;
-    return all[j] ?? null;
+    return order[j] ?? null;
   }
   let best: HTMLElement | null = null;
   let bestScore = Infinity;
-  const vertical = dir === "up" || dir === "down";
   const fromRegion = region(from);
-  const fromRail = inRail(from);
   all.forEach((el, i) => {
     if (el === from) return;
     let s = score(a, boxes[i], dir);
-    if (s !== null && vertical) {
-      if (region(el) !== fromRegion) s += OTHER_REGION;
-      if (inRail(el) !== fromRail) s += RAIL_CROSS;
-    }
+    if (s !== null && vertical && region(el) !== fromRegion) s += OTHER_REGION;
     if (s !== null && s < bestScore) {
       best = el;
       bestScore = s;
@@ -186,7 +212,7 @@ export function isTextInput(el: Element | null): el is HTMLInputElement | HTMLTe
 /** Where focus was last lost (viewport box), for recoverFocus(). */
 let lastLost: Box | null = null;
 
-/** Focus the focusable nearest to where focus was last lost, else the current tab. */
+/** Focus the focusable nearest to where focus was last lost, else the selected view tab. */
 export function recoverFocus(doc: Document = document): void {
   const all = focusables(navScope(doc));
   let best: HTMLElement | null = null;
@@ -202,7 +228,7 @@ export function recoverFocus(doc: Document = document): void {
       }
     }
   }
-  const target = best ?? doc.querySelector<HTMLElement>("[data-tab][aria-current='page']") ?? all[0];
+  const target = best ?? doc.querySelector<HTMLElement>(CURRENT_TAB) ?? all[0];
   if (!target) return;
   // A plain focus() scrolls the target into view (often far): pointer users must keep their scroll position.
   target.focus({ preventScroll: true });

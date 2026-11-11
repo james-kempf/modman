@@ -3,7 +3,16 @@
 
 import { useUi, type ViewId } from "../app/store";
 import { navArbiter, type NavArbiter, type NavInput } from "./arbiter";
-import { SEARCH_ATTR, focusables, isTextInput, moveFocus, navScope, type Dir } from "./spatial";
+import {
+  CURRENT_TAB,
+  SEARCH_ATTR,
+  VIEW_TABS_ATTR,
+  focusables,
+  isTextInput,
+  moveFocus,
+  navScope,
+  type Dir,
+} from "./spatial";
 
 export type NavAction =
   | { type: "move"; dir: Dir }
@@ -25,8 +34,12 @@ export type TabEventDetail = { delta: 1 | -1 };
 export const PAGE_EVENT = "vessel:page";
 export type PageEventDetail = { delta: 1 | -1 };
 
+/** The top tab of `view` (scoped: a dialog's tabs may use the same value, e.g. "mods"). */
+const viewTab = (view: ViewId, doc: Document) => doc.querySelector<HTMLElement>(`[${VIEW_TABS_ATTR}] [data-tab='${view}']`);
+
+/** Focus the selected top tab (Escape/B from a view, the app's first focus). */
 export function focusCurrentTab(doc: Document = document): void {
-  doc.querySelector<HTMLElement>("[data-tab][aria-current='page']")?.focus();
+  doc.querySelector<HTMLElement>(CURRENT_TAB)?.focus();
 }
 
 /**
@@ -34,7 +47,7 @@ export function focusCurrentTab(doc: Document = document): void {
  * focus first, since the control unmounts with the old view.
  */
 export function openView(view: ViewId, doc: Document = document): void {
-  doc.querySelector<HTMLElement>(`[data-tab='${view}']`)?.focus();
+  viewTab(view, doc)?.focus();
   useUi.getState().setView(view);
 }
 
@@ -89,8 +102,8 @@ export function performNav(action: NavAction, doc: Document = document): void {
         return;
       }
       const view = useUi.getState().cycleView(action.delta);
-      // Tab buttons are always rendered, so focus follows the selection now.
-      doc.querySelector<HTMLElement>(`[data-tab='${view}']`)?.focus();
+      // The tabs are always rendered, so focus follows the selection now (before React re-renders).
+      viewTab(view, doc)?.focus();
       return;
     }
     case "page":

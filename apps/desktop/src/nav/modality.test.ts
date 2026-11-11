@@ -16,6 +16,7 @@ const move = (screenX: number, screenY: number, pointerType = "mouse") => {
 let stop: () => void;
 beforeEach(() => {
   delete document.documentElement.dataset.input;
+  delete document.documentElement.dataset.pad;
   stop = installModalityTracking();
 });
 afterEach(() => {
@@ -120,5 +121,71 @@ describe("input modality (drives the focus ring)", () => {
     move(50, 50);
     expect(mode()).toBe("nav");
     stop = installModalityTracking();
+  });
+});
+
+// html[data-pad] (controller mode, drives the pad: variant, e.g. LB/RB glyphs) is separate from
+// data-input: the keyboard sets data-input="nav" too, but must not show controller glyphs.
+describe("controller mode (data-pad)", () => {
+  const pad = () => document.documentElement.dataset.pad;
+  const runPad = (button: number) => {
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => frames.push(cb));
+    Object.defineProperty(navigator, "getGamepads", {
+      configurable: true,
+      value: () => [{ connected: true, axes: [0, 0, 0, 0], buttons: Array.from({ length: 17 }, (_, i) => ({ pressed: i === button })) }],
+    });
+    const stopPad = startGamepadLoop(() => {});
+    frames.shift()!(0);
+    stopPad();
+  };
+
+  // Fails when data-pad is tied to data-input: keyboard nav would show controller glyphs.
+  it("is off by default and keyboard nav keys do not set it", () => {
+    expect(pad()).toBeUndefined();
+    key("ArrowDown");
+    key("PageDown");
+    expect(pad()).toBeUndefined();
+  });
+
+  // Fails when the gamepad loop does not flag controller mode (glyphs never appear).
+  it("a gamepad action sets it (LB included)", () => {
+    runPad(BUTTON.LB);
+    expect(pad()).toBe("");
+  });
+
+  // Fails when switching back to the keyboard keeps showing controller glyphs.
+  it("a nav key clears it; typing text does not", () => {
+    runPad(BUTTON.DOWN);
+    key("a");
+    expect(pad()).toBe("");
+    key("ArrowLeft");
+    expect(pad()).toBeUndefined();
+  });
+
+  // Fails when the mouse taking over keeps controller glyphs.
+  it("a pointer press or real mouse move clears it; jitter does not", () => {
+    runPad(BUTTON.DOWN);
+    pointer();
+    expect(pad()).toBeUndefined();
+    runPad(BUTTON.DOWN);
+    move(100, 100);
+    move(102, 101);
+    expect(pad()).toBe("");
+    move(110, 101);
+    expect(pad()).toBeUndefined();
+  });
+
+  // Fails when every gamepad frame rewrites the attribute (style recalculation per frame).
+  it("writes the attribute once per change", () => {
+    const seen = new MutationObserver(() => {});
+    seen.observe(document.documentElement, { attributes: true, attributeFilter: ["data-pad"] });
+    runPad(BUTTON.DOWN);
+    runPad(BUTTON.UP);
+    expect(seen.takeRecords()).toHaveLength(1);
+    key("Tab");
+    key("Tab");
+    expect(seen.takeRecords()).toHaveLength(1);
+    seen.disconnect();
   });
 });

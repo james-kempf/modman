@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetUi, useUi } from "../app/store";
-import { BACK_EVENT, TAB_EVENT, keyToNav, performNav } from "./actions";
+import { BACK_EVENT, PAGE_EVENT, TAB_EVENT, keyToNav, openView, performNav } from "./actions";
 
 const key = (k: string, target: Element = document.body, mods: Partial<KeyboardEventInit> = {}) => {
   const e = new KeyboardEvent("keydown", { key: k, bubbles: true, ...mods });
@@ -92,6 +92,63 @@ describe("performNav", () => {
     performNav({ type: "tab", delta: -1 });
     expect(useUi.getState().view).toBe("games");
     expect(tab.mock.calls).toEqual([[{ delta: 1 }], [{ delta: -1 }]]);
+  });
+
+  /** The shell's top tabs (scoped by data-view-tabs) plus a dialog tablist reusing the value "mods". */
+  function shellTabs(selected = "games") {
+    const bar = document.createElement("div");
+    bar.setAttribute("data-view-tabs", "");
+    const dialogTab = document.createElement("button");
+    dialogTab.setAttribute("data-tab", "mods");
+    // Earlier in the document than the shell tabs: an unscoped [data-tab] lookup would pick it.
+    document.body.append(dialogTab, bar);
+    const tabs = Object.fromEntries(
+      ["games", "overview", "browse", "mods", "collections", "requirements", "activity", "settings"].map((v) => {
+        const b = document.createElement("button");
+        b.setAttribute("role", "tab");
+        b.setAttribute("data-tab", v);
+        b.setAttribute("aria-selected", String(v === selected));
+        bar.appendChild(b);
+        return [v, b];
+      }),
+    );
+    return { tabs, dialogTab };
+  }
+
+  // Fails when LB/RB without a dialog stop cycling views, do not wrap, or focus a dialog's same-valued tab.
+  it("tab without a dialog cycles the views with wrap-around and focuses the new view tab", () => {
+    const { tabs } = shellTabs();
+    performNav({ type: "tab", delta: -1 });
+    expect(useUi.getState().view).toBe("settings");
+    expect(document.activeElement).toBe(tabs.settings);
+    performNav({ type: "tab", delta: 1 });
+    expect(useUi.getState().view).toBe("games");
+    performNav({ type: "tab", delta: 1 });
+    performNav({ type: "tab", delta: 1 });
+    performNav({ type: "tab", delta: 1 });
+    expect(useUi.getState().view).toBe("mods");
+    expect(document.activeElement).toBe(tabs.mods);
+    openView("games");
+    expect(document.activeElement).toBe(tabs.games);
+  });
+
+  // Fails when Escape/B from a view does not return to the SELECTED top tab.
+  it("back without a dialog focuses the selected view tab", () => {
+    const { tabs } = shellTabs("browse");
+    const inView = document.createElement("button");
+    document.body.appendChild(inView);
+    inView.focus();
+    performNav({ type: "back" });
+    expect(document.activeElement).toBe(tabs.browse);
+  });
+
+  // Fails when LT/RT switch views (LB/RB's job) instead of only paging the view.
+  it("page dispatches PAGE_EVENT and leaves the view alone", () => {
+    const page = vi.fn();
+    document.addEventListener(PAGE_EVENT, (e) => page((e as CustomEvent).detail), { once: true });
+    performNav({ type: "page", delta: 1 });
+    expect(page).toHaveBeenCalledWith({ delta: 1 });
+    expect(useUi.getState().view).toBe("games");
   });
 
   // Fails when Y does not focus the view's search field, or reaches it behind an open dialog.

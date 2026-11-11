@@ -8,7 +8,7 @@
 
 import type { NavAction } from "./actions";
 import { navArbiter, type NavArbiter, type NavInput } from "./arbiter";
-import { setModality } from "./modality";
+import { setModality, setPad } from "./modality";
 import type { Dir } from "./spatial";
 
 export const BUTTON = { A: 0, B: 1, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 } as const;
@@ -191,7 +191,10 @@ export function startGamepadLoop(
   const tick = () => {
     const actions = nav.poll(win.performance.now());
     // Gamepad input fires no key event: switch the focus ring on here (scrolling alone does not).
-    if (actions.some((a) => a.type !== "scroll")) setModality("nav", win.document);
+    if (actions.some((a) => a.type !== "scroll")) {
+      setModality("nav", win.document);
+      setPad(true, win.document);
+    }
     actions.forEach(dispatch);
     frame = win.requestAnimationFrame(tick);
   };

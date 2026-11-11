@@ -296,9 +296,8 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
                 ? data!.mods.map((m, i) => <ModTile key={m.modId !== null ? `m${m.modId}` : `i${i}`} game={game} m={m} focusKey={`m${m.modId ?? m.name}`} />)
                 : data!.collections.map((c) => <CollectionTile key={c.slug} game={game} c={c} />)}
             </ul>
-            {/* role=navigation, not <nav>: a <nav> is its own spatial-nav region (nav/spatial.ts), so Down from the
-                grid would skip the pager for the next control in <main>.
-                A toolbar stuck to the bottom of <main> (like the sidebar's sticky header): the last child of the
+            {/* role=navigation, not <nav> (landmarks inside <main> share its spatial-nav region, nav/spatial.ts).
+                A toolbar stuck to the bottom of <main>: the last child of the
                 results section, so it pins while the grid is on screen and rests below the last row (in flow, it
                 never covers it). -mx-section: edge to edge across the card. While scrolled up it pins flush to
                 <main>'s bottom edge: WebKit insets sticky by <main>'s padding-bottom, so bottom is minus that
