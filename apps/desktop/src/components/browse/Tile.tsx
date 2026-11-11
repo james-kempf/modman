@@ -41,8 +41,14 @@ export const FOCUS_ATTR = "data-browse-focus";
 export const RESULTS_GRID = "@container grid gap-4 sm:grid-cols-2";
 /** Mods: 3 columns from xl. */
 export const MOD_GRID = cx(RESULTS_GRID, "xl:grid-cols-3");
-/** Mod pictures fill the tile's width at 16:9 (Nexus tile art); the monogram fallback takes the same box. */
-export const MOD_PICTURE = "aspect-video w-full shrink-0 rounded-card";
+/**
+ * Mod pictures fill the tile's width at 16:9 (Nexus tile art); the monogram fallback takes the same box.
+ * rounded-control-sm: one step below the tile's rounded-card-lg, so the corners nest inside its padding.
+ */
+export const MOD_PICTURE = "aspect-video w-full shrink-0 rounded-control-sm";
+
+/** The tile's shell: CARD_TILE with its padding (p-3; a vertical tile 4px more at the bottom). */
+const tileShell = (horizontal: boolean) => cx(CARD_TILE, "border-hairline bg-ink", horizontal ? "flex-row p-3" : "flex-col p-3 pb-4");
 
 /**
  * One browse result: a single focusable card (picture, name and byline,
@@ -79,18 +85,23 @@ export function Tile({
   /** The open details dialog (portalled), if any. */
   dialog?: ReactNode;
 }) {
-  const statusId = useId();
+  const id = useId();
+  // The card is named by its title and described by its byline, stats and status badges (no aria-label:
+  // the visible text is the name, so voice control and screen readers say the same thing).
+  const [nameId, bylineId, statsId, statusId] = [`${id}-name`, `${id}-byline`, `${id}-stats`, `${id}-status`];
   const text = (
     <>
-      <span className="block shrink-0 truncate text-[15.5px] font-medium text-zinc-100" title={name}>
+      <span id={nameId} className="block shrink-0 truncate text-title font-medium text-fg" title={name}>
         {name}
       </span>
-      <span className="block shrink-0 truncate font-mono text-[11.5px] text-dim">{byline}</span>
+      <span id={bylineId} className="block shrink-0 truncate font-mono text-caption text-dim">
+        {byline}
+      </span>
       {summary && (
         <span
           data-testid="tile-summary"
           className={cx(
-            "mt-2 block min-h-0 overflow-hidden text-ellipsis text-label leading-relaxed text-zinc-400",
+            "mt-2 block min-h-0 overflow-hidden text-ellipsis text-label leading-relaxed text-fg-2",
             horizontal ? "line-clamp-4 shrink" : "line-clamp-2",
           )}
         >
@@ -101,7 +112,10 @@ export function Tile({
           stats line as one with it: the text stats alone are shorter. pt-3 sits outside the min height. */}
       <span className="mt-auto block min-w-0 shrink-0 pt-3">
         <span data-tile-stats className="flex min-h-badge min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
-          {stats}
+          {/* contents: the stats stay items of the flex row; the wrapper only gives them an id. */}
+          <span id={statsId} className="contents">
+            {stats}
+          </span>
           <span id={statusId} className={cx("flex flex-wrap items-center gap-1.5 empty:hidden", !horizontal && "ml-auto")}>
             {badges}
           </span>
@@ -109,7 +123,7 @@ export function Tile({
       </span>
     </>
   );
-  const shell = cx(CARD_TILE, "border-hairline bg-ink", horizontal ? "flex-row" : "flex-col pb-3.5");
+  const shell = tileShell(horizontal);
   const body = (
     <>
       {picture}
@@ -131,8 +145,8 @@ export function Tile({
         <button
           ref={cardRef}
           type="button"
-          aria-label={name}
-          aria-describedby={statusId}
+          aria-labelledby={nameId}
+          aria-describedby={`${bylineId} ${statsId} ${statusId}`}
           aria-haspopup="dialog"
           {...(focusKey && { [FOCUS_ATTR]: focusKey })}
           onClick={(e) => onOpen(e.currentTarget)}
@@ -141,7 +155,7 @@ export function Tile({
           {body}
         </button>
       ) : (
-        <div aria-disabled="true" aria-describedby={statusId} className={cx(shell, "opacity-60")}>
+        <div aria-disabled="true" aria-describedby={`${bylineId} ${statsId} ${statusId}`} className={cx(shell, "opacity-60")}>
           {body}
         </div>
       )}
@@ -160,7 +174,7 @@ const BONE = "block rounded-control bg-fill-2 motion-safe:animate-pulse";
 export function TileSkeleton({ picture, horizontal = false }: { picture: string; horizontal?: boolean }) {
   return (
     <li aria-hidden="true" data-testid="tile-skeleton" className="min-w-0">
-      <div className={cx(CARD_TILE, "border-hairline bg-ink", horizontal ? "flex-row" : "flex-col pb-3.5")}>
+      <div className={tileShell(horizontal)}>
         <span className={cx(BONE, picture)} />
         <span className={cx("flex min-w-0 flex-1 flex-col gap-2 self-stretch", horizontal ? "px-1.5 py-1" : "px-1.5")}>
           <span className={cx(BONE, "h-4 w-3/4")} />
@@ -179,10 +193,12 @@ export function TileSkeleton({ picture, horizontal = false }: { picture: string;
 
 export function Stat({ icon, value, label }: { icon: ReactNode; value: string; label: string }) {
   return (
-    <span className="flex min-w-0 items-center justify-start gap-1.5 font-mono text-[11.5px] text-dim">
+    <span className="flex min-w-0 items-center justify-start gap-1.5 font-mono text-caption text-dim">
       <span className="shrink-0">{icon}</span>
       <span className="truncate">{value}</span>
-      <span className="sr-only">{label}</span>
+      {/* Whitespace text nodes (no box in a flex row): the card's description reads "1.2K downloads 3 endorsements",
+          not one run-together word. */}{" "}
+      <span className="sr-only">{label}</span>{" "}
     </span>
   );
 }

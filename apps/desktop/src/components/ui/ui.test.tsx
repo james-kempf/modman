@@ -2,7 +2,7 @@
 // The shared Card: header placement and that the default look is unchanged.
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { Button, Card, CardSection, Row, SECTION_PAD, Toggle } from ".";
+import { Button, Card, CardSection, Row, SECTION_PAD, Segmented, Toggle } from ".";
 
 const surface = (title: string) => screen.getByRole("heading", { name: title }).closest("section")!.lastElementChild!;
 
@@ -109,7 +109,27 @@ describe("Button nav focus", () => {
   // Fails when a neutral button overrides the shared dark focus ink.
   it.each(["default", "ghost"] as const)("%s uses the shared focus ink", (tone) => {
     render(<Button tone={tone}>Go</Button>);
-    expect(cls("Go")).not.toContain("--focus-text");
+    // Only unconditional overrides count: a pressed ghost (a segment) keeps the accent like the selected tab.
+    expect(cls("Go")).not.toMatch(/(^|\s)\[--focus-text/);
+  });
+
+  // Fails when a pressed segment falls back to a fill that barely differs from its track (below 3:1), or stops
+  // matching the selected tab (accent-200 on an accent-400/15 tint, accent text on the highlight).
+  it("a pressed ghost (Segmented) takes the selected-tab look with an accent-600 edge", () => {
+    render(<Segmented label="Show" value="a" options={[{ value: "a", label: "A" }, { value: "b", label: "B" }]} onChange={() => {}} />);
+    const on = screen.getByRole("button", { name: "A" });
+    expect(on).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "B" })).toHaveAttribute("aria-pressed", "false");
+    expect(on.className.split(" ")).toEqual(
+      expect.arrayContaining([
+        "aria-pressed:bg-accent-400/15",
+        "aria-pressed:text-accent-200",
+        "aria-pressed:outline",
+        "aria-pressed:outline-accent-600",
+        "aria-pressed:[--focus-text:var(--color-accent-700)]",
+      ]),
+    );
+    expect(on.className).not.toMatch(/aria-pressed:bg-fill-3/);
   });
 
   // Fails when danger goes back to a saturated or ring-bordered fill at rest.

@@ -86,7 +86,7 @@ describe("focus and hover highlight", () => {
   it("darkens text inside the highlighted control above the utilities", () => {
     expect(layer).toMatch(/\* \{\s*@variant highlighted \{\s*color: var\(--focus-text, var\(--color-focus-ink\)\);/);
     expect(layer).toMatch(/\* \{\s*@variant in-highlight \{\s*color: inherit;/);
-    expect(layer).toMatch(/:is\(\.text-dim, \.text-zinc-400, \.text-zinc-500\) \{\s*@variant in-highlight \{\s*color: var\(--color-focus-ink-muted\);/);
+    expect(layer).toMatch(/:is\(\.text-dim, \.text-fg-2, \.text-zinc-400, \.text-zinc-500\) \{\s*@variant in-highlight \{\s*color: var\(--color-focus-ink-muted\);/);
     expect(layer).toMatch(/:focus::placeholder \{\s*color: var\(--color-focus-ink-muted\);/);
     expect(token("--color-focus-ink")).toBe("var(--color-zinc-900)");
     expect(token("--color-focus-ink-muted")).toBe("var(--color-zinc-600)");

@@ -226,6 +226,9 @@ describe("Browse", () => {
   it("does not query Nexus for a game that is not linked to it", async () => {
     const { t } = await open("browse", {}, [game({ nexus_domain: null })]);
     expect(await screen.findByText(/not linked to a Nexus Mods game/)).toBeInTheDocument();
+    // What to do instead (pick another game), and no filters that would change nothing.
+    expect(screen.getByRole("button", { name: "Go to Games" })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Show" })).toBeNull();
     expect(t.callsOf("browse")).toEqual([]);
   });
 
@@ -249,7 +252,8 @@ describe("Browse", () => {
         expect(el.className).toMatch(aspect);
         expect(el.className).toMatch(width);
         expect(el.className).toMatch(/\bshrink-0\b/);
-        expect(el.className).toMatch(/\brounded-card\b/);
+        // Nested inside the tile's padding: one radius step below its rounded-card-lg.
+        expect(el.className).toMatch(/\brounded-control-sm\b/);
       }
       expect(img.className).toMatch(/\bobject-cover\b/);
       // The monogram takes exactly the picture's box.

@@ -203,7 +203,9 @@ export function ModActions({ game, m, onAccepted }: { game: string; m: SearchHit
   return (
     <Button
       tone="primary"
-      disabled={m.modId === null}
+      // inactive, not disabled: focus stays on it (gamepad); a mod without a Nexus id has nothing to download.
+      inactive={m.modId === null}
+      title={m.modId === null ? "Not downloadable: no Nexus id" : undefined}
       busy={busy}
       aria-label={`Install ${name}`}
       icon={<DownloadSimpleIcon aria-hidden size={16} />}

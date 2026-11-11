@@ -84,6 +84,9 @@
    *   --container-content      page content max width
    *   --container-prose        long text measure
    *   --container-prose-sm     short text measure (empty states)
+   * Text (semantic aliases of the zinc steps; muted text is --color-dim)
+   *   --color-fg               primary text: titles, names (text.primary)
+   *   --color-fg-2             secondary text: summaries, empty states (text.secondary)
    * Colour on white (overlays on the ink surfaces), faintest to strongest
    *   --color-fill-1           resting option fill, row hover
    *   --color-hairline         card borders and dividers
@@ -96,7 +99,8 @@
    *   --color-scrim            dialog backdrop
    * Shadow: --shadow-overlay (dialogs, menus, notices via .glass)
    * Duration: --transition-duration-fast, -base, -slow
-   * Opacity: --opacity-disabled, --opacity-grain
+   * Opacity: --opacity-disabled, --opacity-stale (content kept up while its
+   *   replacement loads), --opacity-grain
    * Highlight (nav focus and mouse hover), one look for every control:
    *   --color-focus            the solid white fill
    *   --color-focus-ink        text and icons on it
@@ -157,6 +161,8 @@
   --color-ink-3: oklch(0.225 0.006 286);
   /* Legacy used zinc-500 for secondary text; this keeps that look at AA contrast on ink-3. */
   --color-dim: oklch(0.66 0.012 286);
+  --color-fg: var(--color-zinc-100);
+  --color-fg-2: var(--color-zinc-400);
 
   --color-hairline: rgb(255 255 255 / 0.05);
   --color-line: rgb(255 255 255 / 0.08);
@@ -193,6 +199,7 @@
   --stagger-step: 15ms;
 
   --opacity-disabled: 0.45;
+  --opacity-stale: 0.6;
   --opacity-grain: 0.035;
 
   --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
@@ -392,7 +399,7 @@
       color: inherit;
     }
   }
-  :is(.text-dim, .text-zinc-400, .text-zinc-500) {
+  :is(.text-dim, .text-fg-2, .text-zinc-400, .text-zinc-500) {
     @variant in-highlight {
       color: var(--color-focus-ink-muted);
     }

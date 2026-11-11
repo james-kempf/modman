@@ -4,7 +4,7 @@
 // download queue is on Activity.
 
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useLayoutEffect, useRef, type FocusEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent } from "react";
 import { errMsg } from "../app/bridge";
 import { useActiveGame } from "../app/queries";
 import { useRun } from "../app/run";
@@ -13,12 +13,18 @@ import { CollectionDetailsDialog, ModTile } from "../components/dialogs/BrowseDe
 import { RemoveButton } from "../components/browse/ModActions";
 import {
   ArrowClockwiseIcon,
+  CalendarBlankIcon,
+  CaretDoubleLeftIcon,
+  CaretDoubleRightIcon,
   CaretLeftIcon,
   CaretRightIcon,
   DownloadSimpleIcon,
   HardDrivesIcon,
+  LinkBreakIcon,
+  MagnifyingGlassIcon,
   PackageIcon,
   ThumbsUpIcon,
+  XIcon,
 } from "@phosphor-icons/react";
 import {
   Badge,
@@ -75,14 +81,16 @@ const SORTS = [
   { value: "newest", label: "Newest" },
 ] as const satisfies readonly { value: BrowseSort; label: string }[];
 
-/** "of all time", "this past month", ... for the result summary. */
-const PERIOD_PHRASE: Record<BrowsePeriod, string> = {
-  all: "of all time",
-  year: "from the past year",
-  month: "from the past month",
-  week: "from the past week",
-  day: "from the past day",
+/** "in the past month", ... for the empty state of a recent window (all time has its own sentence). */
+const PERIOD_PHRASE: Record<Exclude<BrowsePeriod, "all">, string> = {
+  year: "in the past year",
+  month: "in the past month",
+  week: "in the past week",
+  day: "today",
 };
+
+/** How long a page change keeps the previous page up (dimmed) before skeletons replace it: a fast answer never flashes them. */
+const SKELETON_DELAY_MS = 300;
 
 export function Browse() {
   const { game, isLoading } = useActiveGame();
@@ -94,9 +102,15 @@ export function Browse() {
       {isLoading ? null : !game ? (
         // Every install goes into the active game.
         <NoGame>Pick or add a game in Games first; Browse shows and installs mods for the active game.</NoGame>
+      ) : !game.nexus_domain ? (
+        // No filters either: they would change nothing.
+        <NoGame icon={<LinkBreakIcon size={28} weight="duotone" />} title="Nothing to browse">
+          This game is not linked to a Nexus Mods game, so Browse cannot list or install its mods. Pick a game that
+          Nexus Mods lists in Games.
+        </NoGame>
       ) : (
         // key: listings belong to one game.
-        <BrowseCard key={game.id} game={game.id} linked={!!game.nexus_domain} />
+        <BrowseCard key={game.id} game={game.id} />
       )}
     </ViewFrame>
   );
@@ -185,13 +199,15 @@ function BrowseSearch({ game }: { game: string }) {
         save(!draft.trim() && s.text ? { draft, text: "", page: 0 } : { draft });
       }}
       onSubmit={() => save({ text: s.draft.trim(), page: 0 })}
+      pending={s.draft.trim() !== s.text}
     />
   );
 }
 
-function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
+function BrowseCard({ game }: { game: string }) {
   const [s, save] = useBrowseSession(game);
   const { kind, period, sort, text, page } = s;
+  const qc = useQueryClient();
   // Set by a page change: once the new page is rendered, go to the top and focus its first result.
   const toFirst = useRef(false);
   const results = useRef<HTMLUListElement>(null);
@@ -200,15 +216,15 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
     toFirst.current = false;
     save({ ...patch, page: 0 });
   };
+  const clearSearch = () => refine({ draft: "", text: "" });
   const q = useQuery({
     queryKey: ["browse", game, kind, period, sort, text, page],
     queryFn: () => ipc.browse({ kind, period, sort, text, offset: page * PAGE_SIZE }),
-    enabled: linked,
     staleTime: 5 * 60_000,
     // The previous page stays up while the next one loads: the pager (and its focus) does not jump away.
     placeholderData: keepPreviousData,
   });
-  const onFocus = useBrowsePosition(game, q.isSuccess || !linked);
+  const onFocus = useBrowsePosition(game, q.isSuccess);
   const data = q.data;
   const total = data?.total ?? 0;
   const shown = data ? pageItems(data) : 0;
@@ -229,23 +245,43 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
   }, [q.isSuccess, q.isPlaceholderData, data, page, shown]);
   const noun = kind === "mods" ? "mods" : "collections";
   const first = page * PAGE_SIZE;
-  // Nothing on screen belongs to this query yet (first load, or the previous query's placeholder data):
-  // skeleton tiles. A cached query has its data at once and never shows them.
-  const loading = linked && !q.isError && (q.isPending || q.isPlaceholderData);
+  // Nothing on screen belongs to this query yet (first load, or the previous query's placeholder data).
+  const loading = !q.isError && (q.isPending || q.isPlaceholderData);
+  // A load that outlasts SKELETON_DELAY_MS swaps in skeleton tiles; until then the previous listing stays up,
+  // dimmed and inert (or nothing, on a first load). A cached query has its data at once and never shows them.
+  const [late, setLate] = useState(false);
+  useEffect(() => {
+    setLate(false);
+    if (!loading) return;
+    const timer = setTimeout(() => setLate(true), SKELETON_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [loading, kind, period, sort, text, page]);
+  const skeleton = loading && late;
+  const dim = loading && !late && !!data;
+  // As many skeletons as the page will hold when another page of these filters told the total.
+  const knownTotal = qc
+    .getQueriesData<BrowseView>({ queryKey: ["browse", game, kind, period, sort, text] })
+    .find(([, d]) => d)?.[1]?.total;
+  const skeletons = knownTotal === undefined ? PAGE_SIZE : Math.min(PAGE_SIZE, Math.max(1, knownTotal - first));
+  // Results (or a loading page) are on screen: the grid, its summary line and the pager.
+  const listed = !q.isError && (loading || shown > 0);
   // The pager is shown (results listed, or loading with a listing already up): it is the card's bottom edge,
   // flush with the view's.
-  const hasPager = linked && !q.isError && (loading ? !!data : shown > 0);
+  const hasPager = !q.isError && (loading ? !!data : shown > 0);
+  // One page: no paging buttons, only the count.
+  const paged = pages > 1;
   // One rule for the buttons and LT/RT: nothing while a page loads, with no results, or past either end.
-  const goPage = (delta: 1 | -1) => {
-    const to = page + delta;
-    if (loading || !shown || to < 0 || to >= pages) return;
+  // `park`: the pager button that holds focus while the page loads when a tile had it (LT/RT).
+  const goTo = (to: number, park: "first" | "prev" | "next" | "last") => {
+    if (loading || !shown || to < 0 || to >= pages || to === page) return;
     toFirst.current = true;
-    // A tile with focus (LT/RT) turns into a skeleton: park focus on the pager button for that direction
-    // until the new page's first tile takes it (T3).
+    // A tile with focus (LT/RT) goes away with its page: park focus on the pager button until the new page's
+    // first tile takes it (T3).
     if (results.current?.contains(document.activeElement))
-      document.querySelector<HTMLElement>(`[${FOCUS_ATTR}="page:${delta > 0 ? "next" : "prev"}"]`)?.focus({ preventScroll: true });
+      document.querySelector<HTMLElement>(`[${FOCUS_ATTR}="page:${park}"]`)?.focus({ preventScroll: true });
     save({ page: to });
   };
+  const goPage = (delta: 1 | -1) => goTo(page + delta, delta > 0 ? "next" : "prev");
   const goPageRef = useRef(goPage);
   goPageRef.current = goPage;
   useEffect(() => {
@@ -253,11 +289,27 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
     document.addEventListener(PAGE_EVENT, onPage);
     return () => document.removeEventListener(PAGE_EVENT, onPage);
   }, []);
+  const count = (n: number) => `${n.toLocaleString()} ${n === 1 ? noun.slice(0, -1) : noun}`;
+  // The one live result summary (screen readers hear each new listing); shown above the grid while results are.
+  const summary = q.isError ? "" : loading ? `Loading ${noun}…` : `${text ? `Results for “${text}” · ` : ""}${count(total)}`;
+  const emptyActions = (text || period !== "all") && (
+    <>
+      {text && (
+        <Button tone="primary" icon={<XIcon aria-hidden size={16} />} onClick={clearSearch}>
+          Clear search
+        </Button>
+      )}
+      {period !== "all" && (
+        <Button tone={text ? "default" : "primary"} icon={<CalendarBlankIcon aria-hidden size={16} />} onClick={() => refine({ period: "all" })}>
+          Show all time
+        </Button>
+      )}
+    </>
+  );
   return (
-    <Card
-      onFocus={onFocus}
-    >
+    <Card onFocus={onFocus}>
       <CardSection>
+        {/* Sort stays a dropdown: as a third Segmented the row no longer fits one line at 1024px (DESIGN.md). */}
         <div className="flex flex-wrap items-center gap-x-6 gap-y-4">
           <Segmented label="Show" value={kind} options={KINDS} onChange={(v) => refine({ kind: v })} />
           <Segmented label="Created" value={period} options={PERIODS} onChange={(v) => refine({ period: v })} />
@@ -265,36 +317,82 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
         </div>
       </CardSection>
       <CardSection className={hasPager ? "pb-0" : undefined}>
-        {!linked ? (
-          <Empty>This game is not linked to a Nexus Mods game, so there is nothing to browse.</Empty>
-        ) : q.isError ? (
-          <ErrorNote>
-            Could not load {noun}: {errMsg(q.error)}
-            <Button size="sm" icon={<ArrowClockwiseIcon aria-hidden size={15} />} onClick={() => void q.refetch()}>
-              Retry
+        {/* Always mounted (a live region must exist before it changes); visually hidden when the empty state or
+            the error says it instead. */}
+        <div className={listed ? "mb-4 flex flex-wrap items-center gap-3" : "sr-only"}>
+          <p aria-live="polite" className="font-mono text-caption text-dim tabular-nums">
+            {summary}
+          </p>
+          {listed && text && (
+            <Button size="sm" tone="ghost" icon={<XIcon aria-hidden size={16} />} onClick={clearSearch}>
+              Clear search
             </Button>
+          )}
+        </div>
+        {q.isError ? (
+          <ErrorNote
+            actions={
+              <Button size="sm" busy={q.isFetching} icon={<ArrowClockwiseIcon aria-hidden size={16} />} onClick={() => void q.refetch()}>
+                Try again
+              </Button>
+            }
+          >
+            <span className="block">Couldn’t reach Nexus to list {noun}.</span>
+            <span className="mt-1 block font-mono text-caption text-rose-300">{errMsg(q.error)}</span>
           </ErrorNote>
-        ) : !loading && !shown ? (
-          <Empty>
+        ) : !listed ? (
+          <Empty
+            icon={
+              text ? (
+                <MagnifyingGlassIcon size={28} weight="duotone" />
+              ) : period !== "all" ? (
+                <CalendarBlankIcon size={28} weight="duotone" />
+              ) : (
+                <PackageIcon size={28} weight="duotone" />
+              )
+            }
+            title={
+              text ? `No ${noun} match “${text}”` : period === "all" ? `No ${noun} listed` : `No ${noun} created ${PERIOD_PHRASE[period]}`
+            }
+            action={emptyActions || undefined}
+          >
             {text
-              ? `No ${noun} match “${text}”. Try fewer words, or a longer period.`
-              : `No ${noun} were created ${PERIOD_PHRASE[period].replace(/^from /, "in ")}.`}
+              ? period === "all"
+                ? "Try fewer or different words."
+                : "Try fewer words, or a longer period."
+              : period === "all"
+                ? `Nexus lists no ${noun} for this game.`
+                : "Try a longer period."}
           </Empty>
         ) : (
           <>
             <ul
               ref={results}
-              className={kind === "mods" ? MOD_GRID : RESULTS_GRID}
+              className={cx(kind === "mods" ? MOD_GRID : RESULTS_GRID, "stagger", dim && "opacity-stale transition-opacity duration-base")}
               aria-label={kind === "mods" ? "Mods" : "Collections"}
               aria-busy={loading || undefined}
+              // The previous page, kept up while the next loads, cannot be opened.
+              inert={dim || undefined}
             >
-              {loading
-                ? Array.from({ length: PAGE_SIZE }, (_, i) => (
+              {skeleton
+                ? Array.from({ length: skeletons }, (_, i) => (
                     <TileSkeleton key={`sk${i}`} horizontal={kind === "collections"} picture={kind === "mods" ? MOD_PICTURE : COLLECTION_PICTURE} />
                   ))
-                : data!.kind === "mods"
-                ? data!.mods.map((m, i) => <ModTile key={m.modId !== null ? `m${m.modId}` : `i${i}`} game={game} m={m} focusKey={`m${m.modId ?? m.name}`} />)
-                : data!.collections.map((c) => <CollectionTile key={c.slug} game={game} c={c} />)}
+                : !data
+                ? null
+                : data.kind === "mods"
+                ? data.mods.map((m, i) => (
+                    <ModTile
+                      key={m.modId !== null ? `m${m.modId}` : `i${i}`}
+                      game={game}
+                      m={m}
+                      focusKey={`m${m.modId ?? m.name}`}
+                      // No Nexus id: nothing to download or describe; a dimmed card that says why (as a collection's mods).
+                      inert={m.modId === null}
+                      extraBadges={m.modId === null && <Badge>Not downloadable: no Nexus id</Badge>}
+                    />
+                  ))
+                : data.collections.map((c) => <CollectionTile key={c.slug} game={game} c={c} />)}
             </ul>
             {/* role=navigation, not <nav> (landmarks inside <main> share its spatial-nav region, nav/spatial.ts).
                 A toolbar stuck to the bottom of <main>: the last child of the
@@ -303,45 +401,74 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
                 <main>'s bottom edge: WebKit insets sticky by <main>'s padding-bottom, so bottom is minus that
                 padding (--main-pb, set by App). At the end it rests here with <main>'s usual bottom padding below. Nothing of the card shows under it:
                 the section has no bottom padding (pb-0) and -mb-px covers the card's bottom border. */}
-            <div
-              role="navigation"
-              className="sticky bottom-[calc(var(--main-pb,0px)*-1)] z-10 -mx-section mt-5 -mb-px flex flex-wrap items-center gap-4 rounded-b-card border-t border-hairline bg-ink-2 px-section py-3"
-              aria-label={`${kind === "mods" ? "Mods" : "Collections"} pages`}
-            >
-              {/* inactive, not disabled: focus stays on the button at the first/last page. */}
-              <Button
-                size="sm"
-                {...{ [FOCUS_ATTR]: "page:prev" }}
-                inactive={page === 0}
-                busy={loading}
-                icon={<CaretLeftIcon aria-hidden size={15} />}
-                onClick={() => goPage(-1)}
+            {hasPager && (
+              <div
+                role="navigation"
+                className="sticky bottom-[calc(var(--main-pb,0px)*-1)] z-10 -mx-section mt-5 -mb-px flex flex-wrap items-center gap-4 rounded-b-card border-t border-hairline bg-ink-2 px-section py-3"
+                aria-label={`${kind === "mods" ? "Mods" : "Collections"} pages`}
               >
-                Previous
-              </Button>
-              <span className="font-mono text-caption text-dim" aria-live="polite">
-                {loading ? (
-                  // The target page; the total may belong to the previous query.
-                  <>Page {page + 1} · loading…</>
-                ) : (
-                  <>
-                    Page {page + 1} of {pages.toLocaleString()} · {(first + 1).toLocaleString()}–
-                    {(first + shown).toLocaleString()} of {total.toLocaleString()}
-                  </>
+                {/* inactive, not disabled: focus stays on the button at the first/last page. */}
+                {paged && (
+                  <span className="flex gap-2">
+                    <Button
+                      size="sm"
+                      {...{ [FOCUS_ATTR]: "page:first" }}
+                      inactive={page === 0}
+                      busy={loading}
+                      icon={<CaretDoubleLeftIcon aria-hidden size={16} />}
+                      onClick={() => goTo(0, "first")}
+                    >
+                      First
+                    </Button>
+                    <Button
+                      size="sm"
+                      {...{ [FOCUS_ATTR]: "page:prev" }}
+                      inactive={page === 0}
+                      busy={loading}
+                      icon={<CaretLeftIcon aria-hidden size={16} />}
+                      onClick={() => goPage(-1)}
+                    >
+                      Previous
+                    </Button>
+                  </span>
                 )}
-              </span>
-              <Button
-                size="sm"
-                {...{ [FOCUS_ATTR]: "page:next" }}
-                inactive={page + 1 >= pages}
-                busy={loading}
-                className="ml-auto"
-                onClick={() => goPage(1)}
-              >
-                Next
-                <CaretRightIcon aria-hidden size={15} />
-              </Button>
-            </div>
+                <span className="font-mono text-caption text-dim tabular-nums">
+                  {loading ? (
+                    // The target page; the total may belong to the previous query.
+                    <>Page {page + 1} · loading…</>
+                  ) : (
+                    <>
+                      Page {page + 1} of {pages.toLocaleString()} · {(first + 1).toLocaleString()}–
+                      {(first + shown).toLocaleString()} of {total.toLocaleString()}
+                    </>
+                  )}
+                </span>
+                {paged && (
+                  <span className="ml-auto flex gap-2">
+                    <Button
+                      size="sm"
+                      {...{ [FOCUS_ATTR]: "page:next" }}
+                      inactive={page + 1 >= pages}
+                      busy={loading}
+                      onClick={() => goPage(1)}
+                    >
+                      Next
+                      <CaretRightIcon aria-hidden size={16} />
+                    </Button>
+                    <Button
+                      size="sm"
+                      {...{ [FOCUS_ATTR]: "page:last" }}
+                      inactive={page + 1 >= pages}
+                      busy={loading}
+                      onClick={() => goTo(pages - 1, "last")}
+                    >
+                      Last
+                      <CaretDoubleRightIcon aria-hidden size={16} />
+                    </Button>
+                  </span>
+                )}
+              </div>
+            )}
           </>
         )}
       </CardSection>
@@ -352,15 +479,16 @@ function BrowseCard({ game, linked }: { game: string; linked: boolean }) {
 // Mod pictures fill the tile's width at 16:9 (MOD_PICTURE). Collection pictures are 4:5 portrait, left of the
 // text, and their width is a mod picture's height. The results <ul> is the container
 // (100cqw), and the mod tile's picture width is its column (mods: 1 / sm 2 / xl 3, gap-4 = 1rem) less the tile's
-// p-2.5 and 1px border (1.25rem + 2px); times 9/16 is that picture's height. Keep in step with the grid and Tile.
+// p-3 and 1px border (1.5rem + 2px); times 9/16 is that picture's height. Keep in step with the grid and Tile.
 // The monogram fallback takes the same box, so a picture arriving never shifts the grid.
 // self-start: the horizontal tile's row stretches its items to the text column's (or grid row's) height, and a
 // stretched cross size overrides aspect-ratio when the width is fixed, so the picture would grow past 4:5.
+// rounded-control-sm: one step below the tile's rounded-card-lg (as MOD_PICTURE), so the corners nest.
 const COLLECTION_PICTURE = cx(
-  "aspect-[4/5] shrink-0 self-start rounded-card",
-  "w-[calc((100cqw-1.25rem-2px)*9/16)]",
-  "sm:w-[calc(((100cqw-1rem)/2-1.25rem-2px)*9/16)]",
-  "xl:w-[calc(((100cqw-2rem)/3-1.25rem-2px)*9/16)]",
+  "aspect-[4/5] shrink-0 self-start rounded-control-sm",
+  "w-[calc((100cqw-1.5rem-2px)*9/16)]",
+  "sm:w-[calc(((100cqw-1rem)/2-1.5rem-2px)*9/16)]",
+  "xl:w-[calc(((100cqw-2rem)/3-1.5rem-2px)*9/16)]",
 );
 
 function CollectionTile({ game, c }: { game: string; c: CollectionHit }) {
@@ -395,12 +523,12 @@ function CollectionTile({ game, c }: { game: string; c: CollectionHit }) {
       byline={[c.author, c.category, c.revision !== null ? `revision ${c.revision}` : null].filter(Boolean).join(" · ")}
       summary={c.summary}
       stats={
-        // 2x2, row by row: likes, installs / size, mods.
+        // 2x2, row by row: likes, installs / size, mods. An unknown (null) count is left out, as on mod tiles.
         <span className="grid min-w-0 flex-1 grid-cols-2 gap-x-4 gap-y-1">
-          <Stat icon={<ThumbsUpIcon aria-hidden size={13} />} value={compact(c.endorsements)} label="endorsements" />
-          <Stat icon={<DownloadSimpleIcon aria-hidden size={13} />} value={compact(c.downloads)} label="downloads" />
-          <Stat icon={<HardDrivesIcon aria-hidden size={13} />} value={bytes(c.total_size)} label="size" />
-          <Stat icon={<PackageIcon aria-hidden size={13} />} value={c.mod_count !== null ? String(c.mod_count) : "?"} label="mods" />
+          {c.endorsements !== null && <Stat icon={<ThumbsUpIcon aria-hidden size={12} />} value={compact(c.endorsements)} label="endorsements" />}
+          {c.downloads !== null && <Stat icon={<DownloadSimpleIcon aria-hidden size={12} />} value={compact(c.downloads)} label="downloads" />}
+          {c.total_size !== null && <Stat icon={<HardDrivesIcon aria-hidden size={12} />} value={bytes(c.total_size)} label="size" />}
+          {c.mod_count !== null && <Stat icon={<PackageIcon aria-hidden size={12} />} value={String(c.mod_count)} label="mods" />}
         </span>
       }
       badges={

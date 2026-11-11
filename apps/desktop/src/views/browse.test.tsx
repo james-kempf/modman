@@ -8,12 +8,13 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { useUi, type ViewId } from "../app/store";
 import { MOD_GRID, RESULTS_GRID } from "../components/browse/Tile";
-import { bytes } from "../components/ui";
+import { bytes, cx } from "../components/ui";
 import type { Handler } from "../mock/fake";
 import { game } from "../mock/fixtures";
 import { performNav } from "../nav/actions";
 import { focusables } from "../nav/spatial";
 import { setup } from "../test/harness";
+import { PAGE_SIZE as PAGE } from "./Browse";
 
 async function open(view: ViewId, handlers: Record<string, Handler> = {}) {
   const env = await setup(handlers, [game()]);
@@ -86,13 +87,13 @@ describe("Browse cards (Browse-1)", () => {
     const card = within(mods).getByRole("button", { name: "Mod 8" });
     expect(card.tagName).toBe("BUTTON");
     expect(card).toHaveAttribute("data-browse-focus", "m8");
-    expect(card).toHaveAccessibleDescription("Installed");
-    expect(within(mods).getByRole("button", { name: "Mod 7" })).not.toHaveAccessibleDescription("Installed");
+    expect(card).toHaveAccessibleDescription(/Installed/);
+    expect(within(mods).getByRole("button", { name: "Mod 7" })).not.toHaveAccessibleDescription(/Installed/);
     expect(within(mods).queryByRole("button", { name: /^(Install|Details for|Installed: remove)/ })).toBeNull();
 
     await showCollections(user);
     const ccard = await screen.findByRole("button", { name: "Coll cur" });
-    expect(ccard).toHaveAccessibleDescription("Installed");
+    expect(ccard).toHaveAccessibleDescription(/Installed/);
     expect(within(ccard.closest("li")!).getAllByRole("button")).toHaveLength(1);
   });
 
@@ -811,7 +812,7 @@ describe("Browse LT/RT paging", () => {
   // Fails when a trigger with no results listed still changes the page (a request for an empty offset).
   it("does nothing when there are no results", async () => {
     const { t } = await open("browse", { browse: () => ({ kind: "mods", total: 0, mods: [] }) });
-    await screen.findByText(/No mods were created/);
+    await screen.findByText(/Nexus lists no mods for this game/);
     const before = t.callsOf("browse").length;
     act(() => performNav({ type: "page", delta: 1 }));
     await act(() => new Promise((r) => setTimeout(r, 20)));
@@ -824,7 +825,7 @@ describe("Browse LT/RT paging", () => {
     await screen.findByText("Mod 1");
     const pager = screen.getByRole("navigation", { name: "Mods pages" });
     expect(pager.className).toMatch(/(^|\s)-mx-section(\s|$)/);
-    expect(within(pager).getByRole("button", { name: /Next/ }).className).toMatch(/\bml-auto\b/);
+    expect(within(pager).getByRole("button", { name: /Next/ }).parentElement!.className).toMatch(/\bml-auto\b/);
   });
 });
 
@@ -903,7 +904,7 @@ describe("Browse page change: top and first tile", () => {
     await user.click(next);
     await waitFor(() => expect(document.activeElement).toBe(tile("Mod 1")));
     expect(t.callsOf("browse").some((c) => reqOf(c).offset === 24)).toBe(true);
-    expect(screen.getByRole("navigation", { name: "Mods pages" })).toHaveTextContent(/^Previous\s*Page 1 of/);
+    expect(screen.getByRole("navigation", { name: "Mods pages" })).toHaveTextContent(/^First\s*Previous\s*Page 1 of/);
   });
 });
 
@@ -1010,10 +1011,11 @@ describe("Browse skeleton while loading", () => {
     await waitFor(() => expect(skeletons()).toHaveLength(24));
     const ul = results();
     expect(ul).toHaveAttribute("aria-busy", "true");
-    expect(ul.className).toBe(MOD_GRID);
+    expect(ul.className).toBe(cx(MOD_GRID, "stagger"));
     for (const li of skeletons()) expect(li).toHaveAttribute("aria-hidden", "true");
     expect(focusables(ul)).toHaveLength(0);
-    expect(screen.queryByText(/Loading mods/)).toBeNull();
+    // Only the live result summary may say so (screen readers); no text line stands in for the tiles.
+    expect(screen.queryByText(/Loading mods/, { ignore: "script, style, [aria-live]" })).toBeNull();
     await g.release();
     expect(await screen.findByText("Mod 1")).toBeInTheDocument();
     expect(skeletons()).toHaveLength(0);
@@ -1029,7 +1031,8 @@ describe("Browse skeleton while loading", () => {
     const pager = screen.getByRole("navigation", { name: "Mods pages" });
     const next = within(pager).getByRole("button", { name: /Next/ });
     await user.click(next);
-    await waitFor(() => expect(skeletons()).toHaveLength(24));
+    // Page 2 of 30 holds 6: as many skeletons as tiles to come.
+    await waitFor(() => expect(skeletons()).toHaveLength(6));
     expect(screen.queryByText("Mod 1")).toBeNull();
     expect(results()).toHaveAttribute("aria-busy", "true");
     expect(pager).toBeInTheDocument();
@@ -1051,7 +1054,7 @@ describe("Browse skeleton while loading", () => {
     const tile = await screen.findByRole("button", { name: "Mod 3" });
     tile.focus();
     act(() => performNav({ type: "page", delta: 1 }));
-    await waitFor(() => expect(skeletons()).toHaveLength(24));
+    await waitFor(() => expect(skeletons()).toHaveLength(6));
     expect(document.activeElement).toBe(within(screen.getByRole("navigation", { name: "Mods pages" })).getByRole("button", { name: /Next/ }));
     await g.release();
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Mod 25" })));
@@ -1077,9 +1080,27 @@ describe("Browse skeleton while loading", () => {
     await showCollections(user);
     await screen.findByText("Coll s1");
     act(() => performNav({ type: "page", delta: 1 }));
-    await waitFor(() => expect(skeletons()).toHaveLength(24));
-    expect(results().className).toBe(RESULTS_GRID);
+    await waitFor(() => expect(skeletons()).toHaveLength(6));
+    expect(results().className).toBe(cx(RESULTS_GRID, "stagger"));
     expect(results()).toHaveAttribute("aria-label", "Collections");
+  });
+
+  // Fails when a page change swaps in skeletons at once (a fast answer flashes them), the kept page can still be
+  // opened while it is stale, or the grid loses its staggered entrance.
+  it("keeps the previous page up, dimmed and inert, until the skeleton delay passes", async () => {
+    const g = gated((o) => o > 0);
+    const { user } = await open("browse", { browse: g.handler });
+    await screen.findByText("Mod 1");
+    await user.click(within(screen.getByRole("navigation", { name: "Mods pages" })).getByRole("button", { name: /Next/ }));
+    const ul = results();
+    expect(screen.getByText("Mod 1")).toBeInTheDocument();
+    expect(skeletons()).toHaveLength(0);
+    expect(ul.className.split(" ")).toEqual(expect.arrayContaining(["stagger", "opacity-stale"]));
+    expect(ul).toHaveAttribute("inert");
+    await waitFor(() => expect(skeletons()).toHaveLength(6));
+    expect(ul.className).not.toMatch(/opacity-stale/);
+    expect(ul).not.toHaveAttribute("inert");
+    await g.release();
   });
 
   // Fails when a failed load leaves the skeletons up instead of the error state.
@@ -1088,7 +1109,8 @@ describe("Browse skeleton while loading", () => {
     await open("browse", { browse: g.handler });
     await waitFor(() => expect(skeletons()).toHaveLength(24));
     await g.release();
-    expect(await screen.findByText(/Could not load mods: nexus down/)).toBeInTheDocument();
+    expect(await screen.findByText(/Couldn’t reach Nexus to list mods\./)).toBeInTheDocument();
+    expect(screen.getByText("nexus down")).toBeInTheDocument();
     expect(skeletons()).toHaveLength(0);
   });
 });
@@ -1227,5 +1249,126 @@ describe("Browse details About (T5)", () => {
     expect(about).toHaveTextContent("<script>alert(1)</script>");
     expect(dlg.querySelector("script")).toBeNull();
     expect(t.callsOf("browse").map(aboutOf).filter(Boolean)).toEqual([{ kind: "collection", slug: "abc" }]);
+  });
+});
+
+describe("Browse UX audit fixes", () => {
+  // Fails when a typed but unsubmitted search looks like an applied filter (no Enter hint), the active search is
+  // not shown above the grid with a way to clear it, or the live result summary is remounted (not announced).
+  it("hints that Enter searches, then shows the active search in a live summary with Clear search", async () => {
+    const { t, user } = await open("browse", { browse: paged });
+    await screen.findByText("Mod 1");
+    const live = screen.getByText("30 mods");
+    expect(live).toHaveAttribute("aria-live", "polite");
+    const form = screen.getByRole("search", { name: "Search Nexus" });
+    const box = screen.getByLabelText("Search");
+    expect(form.querySelector("[data-search-hint]")).toBeNull();
+    await user.type(box, "lore");
+    expect(form.querySelector("[data-search-hint]")).toHaveTextContent("Enter");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(form.querySelector("[data-search-hint]")).toBeNull());
+    await waitFor(() => expect(live).toHaveTextContent("Results for “lore” · 30 mods"));
+    await user.click(screen.getByRole("button", { name: "Clear search" }));
+    // The unfiltered listing is cached: no new request, but the field and the summary are cleared.
+    expect(box).toHaveValue("");
+    await waitFor(() => expect(live).toHaveTextContent(/^30 mods$/));
+    expect(useUi.getState().browse).toMatchObject({ draft: "", text: "" });
+    expect(t.callsOf("browse").length).toBeGreaterThan(0);
+  });
+
+  // Fails when an empty listing leaves the user without a way out (no Clear search / Show all time), suggests a
+  // longer period at all time, or says "created of all time".
+  it("empty states offer Clear search and Show all time, and all time has its own sentence", async () => {
+    const { t, user } = await open("browse", { browse: () => ({ kind: "mods", total: 0, mods: [] }) });
+    expect(await screen.findByText("Nexus lists no mods for this game.")).toBeInTheDocument();
+    expect(screen.queryByText(/longer period|of all time/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show all time" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Month" }));
+    expect(await screen.findByRole("heading", { name: "No mods created in the past month" })).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Search"), "zzz{Enter}");
+    expect(await screen.findByRole("heading", { name: "No mods match “zzz”" })).toBeInTheDocument();
+    expect(screen.getByText("Try fewer words, or a longer period.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Show all time" }));
+    await waitFor(() => expect(lastReq(t).period).toBe("all"));
+    expect(await screen.findByText("Try fewer or different words.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Clear search" }));
+    expect(await screen.findByText("Nexus lists no mods for this game.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Search")).toHaveValue("");
+  });
+
+  // Fails when the card's aria-label overrides its content again (description lost) or the stats run together.
+  it("a card is named by its title and described by its byline, stats and status", async () => {
+    await open("browse", { browse: () => ({ kind: "mods", total: 1, mods: [hit(7, { author: "skyler", downloads: 1500, installed: true })] }) });
+    const card = await screen.findByRole("button", { name: "Mod 7" });
+    expect(card).not.toHaveAttribute("aria-label");
+    expect(card).toHaveAccessibleDescription(/skyler.*1\.5K downloads.*Installed/);
+  });
+
+  // Fails when a mod without a Nexus id opens a dialog whose Install cannot work, or gives no reason.
+  it("a mod without a Nexus id is a dimmed card that says why", async () => {
+    await open("browse", { browse: () => ({ kind: "mods", total: 2, mods: [hit(7), hit(0, { modId: null, name: "Orphan" })] }) });
+    await screen.findByText("Mod 7");
+    expect(screen.queryByRole("button", { name: "Orphan" })).toBeNull();
+    expect(screen.getByText("Not downloadable: no Nexus id")).toBeInTheDocument();
+  });
+
+  // Fails when the last page is only reachable one page at a time, or First/Last ask for the wrong offset.
+  it("First and Last jump to either end", async () => {
+    const many: Handler = (a) => {
+      const r = reqOf(a);
+      const n = Math.min(PAGE, 100 - r.offset);
+      return { kind: "mods", total: 100, mods: Array.from({ length: n }, (_, i) => hit(r.offset + i + 1)) };
+    };
+    const { t, user } = await open("browse", { browse: many });
+    await screen.findByText("Mod 1");
+    const pager = screen.getByRole("navigation", { name: "Mods pages" });
+    expect(within(pager).getByRole("button", { name: /First/ })).toHaveAttribute("aria-disabled", "true");
+    await user.click(within(pager).getByRole("button", { name: /Last/ }));
+    expect(await screen.findByText("Mod 97")).toBeInTheDocument();
+    expect(lastReq(t).offset).toBe(96);
+    expect(pager).toHaveTextContent("Page 5 of 5 · 97–100 of 100");
+    expect(within(pager).getByRole("button", { name: /Last/ })).toHaveAttribute("aria-disabled", "true");
+    await user.click(within(pager).getByRole("button", { name: /First/ }));
+    expect(await screen.findByText("Mod 1")).toBeInTheDocument();
+    expect(pager).toHaveTextContent("Page 1 of 5");
+  });
+
+  // Fails when a single page still shows paging buttons that can never do anything, or drops the count.
+  it("a single page shows the count without paging buttons", async () => {
+    await open("browse", { browse: () => ({ kind: "mods", total: 2, mods: [hit(1), hit(2)] }) });
+    await screen.findByText("Mod 1");
+    const pager = screen.getByRole("navigation", { name: "Mods pages" });
+    expect(within(pager).queryAllByRole("button")).toHaveLength(0);
+    expect(pager).toHaveTextContent("Page 1 of 1 · 1–2 of 2");
+  });
+
+  // Fails when the error's retry is not the ErrorNote action labelled "Try again", or does not list again.
+  it("a failed listing offers Try again, which lists again", async () => {
+    let fail = true;
+    const { user } = await open("browse", {
+      browse: (a) => {
+        if (fail) throw { message: "nexus down" };
+        return paged(a);
+      },
+    });
+    const again = await screen.findByRole("button", { name: "Try again" });
+    expect(screen.getByText(/Couldn’t reach Nexus to list mods\./)).toBeInTheDocument();
+    fail = false;
+    await user.click(again);
+    expect(await screen.findByText("Mod 1")).toBeInTheDocument();
+  });
+
+  // Fails when a collection's unknown counts read as real values ("0" likes, "?" mods) instead of being left out.
+  it("a collection's unknown counts are left out", async () => {
+    const { user } = await open("browse", {
+      browse: (a) =>
+        reqOf(a).kind === "mods"
+          ? { kind: "mods", total: 0, mods: [] }
+          : { kind: "collections", total: 1, collections: [coll("n", { endorsements: null, downloads: null, mod_count: null, total_size: null })] },
+    });
+    await showCollections(user);
+    const card = await screen.findByRole("button", { name: "Coll n" });
+    const stats = card.querySelector("[data-tile-stats]")!;
+    expect(stats).not.toHaveTextContent(/endorsements|downloads|size|mods|\?/);
   });
 });

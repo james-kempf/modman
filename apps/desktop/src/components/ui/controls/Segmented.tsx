@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { Button } from "./Button";
 
-/** Legacy pill switcher (Mods filter / Activity tabs). */
+/** A pill switcher (Browse and Mods filters); the pressed segment looks like the selected tab in Tabs. */
 export function Segmented<T extends string>({
   label,
   value,
