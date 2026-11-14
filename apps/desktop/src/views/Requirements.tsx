@@ -73,11 +73,7 @@ export function Requirements() {
   const rows = q.data ?? [];
   return (
     <ViewFrame>
-      <ViewHeader
-        title="Requirements"
-        eyebrow={game?.name}
-        description="What your enabled mods need, from their Nexus pages. Loaders like UE4SS or SKSE are detected by their files in the game folder."
-      >
+      <ViewHeader>
         <Button
           size="sm"
           busy={refreshing}

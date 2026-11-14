@@ -96,7 +96,7 @@ describe("Overview", () => {
     const { user } = await open("overview", {}, []);
     await screen.findByRole("heading", { name: "No game yet" });
     await user.click(within(screen.getByRole("main")).getByRole("button", { name: "Go to Games" }));
-    expect(await screen.findByRole("heading", { level: 1, name: "Games" })).toBeInTheDocument();
+    expect(await screen.findByRole("main", { name: "Games" })).toBeInTheDocument();
     expect(document.activeElement).toHaveAttribute("data-tab", "games");
     expect(within(screen.getByRole("main")).getByRole("button", { name: "Add game" })).toBeInTheDocument();
   });
@@ -415,7 +415,7 @@ describe("Activity", () => {
     expect(list).toHaveTextContent("SkyUI.7z");
     expect(list).toHaveTextContent("done");
     act(() => useUi.getState().setView("browse"));
-    expect(await screen.findByRole("heading", { name: "Browse" })).toBeInTheDocument();
+    expect(await screen.findByRole("main", { name: "Browse" })).toBeInTheDocument();
     const callsBefore = t.callsOf("downloads_list").length;
     expect(screen.queryByRole("list", { name: "Downloads" })).toBeNull();
     expect(screen.queryByLabelText(/Mod id, Nexus URL/)).toBeNull();
@@ -430,5 +430,24 @@ describe("view frame", () => {
     await open(view);
     const content = screen.getByRole("main").firstElementChild!;
     expect(content.firstElementChild).toHaveAttribute("data-view-frame");
+  });
+
+  // Fails when a visible page title comes back, or the view loses its accessible name (now <main>'s aria-label).
+  it.each(VIEWS.map((v) => [v.id, v.label] as const))("%s has no page title and names <main> %s", async (view, label) => {
+    await open(view);
+    const main = await screen.findByRole("main", { name: label });
+    expect(within(main).queryByRole("heading", { level: 1 })).toBeNull();
+    expect(within(main).queryByText(label, { selector: "h1, .eyebrow" })).toBeNull();
+    // No eyebrow or intro line left in the view header (e.g. the game name, Mods' priority line).
+    expect(main.querySelector("[data-view-frame] > header .eyebrow")).toBeNull();
+    expect(main.querySelector("[data-view-frame] > header .text-lead")).toBeNull();
+  });
+
+  // Fails when a view's search bar leaves the centered slot of its header row.
+  it.each(["games", "browse"] as const)("%s centers its search bar in the header", async (view) => {
+    await open(view);
+    const search = await within(screen.getByRole("main")).findByRole("search");
+    expect(search.parentElement!.className).toMatch(/\bjustify-self-center\b/);
+    expect(search.closest("header")).not.toBeNull();
   });
 });

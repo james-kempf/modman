@@ -19,6 +19,7 @@ export { Notice, type NoticeTone } from "./feedback/Notice";
 export { PadGlyph } from "./display/PadGlyph";
 export { Picture } from "./display/Picture";
 export { Row } from "./layout/Row";
+export { SearchRow } from "./layout/SearchRow";
 export { Segmented } from "./controls/Segmented";
 export { Tabs, type TabItem } from "./controls/Tabs";
 export { SearchField } from "./controls/SearchField";

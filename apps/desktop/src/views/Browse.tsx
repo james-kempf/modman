@@ -94,9 +94,7 @@ export function Browse() {
   const { game, isLoading } = useActiveGame();
   return (
     <ViewFrame>
-      <ViewHeader title="Browse" eyebrow={game?.name}>
-        {game?.nexus_domain && <BrowseSearch key={game.id} game={game.id} />}
-      </ViewHeader>
+      <ViewHeader search={game?.nexus_domain && <BrowseSearch key={game.id} game={game.id} />} />
       {isLoading ? null : !game ? (
         // Every install goes into the active game.
         <NoGame>Pick or add a game in Games first; Browse shows and installs mods for the active game.</NoGame>
@@ -179,7 +177,7 @@ function useBrowsePosition(game: string, ready: boolean) {
 }
 
 /**
- * The Nexus search, top right in the header like the Games filter: Enter (or the on-screen keyboard's Search)
+ * The Nexus search, centered in the header like the Games filter: Enter (or the on-screen keyboard's Search)
  * lists the matches; emptying the field lists everything again.
  */
 function BrowseSearch({ game }: { game: string }) {

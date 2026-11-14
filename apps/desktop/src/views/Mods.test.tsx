@@ -229,6 +229,29 @@ describe("#11 mod details read error", () => {
   });
 });
 
+describe("load order priority hint", () => {
+  // Fails when the priority rule (which mod wins a file clash) is lost with the removed header line,
+  // or goes back into a page header instead of the Load order card it explains.
+  it("sits in the Load order card's header, not a view header", async () => {
+    await open({ mods_list: listed([mod({ name: "SkyUI" })]) });
+    const hint = await screen.findByText("Lower in the list wins when two mods ship the same file.");
+    expect(hint.closest("section")).toBe(screen.getByRole("list", { name: "Load order" }).closest("section"));
+    expect(within(screen.getByRole("main")).queryByText(/Priority runs top to bottom/)).toBeNull();
+    expect(hint.closest("header")).toBeNull();
+  });
+});
+
+describe("search bar", () => {
+  // Fails when the Mods search leaves the centered slot of its filter row (the filters stay beside it).
+  it("is centered in the filter row, the filters in the end column", async () => {
+    await open({ mods_list: listed([mod({ name: "SkyUI" })]) });
+    const row = await screen.findByRole("search", { name: "Filter mods" });
+    const slot = within(row).getByRole("searchbox", { name: "Search mods" }).closest(".justify-self-center")!;
+    expect(slot.className).toMatch(/\bxl:col-start-2\b/);
+    expect(within(row).getByText("Filter", { selector: "span" }).closest(".xl\\:col-start-3")).not.toBeNull();
+  });
+});
+
 describe("#20 no-match state", () => {
   // Fails when an empty Load order card is shown under the no-match state, or the copy is generic.
   it("hides the Load order card and names the active filters", async () => {

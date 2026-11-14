@@ -27,7 +27,6 @@ import {
   StatusDot,
   Toggle,
   ViewFrame,
-  ViewHeader,
   cx,
   when,
 } from "../components/ui";
@@ -38,7 +37,6 @@ import { GameRepairCard } from "./GameRepair";
 export function Settings() {
   return (
     <ViewFrame>
-      <ViewHeader title="Settings" />
       <AccountCard />
       <AutomationCard />
       <GameRepairCard />

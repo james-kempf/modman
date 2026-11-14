@@ -252,18 +252,13 @@ describe("CT2 D05 boundary under StrictMode", () => {
 });
 
 describe("CT2 D06/D08 layout guards", () => {
-  // D06: fails when the header actions squeeze the title instead of wrapping below it.
-  it("ViewHeader wraps the actions below a readable title", async () => {
-    await open("mods");
-    const h1 = await within(main()).findByRole("heading", { level: 1, name: "Mods" });
-    const header = h1.closest("header")!;
+  // D06: fails when the header actions stop wrapping (they would overflow narrow windows) or header text comes back.
+  it("ViewHeader holds only its actions, in a wrapping row", async () => {
+    await open("requirements");
+    const header = (await within(main()).findByRole("button", { name: "Refresh from Nexus" })).closest("header")!;
     expect(header.className).not.toMatch(/md:flex-row/);
-    // Mods has a description: the actions share its wrapping row, top-aligned with its first line.
-    const row = header.lastElementChild!;
-    expect(row.className).toMatch(/\bflex-wrap\b/);
-    expect(row.className).toMatch(/\bitems-start\b/);
-    expect(row.firstElementChild!.className).toMatch(/flex-\[1_1_24rem\]/);
-    expect(row.contains(h1)).toBe(false);
+    expect(header.className).toMatch(/\bflex-wrap\b/);
+    expect(header.textContent).toBe("Refresh from Nexus");
   });
 
   // D08: fails when every job row is a tab stop and the list grows the page.

@@ -681,17 +681,17 @@ describe("Browse toolbar and collection details layout (T3)", () => {
 });
 
 describe("Browse search (A5/A6)", () => {
-  // Fails when the search goes back into the listing card instead of the header's top right (as in Games), loses
+  // Fails when the search goes back into the listing card instead of the header's centered slot (as in Games), loses
   // the shared wide search box, gamepad Y does not focus it, Enter does not search, or emptying it keeps the filter.
-  it("sits top right in the header, Y focuses it, Enter searches, emptying it lists all again", async () => {
+  it("sits centered in the header, Y focuses it, Enter searches, emptying it lists all again", async () => {
     // "sky" matches one mod, Mod 99; no words: the paged listing.
     const { t, user } = await open("browse", {
       browse: (a) => (reqOf(a).text ? { kind: "mods", total: 1, mods: [hit(99)] } : paged(a)),
     });
     await screen.findByText("Mod 1");
     const box = screen.getByRole("searchbox", { name: "Search" });
-    const header = box.closest("header")!;
-    expect(header).toContainElement(screen.getByRole("heading", { level: 1, name: "Browse" }));
+    expect(box.closest("header")).not.toBeNull();
+    expect(box.closest(".justify-self-center")).not.toBeNull();
     expect(screen.getByRole("search", { name: "Search Nexus" }).className.split(" ")).toEqual(expect.arrayContaining(["w-96", "max-w-full"]));
     expect(screen.queryByRole("button", { name: "Search" })).toBeNull();
     act(() => performNav({ type: "search" }));
@@ -925,7 +925,7 @@ describe("Browse pager toolbar (sticky bottom)", () => {
     expect(pager.parentElement!.lastElementChild).toBe(pager);
     expect(pager.parentElement!.contains(screen.getByRole("list", { name: "Mods" }))).toBe(true);
     act(() => useUi.getState().setView("activity"));
-    await screen.findByRole("heading", { name: "Activity" });
+    await screen.findByRole("main", { name: "Activity" });
     expect(screen.queryByRole("navigation", { name: /pages$/ })).toBeNull();
   });
 
@@ -983,7 +983,7 @@ describe("Browse pager toolbar: pinned while scrolled up, page margin at the end
     // The results card is the view's last block: nothing after it in the frame.
     expect(section.closest("[data-view-frame] > *")!.nextElementSibling).toBeNull();
     act(() => useUi.getState().setView("activity"));
-    await screen.findByRole("heading", { name: "Activity" });
+    await screen.findByRole("main", { name: "Activity" });
     expect(main.className).toMatch(/\bpb-28\b/);
   });
 });

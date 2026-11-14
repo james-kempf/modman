@@ -45,7 +45,7 @@ describe("API key entry", () => {
     const pad = gamepad();
     // Overview -> Settings is one LB press (tabs wrap).
     pad.press(BUTTON.LB);
-    await screen.findByRole("heading", { level: 1, name: "Settings" });
+    await screen.findByRole("main", { name: "Settings" });
     const field = await screen.findByLabelText("Nexus API key");
     pad.downUntil((el) => el === field);
     pad.press(BUTTON.A);

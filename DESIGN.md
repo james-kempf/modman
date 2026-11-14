@@ -160,7 +160,7 @@ Failures and notes:
 - Loading: bundled with `@fontsource-variable/geist` and `@fontsource-variable/geist-mono` and imported in `main.tsx`. The CSP blocks remote fonts. No preload step; the fallbacks are system UI fonts.
 - Features: `body { font-feature-settings: "ss01", "cv11"; }`, with `antialiased`.
 - Weights: 400 (default), 500 `font-medium` (titles, buttons, labels), 600 `font-semibold` (primary button, bold spans). 700 is not used.
-- Tracking: `tracking-tight` (titles), `tracking-tighter` (view h1), `--tracking-eyebrow: 0.14em` (uppercase mono eyebrows).
+- Tracking: `tracking-tight` (titles), `tracking-tighter` (error-page h1, Overview hero), `--tracking-eyebrow: 0.14em` (uppercase mono eyebrows).
 
 | Token | Size | Use |
 |---|---|---|
@@ -168,13 +168,13 @@ Failures and notes:
 | `text-caption` | 12px | mono paths, meta, pager count |
 | `text-label` | 13px | field labels, helper text, small buttons, muted notes |
 | `text-body` | 14px | body, rows, menus, md buttons, tabs |
-| `text-lead` | 15px | inputs, lg buttons, view intro |
+| `text-lead` | 15px | inputs, lg buttons |
 | `text-title` | 16px | card titles |
 | `text-lg` | 18px | sub-heads |
 | `text-xl` | 20px | dialog title, empty-state title |
 | `text-2xl` | 24px | n/a |
-| `text-3xl` | 30px | view h1 below `md` |
-| `text-display` | 40px | view h1 at `md` and up (`leading-none`) |
+| `text-3xl` | 30px | error-page h1 |
+| `text-display` | 40px | n/a (views show no visible page title) |
 
 Line heights: the size tokens carry no line height, so text inherits Tailwind's 1.5. Overrides: `leading-none` (display), `leading-tight` (headings), `leading-snug` (muted notes), `leading-relaxed` (1.625: helper, intros, subtitles). Mono logs use 1.7 (see Drift).
 
@@ -353,6 +353,8 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 - Label above in `text-label font-medium text-zinc-300` (`hideLabel` makes it `sr-only`). Helper text in `text-label text-dim`.
 - Error: `aria-invalid`, plus `<p class="text-label text-rose-300">` linked through `aria-describedby`.
 - SearchField: `role=search` form, `w-96`, `MagnifyingGlassIcon` 18 at `left-4`, `pl-11`. Enter submits when `onSubmit` is set; without it the field filters as you type.
+  - Placement: every view search bar (Games, Browse via `ViewHeader search`; the Mods filter row) sits in the centered slot of `SearchRow` (`layout/SearchRow.tsx`): at `xl` a `minmax(0,1fr) auto minmax(0,1fr)` grid, `gap-3`, so the search is centered between equal side columns (header actions or the Mods filters at the end); below `xl` one column, search `justify-self-center`.
+- Views have no page-header text (no title, eyebrow or intro line): `ViewHeader` takes only `search` (centered, via `SearchRow`) and actions (children; end-aligned, wrapping, `gap-2`) and renders nothing when both are absent. Each view is named by `<main aria-label>` (the view's tab label); the active game's name is in the app header. Guidance a control needs goes next to it (e.g. the Load order card's `intro`: "Lower in the list wins when two mods ship the same file.").
   - `pending` (with `onSubmit`): the typed text differs from the submitted one. A trailing `↵ Enter` hint shows (`font-mono text-caption text-dim` at `right-4`, input `pr-20`; `aria-hidden`, not a control; hidden in controller mode, where the on-screen keyboard's Search key submits; `focus-ink-muted` on the nav highlight). Browse submits on Enter rather than as you type so each keystroke does not query Nexus.
 - States: default; hover (no highlight on fields); focus (`bg-ink-3`, white highlight under nav input); disabled (no dedicated style yet **(gap)**: use `opacity-disabled`); error (as above).
 

@@ -41,6 +41,7 @@ import {
   IconButton,
   LIST_ROW,
   SKELETON_DELAY_MS,
+  SearchRow,
   Select,
   StatusDot,
   TextField,
@@ -49,7 +50,6 @@ import {
   Toggle,
   VIEW_FRAME,
   ViewFrame,
-  ViewHeader,
   bytes,
   cx,
   when,
@@ -85,11 +85,6 @@ export function Mods() {
   const panel = useId();
   return (
     <ViewFrame>
-      <ViewHeader
-        title="Mods"
-        eyebrow={game?.name}
-        description="Priority runs top to bottom: when two mods ship the same file, the one lower in the list wins."
-      />
       {/* Focusable roving tabs, not LB/RB-bound: Tabs listens for LB/RB only inside a
           data-nav-scope (a dialog), so in a view LB/RB keep switching the app's views. */}
       <Tabs
@@ -432,7 +427,7 @@ function ModList({ game }: { game: string }) {
       {loaderCard}
       {/* An empty Load order card under the no-match state would only repeat it. */}
       {shown.length > 0 && (
-      <Card title="Load order">
+      <Card title="Load order" intro="Lower in the list wins when two mods ship the same file.">
         <ol aria-label="Load order" className="rows stagger min-w-0">
           {shown.map((m, i) => {
             // Arrows follow the visible list (screen direction); under a filter
@@ -660,43 +655,48 @@ function ModFilters({
     ? [...STATES, { value: "updates" as const, label: "Has updates" }]
     : STATES;
   return (
-    <div
-      role="search"
-      aria-label="Filter mods"
-      className="flex flex-wrap items-end gap-3"
-    >
-      <TextField
-        label="Search mods"
-        type="search"
-        name="mod-search"
-        placeholder="Name, author or ID"
-        value={filter.query}
-        onChange={(e) => onChange({ ...filter, query: e.target.value })}
-        className="min-w-0 flex-[2_1_16rem]"
-      />
-      <Select
-        label="Filter"
-        value={
-          states.some((o) => o.value === filter.state) ? filter.state : "all"
+    // The search is centered in the row (SearchRow); the filters fill the end column.
+    <div role="search" aria-label="Filter mods">
+      <SearchRow
+        search={
+          <TextField
+            label="Search mods"
+            type="search"
+            name="mod-search"
+            placeholder="Name, author or ID"
+            value={filter.query}
+            onChange={(e) => onChange({ ...filter, query: e.target.value })}
+            className="w-96 max-w-full"
+          />
         }
-        options={states}
-        onChange={(state) => onChange({ ...filter, state })}
-        className="min-w-0 flex-[1_1_11rem]"
+        end={
+          <div className="flex flex-wrap items-end gap-3">
+            <Select
+              label="Filter"
+              value={
+                states.some((o) => o.value === filter.state) ? filter.state : "all"
+              }
+              options={states}
+              onChange={(state) => onChange({ ...filter, state })}
+              className="min-w-0 flex-[1_1_11rem]"
+            />
+            {slugs.length > 0 && (
+              <Select
+                label="Collection"
+                value={filter.collection}
+                options={[
+                  { value: "", label: "Any" },
+                  { value: "*", label: "In a collection" },
+                  { value: "-", label: "Not in a collection" },
+                  ...slugs.map((c) => ({ value: c, label: c })),
+                ]}
+                onChange={(collection) => onChange({ ...filter, collection })}
+                className="min-w-0 flex-[1_1_11rem]"
+              />
+            )}
+          </div>
+        }
       />
-      {slugs.length > 0 && (
-        <Select
-          label="Collection"
-          value={filter.collection}
-          options={[
-            { value: "", label: "Any" },
-            { value: "*", label: "In a collection" },
-            { value: "-", label: "Not in a collection" },
-            ...slugs.map((c) => ({ value: c, label: c })),
-          ]}
-          onChange={(collection) => onChange({ ...filter, collection })}
-          className="min-w-0 flex-[1_1_11rem]"
-        />
-      )}
     </div>
   );
 }

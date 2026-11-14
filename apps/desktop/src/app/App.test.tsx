@@ -6,7 +6,8 @@ import { afterChange, deployReport, experimentalGame, game, mod } from "../mock/
 import { setup } from "../test/harness";
 import { VIEWS, useUi } from "./store";
 
-const heading = (name: string) => screen.findByRole("heading", { level: 1, name });
+// The view is named by <main>'s aria-label (no visible page title).
+const heading = (name: string) => screen.findByRole("main", { name });
 
 const viewTabs = () => screen.getByRole("tablist", { name: "Views" });
 

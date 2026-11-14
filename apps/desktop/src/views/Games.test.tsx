@@ -34,7 +34,7 @@ async function library(handlers: Record<string, Handler> = {}, games = twoGames(
   return { ...env, list, user: userEvent.setup() };
 }
 const tile = (name: string) => within(screen.getByRole("list", { name: "Game library" })).getByRole("button", { name });
-const overview = () => screen.findByRole("heading", { level: 1, name: "Overview" });
+const overview = () => screen.findByRole("main", { name: "Overview" });
 
 describe("game library", () => {
   // Fails when the app does not open on the library, a game tile is missing, or an Add game tile comes back.
@@ -114,12 +114,13 @@ describe("game library", () => {
   });
 
   // Fails when an experimental game is not labelled, or a tested one is labelled experimental.
-  // A5/A6. Fails when the filter leaves the header's top right, gamepad Y does not focus it, or it loses the
+  // A5/A6. Fails when the filter leaves the header's centered slot, gamepad Y does not focus it, or it loses the
   // shared longer width (capped so narrow windows do not scroll sideways).
-  it("the search sits top right in the header, wide, and gamepad Y focuses it", async () => {
+  it("the search sits centered in the header, wide, and gamepad Y focuses it", async () => {
     await library();
     const box = screen.getByRole("searchbox", { name: "Search games" });
-    expect(box.closest("header")).toContainElement(screen.getByRole("heading", { level: 1, name: "Games" }));
+    expect(box.closest("header")).not.toBeNull();
+    expect(box.closest(".justify-self-center")).not.toBeNull();
     expect(screen.getByRole("search", { name: "Filter games" }).className.split(" ")).toEqual(expect.arrayContaining(["w-96", "max-w-full"]));
     expect(box.className.split(" ")).toContain("w-full");
     act(() => performNav({ type: "search" }));

@@ -52,8 +52,7 @@ export function Overview() {
   return (
     // minmax(0, 1fr): long unbroken names truncate inside the cards instead of widening the page.
     <ViewFrame>
-      {/* The legacy Overview has no big page title: the game name leads the hero. */}
-      <h1 className="eyebrow">Overview</h1>
+      {/* No page title (<main> names the view): the game name leads the hero. */}
       <StartupCheckCard />
       {error ? (
         <ErrorNote>Could not load games: {errMsg(error)}</ErrorNote>

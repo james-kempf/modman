@@ -41,17 +41,19 @@ export function Games() {
   const list = all.filter((g) => matches(q, g.name, g.id, g.nexus_domain));
   return (
     <ViewFrame>
-      <ViewHeader title="Games">
-        {all.length > 0 && (
-          <SearchField
-            region="Filter games"
-            label="Search games"
-            name="game-search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        )}
-      </ViewHeader>
+      {all.length > 0 && (
+        <ViewHeader
+          search={
+            <SearchField
+              region="Filter games"
+              label="Search games"
+              name="game-search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          }
+        />
+      )}
       {games.error ? (
         <ErrorNote>Could not load games: {errMsg(games.error)}</ErrorNote>
       ) : games.isPending ? (

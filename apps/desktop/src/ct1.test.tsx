@@ -289,7 +289,8 @@ describe("CT1 D06 per-game results", () => {
     await user.click(screen.getByRole("button", { name: "Look up" }));
     expect(await screen.findByText("Coll ABC")).toBeInTheDocument();
     await flip("cyberpunk2077");
-    await within(main()).findByText("Cyberpunk 2077");
+    // The app header names the new active game (views no longer show it).
+    await screen.findByText("Cyberpunk 2077", { selector: "header span" });
     expect(screen.queryByText("Coll ABC")).toBeNull();
   });
 });

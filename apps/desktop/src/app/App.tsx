@@ -119,7 +119,8 @@ export function App() {
         {/* The Overview's hero art sits behind the scrolling view, not in it: it stays put while the view scrolls. */}
         <div className="relative isolate min-h-0 min-w-0 flex-1">
           {view === "overview" && <HeroBackdrop />}
-          <main id={VIEW_ID} className={cx("relative h-full scroll-pt-32 overflow-y-auto", STACK_ROOM[stack] ?? STACK_ROOM[4])}>
+          {/* aria-label: the view's name (views show no visible page title). */}
+          <main id={VIEW_ID} aria-label={VIEWS.find((v) => v.id === view)?.label ?? view} className={cx("relative h-full scroll-pt-32 overflow-y-auto", STACK_ROOM[stack] ?? STACK_ROOM[4])}>
             {/* key: each view enters with the short legacy fade/rise. */}
             <div key={view} className="mx-auto w-full max-w-content animate-rise px-10 pt-10">
               <ViewBoundary name={VIEWS.find((v) => v.id === view)?.label ?? view}>

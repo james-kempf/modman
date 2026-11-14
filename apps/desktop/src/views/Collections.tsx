@@ -17,7 +17,7 @@ import {
   TrashIcon,
   WarningIcon,
 } from "@phosphor-icons/react";
-import { Badge, Button, Card, CardSection, Empty, ErrorNote, Segmented, TextField, Toggle, SECTION_PAD, ViewFrame, ViewHeader, bytes, cx, monogram, when } from "../components/ui";
+import { Badge, Button, Card, CardSection, Empty, ErrorNote, Segmented, TextField, Toggle, SECTION_PAD, ViewFrame, bytes, cx, monogram, when } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import type { CollectionInfo, CollectionRemoved, CollectionResult } from "../ipc/types";
 import { NoGame } from "../components/shell/NoGame";
@@ -54,11 +54,6 @@ export function Collections() {
   const { game } = useActiveGame();
   return (
     <ViewFrame>
-      <ViewHeader
-        title="Collections"
-        eyebrow={game?.name}
-        description="A collection installs a curated set of mods with the curator's installer choices and load order."
-      />
       {!game ? (
         <NoGame icon={<BooksIcon size={28} weight="duotone" />} />
       ) : (

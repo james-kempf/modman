@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// A view's search box, top right in its header (Games, Browse). Gamepad Y
+// A view's search box, centered in its header (Games, Browse). Gamepad Y
 // focuses it ([data-view-search]). Enter submits when `onSubmit` is given
 // (Browse searches Nexus); without it the field filters as you type.
 // `pending` (typed but not submitted yet) shows a trailing "↵ Enter" hint, so
