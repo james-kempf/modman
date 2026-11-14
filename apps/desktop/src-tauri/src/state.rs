@@ -12,6 +12,7 @@ use serde::Serialize;
 
 use vessel_core::app::loaders::Recovered;
 use vessel_core::app::nxm::{self as appnxm, Accepted};
+use vessel_core::app::restore::RestoreStore;
 use vessel_core::app::{chain, AppError, Cx, R};
 use vessel_core::autoupdate::StartupCheck;
 use vessel_core::paths::Paths;
@@ -71,6 +72,8 @@ pub struct Inner {
     /// Loader runs startup recovery finished (a rollback may be offered).
     pub loader_recovered: OnceLock<Vec<Recovered>>,
     nxm: Mutex<NxmQueue>,
+    /// Uninstall snapshots for Undo (`mod_restore`), for this session.
+    pub restore: Arc<RestoreStore>,
 }
 
 /// Managed Tauri state.
@@ -86,6 +89,7 @@ impl AppState {
             startup: OnceLock::new(),
             loader_recovered: OnceLock::new(),
             nxm: Mutex::new(NxmQueue::default()),
+            restore: Arc::default(),
         }))
     }
 }

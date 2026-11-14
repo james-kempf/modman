@@ -7,14 +7,40 @@
 // prompt counts as cancel. Mods, the "changed since deploy" flag, profiles
 // and collections are kept per game.
 
-import type { AboutTarget, Answer, BrowseRequest, CollectionRecord, ConfigEntry, LoaderCard, ModView, Msg, ProfileSummary, Prompt, ReqRow, UpdateReport } from "../ipc/types";
+import type {
+  AboutTarget,
+  Answer,
+  BrowseRequest,
+  CollectionRecord,
+  ConfigEntry,
+  LoaderCard,
+  ModView,
+  Msg,
+  ProfileSummary,
+  Prompt,
+  ReqRow,
+  RestoreErrorKind,
+  RestoreReason,
+  RestoredMod,
+  UninstallRestore,
+  UpdateReport,
+} from "../ipc/types";
 import { createFakeTransport, type Args, type FakeTransport } from "./fake";
 import { afterChange, autoupdateStatus, deployReport, experimentalGame, game, mod } from "./fixtures";
 import { demoAbout, demoBrowse } from "./browse";
 import { demoPoisoned, repairHandlers } from "./repair";
 import { DEMO_LOADER_MOD, installedLoaders, loaderHandlers } from "./loaders";
 
-export function createDemoBackend(): FakeTransport {
+export interface DemoOptions {
+  /**
+   * Restore failures to inject, by mod uid (tests): mod_restore fails that mod with
+   * this kind and keeps its token, e.g. archive_missing for an archive deleted
+   * between the uninstall and Undo. Read on every call, so a test may set it later.
+   */
+  restoreFailures?: Map<string, RestoreErrorKind>;
+}
+
+export function createDemoBackend(opts: DemoOptions = {}): FakeTransport {
   const games = [
     game({ prefix: "/home/deck/.local/share/Steam/steamapps/compatdata/489830/pfx" }),
     experimentalGame({ active: false, mod_count: 0 }),
@@ -34,7 +60,8 @@ export function createDemoBackend(): FakeTransport {
     mods: [
       mod({ name: "SkyUI", nexus_mod_id: 12604 }),
       mod({ name: "Unofficial Patch", nexus_mod_id: 266 }),
-      mod({ name: "Immersive Armors", enabled: false }),
+      // A folder install: no archive to reinstall from.
+      mod({ name: "Immersive Armors", enabled: false, source: "local", archive: null }),
     ],
     dirty: false,
     profiles: [],
@@ -121,6 +148,17 @@ export function createDemoBackend(): FakeTransport {
   const now = () => Math.floor(Date.now() / 1000);
   const renumber = (g: GameState) => g.mods.forEach((m, k) => (m.position = k + 1));
   state.forEach(renumber);
+  /** Undo tokens of uninstalled mods: a copy of the mod as it was (uid, metadata, enabled, position). Restorable ones only. */
+  const restoreTokens = new Map<string, { game: string; mod: ModView }>();
+  let tokenSeq = 0;
+  const gameId = (a?: Args) => (typeof a?.game === "string" && a.game ? a.game : active().id);
+  /** Same rules as the backend: an archive install whose kept archive is in the game's downloads folder. */
+  const noRestoreReason = (m: ModView, deleted: boolean, game: string): RestoreReason | null => {
+    if (!m.archive) return "folder_install";
+    if (deleted) return "archive_deleted";
+    const dir = games.find((x) => x.id === game)?.data_dir;
+    return dir && m.archive.startsWith(`${dir}/downloads/`) ? null : "outside_downloads";
+  };
   // The first game starts deployed and in sync: its deployment holds its enabled mods.
   for (const g of games) {
     const s = state.get(g.id);
@@ -309,11 +347,19 @@ export function createDemoBackend(): FakeTransport {
         const mods = g.mods;
         const i = mods.findIndex((m) => m.uid === a!.reference);
         if (i < 0) throw { message: `no mod '${String(a!.reference)}'` };
-        // The view sends before/after <visible neighbor>; same index math as core move_mod.
+        // before/after <mod>, first, last or #N (N = 1-based position, clamped); same index math as core move_mod.
+        const spec = String(a!.spec);
         const rest = mods.filter((_, x) => x !== i);
-        const k = rest.findIndex((m) => m.uid === a!.arg);
-        if (k < 0 || !["before", "after"].includes(String(a!.spec))) throw { message: `bad move '${String(a!.spec)} ${String(a!.arg)}'` };
-        const j = a!.spec === "after" ? k + 1 : k;
+        const bad = { message: `bad move '${spec} ${String(a!.arg)}'` };
+        let j: number;
+        if (spec === "before" || spec === "after") {
+          const k = rest.findIndex((m) => m.uid === a!.arg);
+          if (k < 0) throw bad;
+          j = spec === "after" ? k + 1 : k;
+        } else if (spec === "first") j = 0;
+        else if (spec === "last") j = rest.length;
+        else if (/^#?\d+$/.test(spec)) j = Math.min(Math.max(Number(spec.replace("#", "")) - 1, 0), rest.length);
+        else throw bad;
         rest.splice(j, 0, mods[i]);
         mods.splice(0, mods.length, ...rest);
         renumber(g);
@@ -326,6 +372,27 @@ export function createDemoBackend(): FakeTransport {
     install: (a: Args) =>
       job("install", async (id) => {
         const g = st(a);
+        const target = String(a!.target);
+        // A local archive installs as is: no download, no FOMOD wizard, no extra question.
+        if (ARCHIVE_PATH.test(target)) {
+          const m = mod({
+            name: typeof a!.name === "string" && a!.name ? a!.name : target.split("/").pop()!.replace(/\.\w+$/, ""),
+            game: active().id,
+            installed_at: now(),
+            position: g.mods.length + 1,
+            source: "local",
+            archive: target,
+          });
+          g.mods.push(m);
+          renumber(g);
+          say(id, `Installed ${m.name}`, "success");
+          return {
+            game: active().id,
+            installed: { mod_id: m.id, uid: m.uid, name: m.name, files: m.file_count, size: m.size, fomod_found: false, replaced: null, warnings: [] },
+            collection: null,
+            after: changed(g, a!.deploy === true),
+          };
+        }
         say(id, `Downloading ${a!.target}…`);
         const answer = await fomod(id, "Demo Mod");
         if (answer.type === "cancel") throw cancelled();
@@ -372,13 +439,83 @@ export function createDemoBackend(): FakeTransport {
         // A uid, or a bare Nexus id (Browse's Remove).
         const gone = g.mods.filter((m) => refs.includes(m.uid) || (m.nexus_mod_id !== null && refs.includes(String(m.nexus_mod_id))));
         if (!gone.length) throw { message: `no mod matches ${refs.join(", ")}` };
-        if (!(await confirm(id, `Uninstall ${gone.length} mod(s)?`))) {
+        // Same prompt as the backend (app/mods.rs uninstall_confirm).
+        const one = gone.length === 1 ? gone[0].name : null;
+        const r = await ask(id, {
+          type: "confirm",
+          question: `Uninstall ${gone.length} mod(s)?`,
+          default_yes: true,
+          title: one ? `Uninstall ${one}?` : `Uninstall ${gone.length} mods?`,
+          yes_label: one ? `Uninstall ${one}` : `Uninstall ${gone.length} mods`,
+          no_label: one ? "Keep mod" : "Keep mods",
+          danger: true,
+          option: "Delete archive too",
+        });
+        if (r.type !== "confirm" || !r.yes) {
           say(id, "Cancelled.");
           return { done: false, mods: 0, archives: [], after: afterChange({ needs_deploy: false }) };
         }
         gone.forEach((m) => g.mods.splice(g.mods.indexOf(m), 1));
         renumber(g);
-        return { done: true, mods: gone.length, archives: [], after: changed(g) };
+        // Only archive installs have an archive to delete (a folder install has none).
+        const deleteArchive = a!.delete_archive === true || r.option_checked === true;
+        const archives = deleteArchive ? gone.flatMap((m) => (m.archive ? [m.archive] : [])) : [];
+        archives.forEach((p) => say(id, `Deleted archive ${p}`));
+        const restore = gone.map((m): UninstallRestore => {
+          const token = `restore-${++tokenSeq}`;
+          const reason = noRestoreReason(m, deleteArchive, gameId(a));
+          // A token that cannot be restored is not kept: restoring it gives expired.
+          if (!reason) restoreTokens.set(token, { game: gameId(a), mod: { ...m } });
+          return { token, uid: m.uid, name: m.name, restorable: !reason, reason };
+        });
+        return { done: true, mods: gone.length, archives, after: changed(g), restore };
+      }),
+    mod_restore: (a: Args) =>
+      job("mod_restore", async (id) => {
+        const g = st(a);
+        const tokens = a!.tokens as string[];
+        const expired: RestoredMod[] = [];
+        const known: { token: string; mod: ModView }[] = [];
+        for (const token of tokens) {
+          const e = restoreTokens.get(token);
+          if (e && e.game === gameId(a)) known.push({ token, mod: e.mod });
+          else
+            expired.push({
+              token,
+              uid: null,
+              name: null,
+              ok: false,
+              error: { kind: "expired", message: "this Undo is no longer available" },
+              warnings: [],
+            });
+        }
+        // Lowest position first, so each mod lands back where it was.
+        known.sort((x, y) => x.mod.position - y.mod.position);
+        const results = known.map(({ token, mod: m }): RestoredMod => {
+          const fail = (kind: RestoreErrorKind, message: string): RestoredMod => ({
+            token,
+            uid: m.uid,
+            name: m.name,
+            ok: false,
+            error: { kind, message },
+            warnings: [],
+          });
+          const injected = opts.restoreFailures?.get(m.uid);
+          if (injected) return fail(injected, `injected ${injected}`);
+          if (g.mods.some((x) => x.uid === m.uid)) return fail("conflict", `a mod with uid ${m.uid} is installed`);
+          g.mods.splice(Math.min(m.position - 1, g.mods.length), 0, { ...m });
+          renumber(g);
+          // Used up on success; a failed token stays for a retry.
+          restoreTokens.delete(token);
+          say(id, `Restored ${m.name}`, "success");
+          return { token, uid: m.uid, name: m.name, ok: true, error: null, warnings: [] };
+        });
+        const restored = results.filter((x) => x.ok).length;
+        return {
+          results: [...expired, ...results],
+          restored,
+          after: restored ? changed(g) : afterChange({ needs_deploy: false }),
+        };
       }),
     nxm_submit: (a: Args) => ({ row: 1, link: String(a!.url).split("?")[0], kind: "mod" }),
     downloads_list: () => [],
@@ -416,7 +553,8 @@ export function createDemoBackend(): FakeTransport {
         const name = String(a!.name).trim();
         if (!name) throw { message: "profile name is empty" };
         const old = profiles.findIndex((p) => p.name === name);
-        if (old >= 0 && !(await confirm(id, `Overwrite profile ${name}?`, false))) return null;
+        // Same default as core save_profile (app/mods.rs): overwriting is the expected answer.
+        if (old >= 0 && !(await confirm(id, `Overwrite profile ${name}?`))) return null;
         const p = {
           name,
           mods: mods.length,
@@ -434,15 +572,21 @@ export function createDemoBackend(): FakeTransport {
         const mods = g.mods;
         const p = g.profiles.find((x) => x.name === a!.name);
         if (!p) throw { message: `no profile '${String(a!.name)}'` };
+        // As core load_profile: the profile's mods first, in its order; the others after them, disabled.
         let missing = 0;
+        const order: ModView[] = [];
         for (const e of p.set) {
           const m = mods.find((x) => x.uid === e.uid);
-          if (m) m.enabled = e.enabled;
-          else missing++;
+          if (!m) missing++;
+          else if (!order.includes(m)) {
+            m.enabled = e.enabled;
+            order.push(m);
+          }
         }
-        const listed = new Set(p.set.map((e) => e.uid));
-        const extra = mods.filter((m) => !listed.has(m.uid));
+        const extra = mods.filter((m) => !order.includes(m));
         extra.forEach((m) => (m.enabled = false));
+        mods.splice(0, mods.length, ...order, ...extra);
+        renumber(g);
         return { missing, added_disabled: extra.length, after: changed(g) };
       }),
     profile_delete: (a: Args) => {
@@ -673,6 +817,9 @@ export function createDemoBackend(): FakeTransport {
   }
   return t;
 }
+
+/** An install target that is a local archive path (not a Nexus id, URL or nxm link). */
+const ARCHIVE_PATH = /^[/~].*\.(7z|zip|rar)$/i;
 
 /** A flat 600x900 SVG poster with the game's name, as a data: URL (stands in for Steam's library art). */
 export function placeholderArt(name: string): string {

@@ -13,6 +13,7 @@ const LABEL: Record<string, string> = {
   mod_move: "Move mod",
   move: "Move mod",
   mods_uninstall: "Uninstall mods",
+  mod_restore: "Restore uninstalled mods",
   mod_reinstall: "Reinstall mod",
   install: "Install",
   deploy: "Deploy",

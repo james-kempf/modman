@@ -45,6 +45,7 @@ import type {
   Launched,
   LoginResult,
   ModDetail,
+  ModRestoreResult,
   ModsView,
   MoveResult,
   NxmReceived,
@@ -105,6 +106,7 @@ export const COMMANDS = [
   "mods_set_enabled",
   "mod_move",
   "mods_uninstall",
+  "mod_restore",
   "mod_reinstall",
   "thumbnail",
   "picture",
@@ -246,6 +248,13 @@ export const modsUninstall = (refs: string[], deleteArchive: boolean, game?: Gam
     refs,
     delete_archive: deleteArchive,
   });
+/**
+ * Job (no prompts). Undo of `modsUninstall`: tokens from
+ * `UninstallResult.restore`. Per-mod results; one failure does not stop
+ * the rest.
+ */
+export const modRestore = (tokens: string[], game?: Game) =>
+  call<ModRestoreResult>("mod_restore", { game: game ?? null, tokens });
 /** Job (FOMOD/variant prompts). fomod: ask | default | none | reuse. */
 export const modReinstall = (
   reference: string,

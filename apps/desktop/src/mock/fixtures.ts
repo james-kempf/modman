@@ -75,7 +75,8 @@ export const mod = (o: Partial<ModView> = {}): ModView => {
     nexus_file_id: null,
     md5: null,
     source: "nexus",
-    archive: null,
+    // Installed from a downloaded archive; a folder install passes archive: null.
+    archive: `/home/deck/.local/share/vessel/skyrimspecialedition/downloads/mod-${id}.7z`,
     author: "someone",
     category: null,
     update_policy: null,

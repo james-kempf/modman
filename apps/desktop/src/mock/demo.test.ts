@@ -4,11 +4,25 @@
 // follows the real backend's semantics.
 import { describe, expect, it } from "vitest";
 import type { JobEvent, PromptEvent } from "../ipc/events";
-import type { Answer, ApplyOutcome, ConfigEntry, GameView, InstallResult, LoaderCard, ModsView, Preview, ReqRow, RunReport } from "../ipc/types";
-import { createDemoBackend } from "./demo";
+import type {
+  Answer,
+  ApplyOutcome,
+  ConfigEntry,
+  GameView,
+  InstallResult,
+  LoaderCard,
+  ModRestoreResult,
+  ModsView,
+  Preview,
+  ReqRow,
+  RestoreErrorKind,
+  RunReport,
+  UninstallResult,
+} from "../ipc/types";
+import { createDemoBackend, type DemoOptions } from "./demo";
 
-function demo() {
-  const t = createDemoBackend();
+function demo(opts: DemoOptions = {}) {
+  const t = createDemoBackend(opts);
   const prompts: PromptEvent[] = [];
   const jobs: JobEvent[] = [];
   void t.listen<PromptEvent>("vessel:prompt", (p) => prompts.push(p));
@@ -104,11 +118,80 @@ describe("demo backend", () => {
     expect(mods.map((m) => m.uid).slice(0, 2)).toEqual([second.uid, first.uid]);
   });
 
+  // Fails when the demo rejects the move-to-position specs the views send (first, last, #N), or drifts from core clamping.
+  it("mod_move accepts first, last and #N like core move_mod", async () => {
+    const d = demo();
+    const uids = async () => (await d.call<ModsView>("mods_list")).mods.map((m) => m.uid);
+    const [a, b, c] = await uids();
+    await expect(d.call("mod_move", { reference: a, spec: "last", arg: null })).resolves.toMatchObject({ from: 1, to: 3, of: 3 });
+    expect(await uids()).toEqual([b, c, a]);
+    await expect(d.call("mod_move", { reference: a, spec: "first", arg: null })).resolves.toMatchObject({ from: 3, to: 1 });
+    expect(await uids()).toEqual([a, b, c]);
+    await expect(d.call("mod_move", { reference: a, spec: "#2", arg: null })).resolves.toMatchObject({ from: 1, to: 2 });
+    expect(await uids()).toEqual([b, a, c]);
+    // Out of range clamps to the end, as in core.
+    await expect(d.call("mod_move", { reference: b, spec: "#99", arg: null })).resolves.toMatchObject({ from: 1, to: 3 });
+    expect(await uids()).toEqual([a, c, b]);
+    expect((await d.call<ModsView>("mods_list")).mods.map((m) => m.position)).toEqual([1, 2, 3]);
+    await expect(d.call("mod_move", { reference: a, spec: "#x", arg: null })).rejects.toMatchObject({ message: /bad move/ });
+  });
+
+  // Fails when profile_load only flips enabled flags and leaves the load order as it is (core reorders).
+  it("profile_load restores the saved order; mods not in the profile follow, disabled", async () => {
+    const d = demo();
+    const [a, b, c] = (await d.call<ModsView>("mods_list")).mods;
+    await d.call("mod_move", { reference: c.uid, spec: "first", arg: null });
+    await d.call("profile_save", { name: "evening" });
+    await d.call("mod_move", { reference: c.uid, spec: "last", arg: null });
+    await d.call("mods_set_enabled", { ids: [a.id], enabled: false });
+    // A mod installed after the save is not in the profile.
+    await d.call("install", { target: "/home/deck/Downloads/Extra.7z", name: "Extra" });
+    expect(await d.call("profile_load", { name: "evening" })).toMatchObject({ missing: 0, added_disabled: 1 });
+    const after = (await d.call<ModsView>("mods_list")).mods;
+    expect(after.map((m) => m.uid).slice(0, 3)).toEqual([c.uid, a.uid, b.uid]);
+    expect(after.map((m) => m.position)).toEqual([1, 2, 3, 4]);
+    expect(after.find((m) => m.uid === a.uid)?.enabled).toBe(true);
+    expect(after.slice(3).every((m) => !m.enabled)).toBe(true);
+  });
+
+  // Fails when overwriting a profile defaults to No (core's save_profile confirm defaults to yes).
+  it("profile_save asks before overwriting, defaulting to yes", async () => {
+    const d = demo();
+    await d.call("profile_save", { name: "evening" });
+    expect(d.prompts).toHaveLength(0);
+    const r = d.call("profile_save", { name: "evening" });
+    await d.tick();
+    expect(d.prompts[d.prompts.length - 1].prompt).toMatchObject({ type: "confirm", default_yes: true });
+    await d.answer({ type: "confirm", yes: true });
+    expect(await r).toBe(3);
+  });
+
+  // Fails when installing a local archive always runs the FOMOD and patch prompts, or ignores the given name.
+  it("install from an archive path needs no prompt, uses the name and returns installed", async () => {
+    const d = demo();
+    const r = await d.call<InstallResult>("install", { target: "/home/deck/Downloads/Better Lamps.7z", name: "Better Lamps" });
+    expect(d.prompts).toHaveLength(0);
+    expect(r.installed).toMatchObject({ name: "Better Lamps" });
+    const added = (await d.call<ModsView>("mods_list")).mods.find((m) => m.uid === r.installed!.uid);
+    expect(added).toMatchObject({ name: "Better Lamps", archive: "/home/deck/Downloads/Better Lamps.7z", nexus_mod_id: null });
+  });
+
+  // Fails when demo mods have no archive (Undo of an uninstall would have nothing to reinstall from), or no folder install remains.
+  it("fixture mods expose archive paths, plus one folder install without one", async () => {
+    const d = demo();
+    const mods = (await d.call<ModsView>("mods_list")).mods;
+    const folder = mods.filter((m) => m.archive === null);
+    expect(folder).toHaveLength(1);
+    expect(mods.filter((m) => m.archive !== null).every((m) => /\.(7z|zip|rar)$/.test(m.archive!))).toBe(true);
+    expect(mods.length - folder.length).toBeGreaterThanOrEqual(2);
+  });
+
   it("has handlers for every command the views call", () => {
     const d = demo();
     for (const cmd of [
       "mod_reinstall",
       "mods_uninstall",
+      "mod_restore",
       "profile_save",
       "profile_load",
       "profile_delete",
@@ -119,6 +202,28 @@ describe("demo backend", () => {
       "updates_install",
     ])
       expect(d.t.handlers[cmd], cmd).toBeTypeOf("function");
+  });
+
+  // Fails when the demo's uninstall confirm drifts from the backend's danger confirm, or ignores option_checked.
+  it("mods_uninstall asks the danger confirm and deletes archives only when the option is ticked", async () => {
+    const d = demo();
+    const [a, b] = (await d.call<ModsView>("mods_list")).mods;
+    const kept = d.call("mods_uninstall", { refs: [a.uid], delete_archive: false });
+    await d.answer({ type: "confirm", yes: true });
+    expect(await kept).toMatchObject({ done: true, mods: 1, archives: [] });
+    expect(d.prompts[d.prompts.length - 1].prompt).toEqual({
+      type: "confirm",
+      question: "Uninstall 1 mod(s)?",
+      default_yes: true,
+      title: `Uninstall ${a.name}?`,
+      yes_label: `Uninstall ${a.name}`,
+      no_label: "Keep mod",
+      danger: true,
+      option: "Delete archive too",
+    });
+    const deleted = d.call("mods_uninstall", { refs: [b.uid], delete_archive: false });
+    await d.answer({ type: "confirm", yes: true, option_checked: true });
+    expect(await deleted).toMatchObject({ done: true, mods: 1, archives: [expect.stringContaining(b.uid)] });
   });
 
   it("profiles save, list, load and delete", async () => {
@@ -219,5 +324,69 @@ describe("demo backend", () => {
     expect(await d.call("loader_junk_remove", { mod_ids: [9001] })).toBe(1);
     expect(await d.call("loader_junk_scan")).toEqual([]);
   });
-});
 
+  describe("mod_restore (Undo of an uninstall)", () => {
+    /** Uninstall a mod by uid, answering the confirm (option = "Delete archive too"). */
+    const uninstall = async (d: ReturnType<typeof demo>, uid: string, deleteArchive = false) => {
+      const r = d.call<UninstallResult>("mods_uninstall", { refs: [uid], delete_archive: false });
+      await d.answer({ type: "confirm", yes: true, option_checked: deleteArchive });
+      return r;
+    };
+    const list = async (d: ReturnType<typeof demo>) => (await d.call<ModsView>("mods_list")).mods;
+
+    // Fails when Undo brings the mod back changed: another uid, enabled state or position.
+    it("round-trips uninstall -> mod_restore(token): same uid, enabled state and position; the token is used up", async () => {
+      const d = demo();
+      const [, b] = await list(d);
+      await d.call("mods_set_enabled", { ids: [b.id], enabled: false });
+      const u = await uninstall(d, b.uid);
+      expect(u.restore).toEqual([{ token: expect.any(String), uid: b.uid, name: b.name, restorable: true, reason: null }]);
+      expect((await list(d)).map((m) => m.uid)).not.toContain(b.uid);
+      const r = await d.call<ModRestoreResult>("mod_restore", { tokens: [u.restore![0].token] });
+      expect(r).toMatchObject({ restored: 1, results: [{ uid: b.uid, name: b.name, ok: true, error: null, warnings: [] }] });
+      expect((await list(d))[1]).toMatchObject({ uid: b.uid, name: b.name, enabled: false, position: 2, archive: b.archive });
+      expect(d.jobs.some((j) => j.kind === "mod_restore" && j.state === "finished")).toBe(true);
+      // Undo pressed twice: the used token is expired.
+      const again = await d.call<ModRestoreResult>("mod_restore", { tokens: [u.restore![0].token] });
+      expect(again).toMatchObject({ restored: 0, results: [{ uid: null, ok: false, error: { kind: "expired" } }] });
+    });
+
+    // Fails when the demo marks a mod restorable that the backend would not, or keeps a token for it.
+    it("not restorable: folder install, deleted archive, archive outside downloads (restore gives expired)", async () => {
+      const d = demo();
+      const mods = await list(d);
+      const folder = mods.find((m) => m.archive === null)!;
+      const outside = d.call<InstallResult>("install", { target: "/home/deck/Downloads/Lamps.7z", deploy: false });
+      const lamps = (await outside).installed!.uid;
+      const cases = [
+        [await uninstall(d, folder.uid), "folder_install"],
+        [await uninstall(d, mods[0].uid, true), "archive_deleted"],
+        [await uninstall(d, lamps), "outside_downloads"],
+      ] as const;
+      for (const [u, reason] of cases) {
+        expect(u.restore).toEqual([expect.objectContaining({ restorable: false, reason })]);
+        const r = await d.call<ModRestoreResult>("mod_restore", { tokens: [u.restore![0].token] });
+        expect(r.results[0].error?.kind).toBe("expired");
+      }
+    });
+
+    // Fails when an injected failure is not reported per kind, or uses up the token (no retry).
+    it.each<RestoreErrorKind>(["archive_missing", "conflict", "install_failed"])(
+      "injected %s fails that mod and keeps the token for a retry",
+      async (kind) => {
+        const restoreFailures = new Map<string, RestoreErrorKind>();
+        const d = demo({ restoreFailures });
+        const [a] = await list(d);
+        const u = await uninstall(d, a.uid);
+        restoreFailures.set(a.uid, kind);
+        const token = u.restore![0].token;
+        const r = await d.call<ModRestoreResult>("mod_restore", { tokens: [token] });
+        expect(r).toMatchObject({ restored: 0, results: [{ uid: a.uid, name: a.name, ok: false, error: { kind } }] });
+        expect((await list(d)).map((m) => m.uid)).not.toContain(a.uid);
+        restoreFailures.clear();
+        expect((await d.call<ModRestoreResult>("mod_restore", { tokens: [token] })).restored).toBe(1);
+        expect((await list(d))[0].uid).toBe(a.uid);
+      },
+    );
+  });
+});

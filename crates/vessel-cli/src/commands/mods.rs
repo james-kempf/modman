@@ -403,7 +403,13 @@ pub fn disable(ctx: &mut Ctx, args: DisableArgs) -> Result<()> {
 pub fn uninstall(ctx: &mut Ctx, args: UninstallArgs) -> Result<()> {
     let game = ctx.need_game()?;
     let ui = ctx.ui();
-    appmods::uninstall(&mut ctx.cx(&ui), &game, &args.refs, args.delete_archive)?;
+    appmods::uninstall(
+        &mut ctx.cx(&ui),
+        &game,
+        &args.refs,
+        args.delete_archive,
+        None,
+    )?;
     Ok(())
 }
 

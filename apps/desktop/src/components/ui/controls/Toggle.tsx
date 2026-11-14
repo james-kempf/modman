@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { CircleNotchIcon } from "@phosphor-icons/react";
 import { cx } from "../styles";
 
 export function Toggle({
@@ -13,7 +14,7 @@ export function Toggle({
   onChange: (v: boolean) => void;
   label: string;
   disabled?: boolean;
-  /** A change is being applied: ignores clicks but stays focusable (aria-disabled). */
+  /** A change is being applied: a spinner in the knob; ignores clicks but stays focusable (aria-disabled). */
   busy?: boolean;
   /** Show `label` next to the switch (it is always the accessible name). */
   showLabel?: boolean;
@@ -45,10 +46,21 @@ export function Toggle({
       >
         <span
           className={cx(
-            "size-icon rounded-pill transition-[transform,background-color] duration-slow ease-spring",
+            "inline-flex size-icon items-center justify-center rounded-pill transition-[transform,translate,background-color] duration-slow ease-spring",
             checked ? "translate-x-5 bg-white" : "bg-zinc-400 in-highlight:bg-white",
           )}
-        />
+        >
+          {/* Spins only when motion is allowed; under reduced motion the static ring still marks it busy. */}
+          {busy && (
+            <CircleNotchIcon
+              aria-hidden
+              data-testid="toggle-spinner"
+              size={14}
+              weight="bold"
+              className="text-zinc-800 motion-safe:animate-spin"
+            />
+          )}
+        </span>
       </span>
       {showLabel && label}
     </button>

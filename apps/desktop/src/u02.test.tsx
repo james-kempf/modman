@@ -364,28 +364,32 @@ describe("Mods search and filters", () => {
       mods_list: () => ({ mods: MODS, changed_since_deploy: false }),
       conflicts: () => ({ files: [{ rel_path: "a.dds", winner: MODS[2], losers: [MODS[0]], plugin: false }], plugins: [] }),
     });
-    const list = await screen.findByRole("list", { name: "Load order" });
+    await screen.findByRole("list", { name: "Load order" });
+    // A getter: the no-match/"Reading conflicts…" state replaces the Load order card, so the element changes.
+    const list = () => screen.getByRole("list", { name: "Load order" });
     const search = screen.getByRole("searchbox", { name: "Search mods" });
     await user.type(search, "armor");
-    expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(list()).getAllByRole("listitem")).toHaveLength(1);
     expect(screen.getByText(/1 of 3 mods/)).toBeInTheDocument();
     await user.clear(search);
     // Show: Has conflicts.
     await user.click(screen.getByRole("button", { name: /^Filter/ }));
     await user.click(await screen.findByRole("option", { name: "Has conflicts" }));
-    await waitFor(() => expect(within(list).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+    await waitFor(() => expect(within(list()).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
       expect.stringContaining("SkyUI"),
       expect.stringContaining("Immersive Armors"),
     ]));
     // Collection: def.
     await user.click(screen.getByRole("button", { name: "Collection Any" }));
     await user.click(await screen.findByRole("option", { name: "def" }));
-    expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(list()).getAllByRole("listitem")).toHaveLength(1);
     // No match: empty state, then clear.
     await user.type(search, "nothing like this");
     expect(screen.getByText("No mods match")).toBeInTheDocument();
+    // The no-match state replaces the Load order card, so the list is a new element afterwards.
+    expect(screen.queryByRole("list", { name: "Load order" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Clear search and filters" }));
-    expect(within(list).getAllByRole("listitem")).toHaveLength(3);
+    expect(within(list()).getAllByRole("listitem")).toHaveLength(3);
     expect(search).toHaveValue("");
   });
 

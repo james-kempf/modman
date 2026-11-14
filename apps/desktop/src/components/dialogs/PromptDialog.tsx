@@ -81,24 +81,31 @@ function Actions({ children }: { children: ReactNode }) {
 }
 
 function Confirm({ p, answer, cancel, sending }: Props<"confirm">) {
+  const [checked, setChecked] = useState(false);
+  // A destructive yes keeps focus on the safe answer, whatever default_yes (the CLI/Headless answer) says.
+  const focusNo = p.danger ? true : !p.default_yes;
+  const send = (yes: boolean) => answer(p.option ? { type: "confirm", yes, option_checked: checked } : { type: "confirm", yes });
   return (
-    <Dialog title="Confirm" onBack={cancel}>
+    <Dialog title={p.title || "Confirm"} onBack={cancel}>
       <p className="text-title leading-relaxed text-zinc-200">{p.question}</p>
+      {p.option && (
+        <div className="mt-5">
+          <Choice multi selected={checked} onClick={() => setChecked((c) => !c)}>
+            <span className="text-zinc-100">{p.option}</span>
+          </Choice>
+        </div>
+      )}
       <Actions>
-        <Button
-          data-autofocus={!p.default_yes || undefined}
-          disabled={sending}
-          onClick={() => answer({ type: "confirm", yes: false })}
-        >
-          No
+        <Button data-autofocus={focusNo || undefined} busy={sending} onClick={() => send(false)}>
+          {p.no_label || "No"}
         </Button>
         <Button
-          tone="primary"
-          data-autofocus={p.default_yes || undefined}
-          disabled={sending}
-          onClick={() => answer({ type: "confirm", yes: true })}
+          tone={p.danger ? "danger" : "primary"}
+          data-autofocus={!focusNo || undefined}
+          busy={sending}
+          onClick={() => send(true)}
         >
-          Yes
+          {p.yes_label || "Yes"}
         </Button>
       </Actions>
     </Dialog>
@@ -117,10 +124,10 @@ function Text({ p, answer, cancel, sending }: Props<"text">) {
       >
         <TextField label={p.question} value={value} onChange={(e) => setValue(e.target.value)} data-autofocus />
         <Actions>
-          <Button tone="ghost" onClick={cancel} disabled={sending}>
+          <Button tone="ghost" onClick={cancel} busy={sending}>
             Cancel
           </Button>
-          <Button type="submit" tone="primary" disabled={sending}>
+          <Button type="submit" tone="primary" busy={sending}>
             OK
           </Button>
         </Actions>
@@ -152,9 +159,10 @@ function Choice({
       type="button"
       role={multi ? "checkbox" : "radio"}
       aria-checked={selected}
-      disabled={disabled}
+      // Not native disabled: it would drop pad/keyboard focus to <body>.
+      aria-disabled={disabled || undefined}
       data-autofocus={autoFocus || undefined}
-      onClick={onClick}
+      onClick={disabled ? undefined : onClick}
       onFocus={onFocus}
       className={cx(
         "flex min-h-control-lg w-full items-start gap-3 rounded-card border px-4 py-3 text-left transition-colors duration-base",
@@ -200,10 +208,10 @@ function ChooseFile({ p, answer, cancel, sending }: Props<"choose_file">) {
         ))}
       </div>
       <Actions>
-        <Button tone="ghost" onClick={cancel} disabled={sending}>
+        <Button tone="ghost" onClick={cancel} busy={sending}>
           Cancel
         </Button>
-        <Button tone="primary" disabled={sending} onClick={() => answer({ type: "choice", index: sel })}>
+        <Button tone="primary" busy={sending} onClick={() => answer({ type: "choice", index: sel })}>
           Install this file
         </Button>
       </Actions>
@@ -228,11 +236,11 @@ function ChooseOptional({ p, answer, cancel, sending }: Props<"choose_optional">
         ))}
       </div>
       <Actions>
-        <Button tone="ghost" onClick={cancel} disabled={sending}>
+        <Button tone="ghost" onClick={cancel} busy={sending}>
           Cancel
         </Button>
         <Button onClick={() => setSel(p.mods.map((_, i) => i))}>Select all</Button>
-        <Button tone="primary" disabled={sending} onClick={() => answer({ type: "choices", indices: sel })}>
+        <Button tone="primary" busy={sending} onClick={() => answer({ type: "choices", indices: sel })}>
           Install {sel.length} optional
         </Button>
       </Actions>
@@ -265,10 +273,10 @@ function ManualDownload({ p, answer, cancel, sending }: Props<"manual_download">
           data-autofocus
         />
         <Actions>
-          <Button tone="ghost" onClick={cancel} disabled={sending}>
+          <Button tone="ghost" onClick={cancel} busy={sending}>
             Skip this mod
           </Button>
-          <Button type="submit" tone="primary" disabled={sending || !path.trim()}>
+          <Button type="submit" tone="primary" busy={sending} inactive={!path.trim()}>
             Use this file
           </Button>
         </Actions>
@@ -282,13 +290,13 @@ function ChooseVariant({ p, answer, cancel, sending }: Props<"choose_variant">) 
     <Dialog title="Choose a variant" subtitle="The archive holds several versions of the mod." onBack={cancel}>
       <div className="grid gap-2">
         {p.choices.map((c, i) => (
-          <Button key={i} data-autofocus={i === 0 || undefined} disabled={sending} className="justify-start" onClick={() => answer({ type: "choice", index: i })}>
+          <Button key={i} data-autofocus={i === 0 || undefined} busy={sending} className="justify-start" onClick={() => answer({ type: "choice", index: i })}>
             {c}
           </Button>
         ))}
       </div>
       <Actions>
-        <Button tone="ghost" onClick={cancel} disabled={sending}>
+        <Button tone="ghost" onClick={cancel} busy={sending}>
           Cancel
         </Button>
       </Actions>
@@ -388,10 +396,10 @@ function FomodGroup({ p, answer, cancel, sending }: Props<"fomod_group">) {
       </div>
       {problem && <p className="mt-4 text-body text-amber-300">{problem}</p>}
       <Actions>
-        <Button tone="ghost" onClick={cancel} disabled={sending}>
+        <Button tone="ghost" onClick={cancel} busy={sending}>
           Cancel install
         </Button>
-        <Button tone="primary" disabled={sending || !!problem} onClick={() => answer({ type: "choices", indices: sel })}>
+        <Button tone="primary" busy={sending} inactive={!!problem} onClick={() => answer({ type: "choices", indices: sel })}>
           Next
         </Button>
       </Actions>

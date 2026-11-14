@@ -7,6 +7,7 @@
 
 mod install;
 mod profiles;
+pub mod restore;
 
 use std::path::{Path, PathBuf};
 
@@ -47,6 +48,9 @@ pub enum ModsError {
     InvalidProfileName(String),
     #[error("no profile named '{0}'")]
     ProfileNotFound(String),
+    /// A restore reinstalled different files than the snapshot recorded.
+    #[error("{0}: the archive no longer matches the uninstalled mod")]
+    RestoreMismatch(String),
     #[error("no installable files in {0}")]
     NoInstallableFiles(String),
     /// The archive is a mod loader (SMAPI, BepInEx, ...): it installs into

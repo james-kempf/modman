@@ -117,8 +117,8 @@ describe("Mods", () => {
       mods_list: () => ({ mods: [a, b, c], changed_since_deploy: false }),
       mod_move: () => ({ uid: a.uid, from: 1, to: 2, of: 3, after: { deployed: null, needs_deploy: false } }),
     });
-    expect(await screen.findByRole("button", { name: "Move A up" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Move C down" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Move A up" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "Move C down" })).toHaveAttribute("aria-disabled", "true");
     await user.click(screen.getByRole("button", { name: "Move A down" }));
     // after B == position 2
     await waitFor(() =>
@@ -136,7 +136,7 @@ describe("Mods", () => {
     await user.type(await screen.findByRole("searchbox", { name: "Search mods" }), "Alp");
     await waitFor(() => expect(screen.queryByRole("button", { name: "Move Bravo up" })).toBeNull());
     // Alpine is #3 of 4 but last of the visible rows.
-    expect(screen.getByRole("button", { name: "Move Alpine down" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Move Alpine down" })).toHaveAttribute("aria-disabled", "true");
     await user.click(screen.getByRole("button", { name: "Move Alpine up" }));
     await waitFor(() =>
       expect(t.callsOf("mod_move")).toEqual([expect.objectContaining({ reference: ms[2].uid, spec: "before", arg: ms[0].uid })]),
@@ -148,7 +148,7 @@ describe("Mods", () => {
     const { user } = await open("mods", {
       conflicts: () => ({ files: [{ rel_path: "textures/sky.dds", winner: m(2, "B"), losers: [m(1, "A")], plugin: false }], plugins: [] }),
     });
-    await user.click(await screen.findByRole("button", { name: "Conflicts" }));
+    await user.click(await screen.findByRole("tab", { name: "Conflicts" }));
     const list = await screen.findByRole("list", { name: "File conflicts" });
     expect(list).toHaveTextContent("textures/sky.dds");
     expect(list).toHaveTextContent("B wins over A");

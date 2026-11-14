@@ -42,6 +42,7 @@ export {
   PILL,
   SECTION_PAD,
   SETTING_CONTROL,
+  SKELETON_DELAY_MS,
   TILE,
   VIEW_FRAME,
   cx,

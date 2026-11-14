@@ -21,8 +21,25 @@ use crate::events::{self, Sink};
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PromptKind {
-    /// Answer: `confirm`.
-    Confirm { question: String, default_yes: bool },
+    /// Answer: `confirm`. The optional fields are left out of the JSON when
+    /// unset, so a plain confirm keeps the legacy shape.
+    Confirm {
+        question: String,
+        default_yes: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        yes_label: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        no_label: Option<String>,
+        /// The GUI focuses "no" (destructive "yes").
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        danger: bool,
+        /// Label of a checkbox, unchecked by default; its state comes back
+        /// as `option_checked`.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        option: Option<String>,
+    },
     /// Answer: `text` (empty = default).
     Text { question: String, default: String },
     /// Answer: `choice` (index into `files`).
@@ -81,11 +98,24 @@ pub struct OptionalMod {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Answer {
-    Confirm { yes: bool },
-    Text { value: String },
-    Choice { index: usize },
-    Choices { indices: Vec<usize> },
-    Path { path: String },
+    Confirm {
+        yes: bool,
+        /// State of the confirm's `option` checkbox; absent = unchecked.
+        #[serde(default)]
+        option_checked: bool,
+    },
+    Text {
+        value: String,
+    },
+    Choice {
+        index: usize,
+    },
+    Choices {
+        indices: Vec<usize>,
+    },
+    Path {
+        path: String,
+    },
     Cancel,
 }
 
@@ -198,6 +228,11 @@ mod tests {
                 PromptKind::Confirm {
                     question: "Proceed?".into(),
                     default_yes: true,
+                    title: None,
+                    yes_label: None,
+                    no_label: None,
+                    danger: false,
+                    option: None,
                 },
             )
         });
@@ -207,8 +242,12 @@ mod tests {
         assert_eq!(ev["prompt"]["type"], "confirm");
         let id = ev["id"].as_u64().unwrap();
         assert!(!p.answer(id + 1, Answer::Cancel));
-        assert!(p.answer(id, Answer::Confirm { yes: false }));
-        assert_eq!(t.join().unwrap(), Some(Answer::Confirm { yes: false }));
+        let no = Answer::Confirm {
+            yes: false,
+            option_checked: false,
+        };
+        assert!(p.answer(id, no.clone()));
+        assert_eq!(t.join().unwrap(), Some(no));
         assert_eq!(p.pending(), 0);
     }
 
@@ -277,5 +316,45 @@ mod tests {
             }
         );
         assert!(serde_json::from_str::<Answer>(r#"{"type":"eval","code":"x"}"#).is_err());
+    }
+
+    // Fails when an older webview's confirm answer (no option_checked) stops parsing.
+    #[test]
+    fn a_legacy_confirm_answer_parses_with_the_option_unchecked() {
+        let a: Answer = serde_json::from_str(r#"{"type":"confirm","yes":true}"#).unwrap();
+        assert_eq!(
+            a,
+            Answer::Confirm {
+                yes: true,
+                option_checked: false,
+            }
+        );
+        let a: Answer =
+            serde_json::from_str(r#"{"type":"confirm","yes":true,"option_checked":true}"#).unwrap();
+        assert_eq!(
+            a,
+            Answer::Confirm {
+                yes: true,
+                option_checked: true,
+            }
+        );
+    }
+
+    // Fails when unset danger-confirm fields leak into a plain confirm's JSON.
+    #[test]
+    fn a_plain_confirm_serialises_to_the_legacy_shape() {
+        let plain = PromptKind::Confirm {
+            question: "Proceed?".into(),
+            default_yes: false,
+            title: None,
+            yes_label: None,
+            no_label: None,
+            danger: false,
+            option: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&plain).unwrap(),
+            serde_json::json!({"type": "confirm", "question": "Proceed?", "default_yes": false})
+        );
     }
 }

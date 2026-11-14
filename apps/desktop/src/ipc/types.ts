@@ -290,6 +290,41 @@ export interface UninstallResult {
   mods: number;
   archives: string[];
   after: AfterChange;
+  /**
+   * One entry per uninstalled mod (GUI uninstalls only). Absent when no
+   * snapshot was captured (legacy shape, CLI). Offer Undo only for
+   * entries with `restorable: true`.
+   */
+  restore?: UninstallRestore[] | null;
+}
+/** Why an uninstalled mod cannot be restored. */
+export type RestoreReason = "folder_install" | "archive_deleted" | "outside_downloads";
+/** An uninstalled mod and its opaque Undo token (pass it to `modRestore`). */
+export interface UninstallRestore {
+  token: string;
+  uid: string;
+  name: string;
+  /** false whenever `reason` is set. */
+  restorable: boolean;
+  reason?: RestoreReason | null;
+}
+export type RestoreErrorKind = "archive_missing" | "conflict" | "expired" | "install_failed";
+/** Result of one token of `modRestore`. */
+export interface RestoredMod {
+  token: string;
+  /** null for an expired (unknown or used) token. */
+  uid: string | null;
+  name: string | null;
+  ok: boolean;
+  error?: { kind: RestoreErrorKind; message: string } | null;
+  warnings: string[];
+}
+/** Result of `modRestore` (Rust `RestoreResult`). */
+export interface ModRestoreResult {
+  /** Expired tokens first, then the rest lowest position first. */
+  results: RestoredMod[];
+  restored: number;
+  after: AfterChange;
 }
 export interface ProfileSummary {
   name: string;
@@ -691,7 +726,19 @@ export interface OptionalMod {
 
 /** A question from a running job (`vessel:prompt`). */
 export type Prompt =
-  | { type: "confirm"; question: string; default_yes: boolean }
+  | {
+      type: "confirm";
+      question: string;
+      default_yes: boolean;
+      /** Optional (absent or null = legacy plain confirm). Dialog title; fallback "Confirm". */
+      title?: string | null;
+      yes_label?: string | null;
+      no_label?: string | null;
+      /** Destructive yes: the dialog focuses the no button. Absent/null = false. */
+      danger?: boolean | null;
+      /** Label of a checkbox, unchecked by default; its state is sent as option_checked. */
+      option?: string | null;
+    }
   | { type: "text"; question: string; default: string }
   | { type: "choose_file"; files: FileInfo[]; default: number }
   | { type: "choose_optional"; collection: string; mods: OptionalMod[] }
@@ -712,7 +759,7 @@ export type Prompt =
 
 /** Reply to a prompt (`prompt_answer`). */
 export type Answer =
-  | { type: "confirm"; yes: boolean }
+  | { type: "confirm"; yes: boolean; option_checked?: boolean }
   | { type: "text"; value: string }
   | { type: "choice"; index: number }
   | { type: "choices"; indices: number[] }

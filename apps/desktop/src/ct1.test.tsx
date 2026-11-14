@@ -404,7 +404,7 @@ describe("CT1 D10 failing queries", () => {
 
   it("Mods profiles shows a note when profiles_list fails", async () => {
     const { user } = await open("mods", { profiles_list: fail("profiles_list") });
-    await user.click(await screen.findByRole("button", { name: "Profiles" }));
+    await user.click(await screen.findByRole("tab", { name: "Profiles" }));
     expect(await within(main()).findByText(/profiles_list failed/)).toBeInTheDocument();
   });
 });
@@ -434,7 +434,7 @@ describe("CT1 D13 profile save failure", () => {
         throw { message: "disk full" };
       },
     });
-    await user.click(await screen.findByRole("button", { name: "Profiles" }));
+    await user.click(await screen.findByRole("tab", { name: "Profiles" }));
     const field = screen.getByLabelText("Save the current mod set as");
     await user.type(field, "evening");
     await user.click(screen.getByRole("button", { name: "Save profile" }));

@@ -36,3 +36,8 @@ export const VIEW_FRAME = "grid grid-cols-[minmax(0,1fr)] gap-6";
 export const CARD_TITLE = "text-title font-medium tracking-tight text-zinc-50";
 /** Muted secondary line under a title (card intros, row help). */
 export const MUTED_NOTE = "text-label leading-snug text-dim";
+/**
+ * How long a load may run before its loading state shows (skeletons, "Loading…"): a fast answer never flashes
+ * one, and a page change keeps the previous page up (dimmed) until then.
+ */
+export const SKELETON_DELAY_MS = 300;

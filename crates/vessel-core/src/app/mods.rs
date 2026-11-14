@@ -7,7 +7,8 @@ use serde::Serialize;
 
 use super::deploy::{after_change, AfterChange};
 use super::install::AfterChangeView;
-use super::{fail, staging_lock, Cx, Msg, R};
+use super::restore::{self, RestoreEntry, RestoreStore};
+use super::{fail, staging_lock, ConfirmSpec, Cx, Msg, R};
 use crate::deploy;
 use crate::fomod::FomodChoices;
 use crate::games::GameConfig;
@@ -87,15 +88,22 @@ pub struct UninstallResult {
     pub mods: usize,
     pub archives: Vec<std::path::PathBuf>,
     pub after: AfterChangeView,
+    /// One entry per uninstalled mod when restore snapshots were captured;
+    /// left out (not `[]`) otherwise, so the legacy shape is unchanged.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub restore: Vec<RestoreEntry>,
 }
 
 /// Uninstalls mods (references: #position, uid, name, ...) after a
-/// confirmation; `delete_archive` also deletes unused archives.
+/// confirmation; `delete_archive` also deletes unused archives. With
+/// `capture_restore` (GUI only), each mod is snapshotted into that store
+/// first and listed in [`UninstallResult::restore`].
 pub fn uninstall(
     cx: &mut Cx<'_>,
     game: &GameConfig,
     refs: &[String],
     delete_archive: bool,
+    capture_restore: Option<&RestoreStore>,
 ) -> R<UninstallResult> {
     let all = mods::list_mods(cx.store.conn(), &game.id)?;
     let mut targets: Vec<&ModRecord> = Vec::new();
@@ -110,15 +118,18 @@ pub fn uninstall(
     for t in &targets {
         cx.ui.say(Msg::line("  ").y("−").p(format!(" {}", t.uid)));
     }
-    if !cx
-        .ui
-        .confirm(&format!("Uninstall {} mod(s)?", targets.len()), true)
-    {
+    let answer = cx.ui.confirm_with(&uninstall_confirm(&targets));
+    if !answer.yes {
         cx.ui.info("Cancelled.");
         return Ok(UninstallResult::default());
     }
+    let delete_archive = delete_archive || answer.option_checked;
     let ids: Vec<i64> = targets.iter().map(|t| t.id).collect();
     let dl = mods::downloads_dir(&cx.config()?.data_dir, &game.id);
+    let snaps = match capture_restore {
+        Some(_) => restore::capture(cx, &targets)?,
+        None => Vec::new(),
+    };
     let lock = staging_lock(cx.paths)?;
     let r = mods::remove_mods(
         cx.store,
@@ -127,6 +138,10 @@ pub fn uninstall(
         delete_archive.then_some(dl.as_path()),
     )?;
     drop(lock);
+    let restore = match capture_restore {
+        Some(store) => restore::keep(store, &game.id, snaps, &r.archives, &dl)?,
+        None => Vec::new(),
+    };
     for a in &r.archives {
         cx.ui.info(&format!("Deleted archive {}", a.display()));
     }
@@ -137,7 +152,35 @@ pub fn uninstall(
         mods: r.mods,
         archives: r.archives,
         after: after.into(),
+        restore,
     })
+}
+
+/// The uninstall question. `default_yes` stays true so the CLI (Enter, no
+/// tty) and [`crate::app::Headless`] keep proceeding; `danger` only moves
+/// GUI focus to the "keep" button.
+fn uninstall_confirm(targets: &[&ModRecord]) -> ConfirmSpec {
+    let (title, yes_label, no_label) = match targets {
+        [one] => (
+            format!("Uninstall {}?", one.name),
+            format!("Uninstall {}", one.name),
+            "Keep mod".to_string(),
+        ),
+        _ => (
+            format!("Uninstall {} mods?", targets.len()),
+            format!("Uninstall {} mods", targets.len()),
+            "Keep mods".to_string(),
+        ),
+    };
+    ConfirmSpec {
+        question: format!("Uninstall {} mod(s)?", targets.len()),
+        title: Some(title),
+        yes_label: Some(yes_label),
+        no_label: Some(no_label),
+        danger: true,
+        default_yes: true,
+        option: Some("Delete archive too".into()),
+    }
 }
 
 /// Saves the current order and enabled state; asks before overwriting.
@@ -310,7 +353,11 @@ pub fn mod_detail(cx: &Cx<'_>, game: &GameConfig, reference: &str) -> R<ModDetai
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+    use std::path::{Path, PathBuf};
+
     use crate::app::testing::Recorder;
+    use crate::app::{ConfirmAnswer, Headless, Ui};
     use crate::paths::Paths;
     use crate::store::Store;
 
@@ -323,5 +370,133 @@ mod tests {
         let mut cx = Cx::new(&paths, &mut store, &ui);
         let g = GameConfig::custom("g");
         assert!(save_profile(&mut cx, &g, "../x").is_err());
+    }
+
+    /// Records every [`ConfirmSpec`]; answers `yes` with `option_checked`.
+    struct Asker {
+        specs: RefCell<Vec<ConfirmSpec>>,
+        yes: bool,
+        option_checked: bool,
+    }
+
+    impl Ui for Asker {
+        fn say(&self, _msg: Msg) {}
+        fn confirm_with(&self, spec: &ConfirmSpec) -> ConfirmAnswer {
+            self.specs.borrow_mut().push(spec.clone());
+            ConfirmAnswer {
+                yes: self.yes,
+                option_checked: self.option_checked,
+            }
+        }
+    }
+
+    /// Game "g" with mods a and b, each with its own archive in downloads.
+    fn setup(home: &Path, store: &mut Store) -> (Paths, GameConfig, Vec<PathBuf>) {
+        let paths = Paths::for_home(home);
+        std::fs::create_dir_all(&paths.data_dir).unwrap();
+        crate::games::save_game(store.conn(), &GameConfig::custom("g")).unwrap();
+        let cfg = crate::config::Config::load(store, &paths).unwrap();
+        let dl = mods::downloads_dir(&cfg.data_dir, "g");
+        std::fs::create_dir_all(&dl).unwrap();
+        let mut archives = Vec::new();
+        for (uid, name) in [("a", "Alpha"), ("b", "Beta")] {
+            let id = crate::mods::tests::add(store, "g", uid, name, None);
+            let arch = dl.join(format!("{uid}.zip"));
+            std::fs::write(&arch, "x").unwrap();
+            store
+                .conn()
+                .execute(
+                    "UPDATE mods SET archive = ?1 WHERE id = ?2",
+                    rusqlite::params![arch.to_string_lossy(), id],
+                )
+                .unwrap();
+            archives.push(arch);
+        }
+        let g = crate::games::get_game(store.conn(), "g").unwrap().unwrap();
+        (paths, g, archives)
+    }
+
+    fn left(store: &Store) -> usize {
+        mods::list_mods(store.conn(), "g").unwrap().len()
+    }
+
+    // Fails when the uninstall prompt loses its title/labels/danger/option,
+    // or when default_yes flips (which would make CLI Enter and Headless cancel).
+    #[test]
+    fn uninstall_asks_a_named_danger_confirm_with_an_archive_option() {
+        let home = tempfile::tempdir().unwrap();
+        let mut store = Store::open_in_memory().unwrap();
+        let (paths, g, _) = setup(home.path(), &mut store);
+        let ui = Asker {
+            specs: RefCell::default(),
+            yes: false,
+            option_checked: false,
+        };
+        let mut cx = Cx::new(&paths, &mut store, &ui);
+        // Declined, so both questions are asked on the same mod set.
+        let r = uninstall(&mut cx, &g, &["a".into()], false, None).unwrap();
+        assert!(!r.done);
+        uninstall(&mut cx, &g, &["a".into(), "b".into()], false, None).unwrap();
+        assert_eq!(left(&store), 2);
+        let specs = ui.specs.borrow();
+        assert_eq!(
+            specs[0],
+            ConfirmSpec {
+                question: "Uninstall 1 mod(s)?".into(),
+                title: Some("Uninstall Alpha?".into()),
+                yes_label: Some("Uninstall Alpha".into()),
+                no_label: Some("Keep mod".into()),
+                danger: true,
+                default_yes: true,
+                option: Some("Delete archive too".into()),
+            }
+        );
+        assert_eq!(
+            specs[1],
+            ConfirmSpec {
+                question: "Uninstall 2 mod(s)?".into(),
+                title: Some("Uninstall 2 mods?".into()),
+                yes_label: Some("Uninstall 2 mods".into()),
+                no_label: Some("Keep mods".into()),
+                danger: true,
+                default_yes: true,
+                option: Some("Delete archive too".into()),
+            }
+        );
+    }
+
+    // Fails when Headless (and so the CLI without a tty) stops uninstalling,
+    // or when the archive is deleted without delete_archive or the option.
+    #[test]
+    fn headless_uninstall_proceeds_and_keeps_archives() {
+        let home = tempfile::tempdir().unwrap();
+        let mut store = Store::open_in_memory().unwrap();
+        let (paths, g, archives) = setup(home.path(), &mut store);
+        let mut cx = Cx::new(&paths, &mut store, &Headless);
+        let r = uninstall(&mut cx, &g, &["a".into(), "b".into()], false, None).unwrap();
+        assert!(r.done);
+        assert_eq!(r.mods, 2);
+        assert!(r.archives.is_empty());
+        assert_eq!(left(&store), 0);
+        assert!(archives.iter().all(|a| a.exists()));
+    }
+
+    // Fails when a ticked "Delete archive too" is ignored by the backend.
+    #[test]
+    fn a_checked_option_deletes_and_reports_the_archives() {
+        let home = tempfile::tempdir().unwrap();
+        let mut store = Store::open_in_memory().unwrap();
+        let (paths, g, archives) = setup(home.path(), &mut store);
+        let ui = Asker {
+            specs: RefCell::default(),
+            yes: true,
+            option_checked: true,
+        };
+        let mut cx = Cx::new(&paths, &mut store, &ui);
+        let r = uninstall(&mut cx, &g, &["a".into(), "b".into()], false, None).unwrap();
+        assert!(r.done);
+        assert_eq!(r.archives, archives);
+        assert!(archives.iter().all(|a| !a.exists()));
+        assert_eq!(left(&store), 0);
     }
 }

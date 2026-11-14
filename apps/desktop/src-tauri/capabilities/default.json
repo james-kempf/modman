@@ -38,6 +38,7 @@
     "allow-mods-set-enabled",
     "allow-mod-move",
     "allow-mods-uninstall",
+    "allow-mod-restore",
     "allow-mod-reinstall",
     "allow-thumbnail",
     "allow-picture",

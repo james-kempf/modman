@@ -58,6 +58,12 @@ export interface Notice {
   deploy?: boolean;
   /** The game (id) a "Deploy now" notice is about: shown and acted on only for it. */
   game?: string;
+  /** A one-off action button (e.g. Undo) in place of "Deploy now". */
+  action?: NoticeAction;
+}
+export interface NoticeAction {
+  label: string;
+  onAction(): void;
 }
 
 /**
@@ -110,12 +116,42 @@ export const browseDefaults = (game: string): BrowseSession => ({
   scroll: 0,
 });
 
+/** The Mods view's sub-tabs. */
+export type ModsTab = "list" | "conflicts" | "updates" | "profiles";
+export type StateFilter = "all" | "enabled" | "disabled" | "conflicts" | "updates";
+/** "" = any collection membership, "-" = in none, "*" = in any, else a collection slug. */
+export type CollectionFilter = string;
+export interface ModFilter {
+  query: string;
+  state: StateFilter;
+  collection: CollectionFilter;
+}
+export const NO_FILTER: ModFilter = { query: "", state: "all", collection: "" };
+
+/** The Mods view's UI state for this session (in memory): kept across view switches. */
+export interface ModsUi {
+  tab: ModsTab;
+  /** The load order's search and filters, per game (collection slugs belong to one game). */
+  filters: Record<string, ModFilter>;
+  /**
+   * Per game: the "before-<name>" profiles the profile-load flow saved itself. Only these
+   * are replaced by a later snapshot; any other profile of that name is the user's.
+   */
+  snapshots: Record<string, string[]>;
+}
+const modsUiDefaults = (): ModsUi => ({ tab: "list", filters: {}, snapshots: {} });
+
 const MAX_ACTIVITY = 500;
 /** Jobs kept for Activity; past this the oldest finished ones are dropped. */
 export const MAX_JOBS = 200;
 const MAX_NOTICES = 3;
 /** Auto-dismiss after (ms); every notice closes on its own, "Deploy now" ones included. */
 const NOTICE_TTL: Record<NoticeTone, number> = { info: 6000, success: 6000, warn: 10000, error: 10000 };
+/** A notice with an action (Undo) stays at least this long: time to reach it with D-pad or Tab. */
+export const ACTION_NOTICE_TTL = 15000;
+/** Pending auto-dismiss timers, and the notices focus is in (their timer waits until focus leaves). */
+const noticeTimers = new Map<number, ReturnType<typeof setTimeout>>();
+const heldNotices = new Set<number>();
 
 export interface UiState {
   view: ViewId;
@@ -149,9 +185,16 @@ export interface UiState {
   setStartupCheck(c: StartupCheck | null): void;
 
   notices: Notice[];
-  /** `game`: a "Deploy now" notice for that game (id). */
-  notify(tone: NoticeTone, text: string, game?: string): void;
+  /**
+   * `game`: the notice belongs to that game (id) and, without `action`, offers "Deploy now".
+   * `action`: one button (e.g. Undo); using it dismisses the notice, then calls `onAction`.
+   */
+  notify(tone: NoticeTone, text: string, game?: string, action?: NoticeAction): void;
   dismiss(id: number): void;
+  /** Use a notice's action: dismiss it, then run the action. */
+  runNoticeAction(id: number): void;
+  /** Focus entered (true) or left (false) a notice: its auto-dismiss waits, then restarts in full. */
+  holdNotice(id: number, held: boolean): void;
 
   /**
    * Per game (id): a mod-set change left it out of sync with staging,
@@ -193,6 +236,15 @@ export interface UiState {
   browse: BrowseSession | null;
   /** Merge into the game's Browse session (a session of another game is replaced). */
   saveBrowse(game: string, patch: Partial<Omit<BrowseSession, "game">>): void;
+
+  modsUi: ModsUi;
+  setModsTab(tab: ModsTab): void;
+  setModsFilter(game: string, filter: ModFilter): void;
+  /**
+   * owned: the load flow saved this snapshot profile. Not owned: the user saved or deleted a
+   * profile of that name, so it is theirs and is never replaced.
+   */
+  markProfileSnapshot(game: string, name: string, owned: boolean): void;
 }
 
 /** A game found in Steam with no preset: its name and install folder. */
@@ -222,6 +274,7 @@ const initial = {
   addGame: false,
   addGamePrefill: null as AddGamePrefill | null,
   browse: null as BrowseSession | null,
+  modsUi: modsUiDefaults(),
 };
 
 export const useUi = create<UiState>()((set, get) => ({
@@ -297,19 +350,54 @@ export const useUi = create<UiState>()((set, get) => ({
 
   setStartupCheck: (c) => set({ startupCheck: c }),
 
-  notify: (tone, text, game) => {
+  notify: (tone, text, game, action) => {
     const id = ++seq;
-    const deploy = game !== undefined;
+    const deploy = game !== undefined && !action;
     const notice: Notice = deploy ? { id, tone, text, deploy, game } : { id, tone, text };
+    if (action) {
+      notice.action = action;
+      if (game !== undefined) notice.game = game;
+    }
     set((s) => ({
       // The same notice again replaces the old one (moved to the end, fresh timeout) instead of stacking.
       notices: [...s.notices.filter((n) => !(n.tone === tone && n.text === text && n.game === game)), notice].slice(
         -MAX_NOTICES,
       ),
     }));
-    setTimeout(() => get().dismiss(id), NOTICE_TTL[tone]);
+    // Drop the timers of notices that were replaced or pushed out.
+    const live = new Set(get().notices.map((n) => n.id));
+    for (const [old, t] of noticeTimers) {
+      if (live.has(old)) continue;
+      clearTimeout(t);
+      noticeTimers.delete(old);
+      heldNotices.delete(old);
+    }
+    armNotice(id, action ? Math.max(ACTION_NOTICE_TTL, NOTICE_TTL[tone]) : NOTICE_TTL[tone], get);
   },
-  dismiss: (id) => set((s) => ({ notices: s.notices.filter((n) => n.id !== id) })),
+  dismiss: (id) => {
+    clearTimeout(noticeTimers.get(id));
+    noticeTimers.delete(id);
+    heldNotices.delete(id);
+    set((s) => ({ notices: s.notices.filter((n) => n.id !== id) }));
+  },
+  runNoticeAction: (id) => {
+    const action = get().notices.find((n) => n.id === id)?.action;
+    if (!action) return;
+    get().dismiss(id);
+    action.onAction();
+  },
+  holdNotice: (id, held) => {
+    const notice = get().notices.find((n) => n.id === id);
+    if (!notice) return;
+    if (held) {
+      heldNotices.add(id);
+      clearTimeout(noticeTimers.get(id));
+      noticeTimers.delete(id);
+    } else if (heldNotices.delete(id)) {
+      const ttl = NOTICE_TTL[notice.tone];
+      armNotice(id, notice.action ? Math.max(ACTION_NOTICE_TTL, ttl) : ttl, get);
+    }
+  },
 
   markDeployDue: (game) => set((s) => ({ deployDue: { ...s.deployDue, [game]: ++seq } })),
   clearDeployDue: (game, since) =>
@@ -354,9 +442,29 @@ export const useUi = create<UiState>()((set, get) => ({
 
   saveBrowse: (game, patch) =>
     set((s) => ({ browse: { ...(s.browse?.game === game ? s.browse : browseDefaults(game)), ...patch } })),
+
+  setModsTab: (tab) => set((s) => ({ modsUi: { ...s.modsUi, tab } })),
+  setModsFilter: (game, filter) =>
+    set((s) => ({ modsUi: { ...s.modsUi, filters: { ...s.modsUi.filters, [game]: filter } } })),
+  markProfileSnapshot: (game, name, owned) =>
+    set((s) => {
+      const have = s.modsUi.snapshots[game] ?? [];
+      if (have.includes(name) === owned) return s;
+      const next = owned ? [...have, name] : have.filter((n) => n !== name);
+      return { modsUi: { ...s.modsUi, snapshots: { ...s.modsUi.snapshots, [game]: next } } };
+    }),
 }));
 
 /** Drop the oldest finished jobs past MAX_JOBS (running ones always stay). */
+/** (Re)start a notice's auto-dismiss timer. */
+function armNotice(id: number, ms: number, get: () => UiState): void {
+  clearTimeout(noticeTimers.get(id));
+  noticeTimers.set(
+    id,
+    setTimeout(() => get().dismiss(id), ms),
+  );
+}
+
 function capJobs(jobs: Record<number, JobEntry>): Record<number, JobEntry> {
   const ids = Object.keys(jobs).map(Number);
   if (ids.length <= MAX_JOBS) return jobs;
@@ -371,5 +479,5 @@ function capJobs(jobs: Record<number, JobEntry>): Record<number, JobEntry> {
 
 /** Test helper: back to the initial state. */
 export function resetUi(): void {
-  useUi.setState({ ...initial });
+  useUi.setState({ ...initial, modsUi: modsUiDefaults() });
 }

@@ -24,6 +24,7 @@ use vessel_core::app::mods::{
     self as appmods, ModDetail, ModsView, MoveResult, ProfileLoaded, UninstallResult,
 };
 use vessel_core::app::nexus::{self as appnx, AccountInfo, LoginResult};
+use vessel_core::app::restore::{self, RestoreResult};
 use vessel_core::app::shortcut::{self, ShortcutStatus};
 use vessel_core::app::updates::{self as appup, UpdateReport};
 use vessel_core::app::views::{
@@ -418,9 +419,26 @@ pub async fn mods_uninstall(
     refs: Vec<String>,
     delete_archive: bool,
 ) -> CmdResult<UninstallResult> {
+    let snaps = state.0.restore.clone();
     job(app, &state, "mods_uninstall", game, move |cx| {
         let g = cx.need_game()?;
-        appmods::uninstall(cx, &g, &refs, delete_archive)
+        appmods::uninstall(cx, &g, &refs, delete_archive, Some(&snaps))
+    })
+    .await
+}
+
+/// Undo of `mods_uninstall`: tokens from `UninstallResult.restore`.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn mod_restore(
+    app: AppHandle,
+    state: St<'_>,
+    game: Option<String>,
+    tokens: Vec<String>,
+) -> CmdResult<RestoreResult> {
+    let snaps = state.0.restore.clone();
+    job(app, &state, "mod_restore", game, move |cx| {
+        let g = cx.need_game()?;
+        restore::restore(cx, &g, &snaps, &tokens)
     })
     .await
 }

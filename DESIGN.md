@@ -287,7 +287,7 @@ Hit area: icon buttons are `size-control` (48px). Any icon control is at least `
 - Loading delay: a load replaces what is on screen with skeletons only after 300ms (the `slow` step, `SKELETON_DELAY_MS` in `views/Browse.tsx`). Until then the previous content stays up at `opacity-stale`, `inert`.
 - Press: `active:translate-y-px active:scale-98` on buttons, `active:scale-98` on tabs. Activatable cards (`CARD_TILE`) use `translate-y-px scale-99`: at 98 a ~300px card's edges would move ~3px. Transform only, so nothing reflows; under reduced motion the press applies without the transition, like buttons.
 - The highlight never animates. `html[data-input] *` limits transitions to transform, translate, scale, rotate and opacity, so the white fill snaps on and off.
-- Reduced motion: a global `@media (prefers-reduced-motion: reduce)` rule sets animation and transition durations to 0.01ms. Skeleton pulse uses `motion-safe:animate-pulse`. The tab pill uses `motion-reduce:transition-none`.
+- Reduced motion: a global `@media (prefers-reduced-motion: reduce)` rule sets animation and transition durations to 0.01ms. Skeleton pulse uses `motion-safe:animate-pulse`, the Toggle busy spinner `motion-safe:animate-spin`. The tab pill uses `motion-reduce:transition-none`.
 
 ---
 
@@ -369,7 +369,8 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 ### Toggle (`controls/Toggle.tsx`)
 
 - `role=switch`, 48px `rounded-pill` hit box (`px-2.5`, the highlight's shape). Track `h-7 w-12 rounded-pill`: on `bg-accent-500/90`, off `bg-fill-hover`. Knob `size-icon`: on white, off zinc-400. Both move with `duration-slow ease-spring`.
-- Under the highlight the on track becomes accent-700 and the off track zinc-500, keeping ≥3:1. `busy` uses `aria-disabled`.
+- Under the highlight the on track becomes accent-700 and the off track zinc-500, keeping ≥3:1.
+- Busy (`busy`): `aria-busy` + `aria-disabled`, never native `disabled`, so focus stays on the switch and clicks are ignored. The knob shows a `CircleNotchIcon` 14 bold `text-zinc-800` spinner (on the white or zinc-400 knob, and on white under the highlight). It spins with `motion-safe:animate-spin`, so under reduced motion it is a static ring that still marks the switch busy. The knob transition names `transform` and `translate` (Tailwind v4 `translate-x-*` sets `translate`).
 
 ### Tabs (`controls/Tabs.tsx`)
 
@@ -382,7 +383,8 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 - No track: the tablist has no fill or padding, only `gap-2` (8px) between pills. The selected pill and its focus ring (`inset-0`, `ring-inset`) share the tab's `rounded-pill` box, so they span the whole equal-width tab and the ring stays inside the pill.
 - Selected: `text-accent-200` on a `bg-accent-400/15` pill (scale .95 to 1 plus opacity, 250ms spring).
 - Selected + highlighted: accent-700 text and a `ring-2 ring-accent-600` inset ring.
-- Keys: roving tabindex with APG manual activation (arrows, Home, End). LB/RB switch tabs.
+- Keys: roving tabindex with APG manual activation (arrows, Home, End). LB/RB switch tabs, but only inside a `[data-nav-scope]` (Dialog, Select).
+- Tabs inside a view (e.g. the Mods sub-tabs): use `focusable`, so the tablist is one roving stop that arrows / D-pad move through and Enter/A activates. They are not bound to LB/RB: a view is not a nav scope, so LB/RB keep cycling the app view bar. Never use Segmented for navigation between panes of a view; Segmented is for filter values.
 - With a panel there is a hairline under the bar, and only the panel scrolls.
 
 ### Segmented (`controls/Segmented.tsx`)
@@ -429,6 +431,15 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 - `.glass rounded-card min-h-14 px-4 py-2 animate-island` in the bottom stack (`z-40`).
 - Tones and borders: info `white/10`, success `accent-400/25`, warn `amber-400/30`, error `rose-400/40`. Duotone icon 18.
 - Timed close, so there is no dismiss button. `role=alert` for errors, `status` otherwise. One optional action.
+- API: `notify(tone, text, game?, action?)` in `app/store.ts`. `game` alone gives the "Deploy now" notice for that game (unchanged). `action: { label, onAction }` gives one `Button size="sm"` (default tone) in place of "Deploy now"; with a `game` the notice is still shown only for that game. TTLs: info and success 6s, warn and error 10s, action notices `ACTION_NOTICE_TTL` = 15s (at least).
+- The action never takes focus when the notice appears (it is announced through the live region); it is a normal Tab and D-pad stop in the bottom stack. Using it dismisses the notice first, then runs `onAction` once (`runNoticeAction`). While focus is inside an action notice its timer waits (`holdNotice`), and it restarts in full when focus leaves, so the button never vanishes under the user. If it closes anyway, focus recovery puts focus on the nearest control.
+
+#### Undo toast
+
+- After a destructive action that can be reversed (uninstall, profile load), show a success notice that says what happened, with `action: { label: "Undo", onAction }`: "Uninstalled SkyUI" + Undo, "Loaded profile Survival" + Undo.
+- Offer Undo only when it can really undo. For uninstall that is the backend's `restorable` flag on each `UninstallResult.restore[]` entry; the frontend never re-derives it from archives. Undo calls `modRestore(tokens)` with the opaque tokens of the restorable entries. A ticked "Delete archive too" makes the entry not restorable, so that uninstall gets a plain notice with no Undo.
+- The result of Undo is its own notice: one success notice ("Restored SkyUI" / "Restored 3 mods"), and for failures an error notice naming the mod and the reason (archive missing, conflict, expired, install failed). The list refetches either way.
+- One failed mod keeps its own sentence ("Couldn't restore SkyUI: its archive is no longer in the downloads folder."). Several failures (a bulk Undo) share ONE error notice that lists each mod with a short reason: "Couldn't restore 3 mods: A (archive missing), B (conflict), C (expired)." The stack holds only `MAX_NOTICES` = 3, so one notice per mod would push out the rest of the outcome.
 
 ### JobIsland (`feedback/JobIsland.tsx`)
 
@@ -438,6 +449,28 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 
 - `rounded-card border-rose-400/15 bg-rose-500/5 px-4 py-3 text-body text-rose-200`, with optional actions such as "Try again".
 - Content: a plain lead line that says what failed ("Couldn’t reach Nexus to list mods."), then the raw error as a secondary line (`mt-1 font-mono text-caption text-rose-300`). The retry goes in `actions` (`Button size="sm"`, `ArrowClockwiseIcon` 16, "Try again", `busy` while refetching).
+- Copy formula: "Couldn’t <verb> <object>." (`Couldn’t read the mod list.`, `Couldn’t check conflicts.`, `Couldn’t load details.`), then the raw error, then "Try again". No "Error:" prefix, no apology.
+- Use it in place of the content that failed to load (a list, a card body, a detail pane), not as a toast: the error stays until the retry succeeds. A filter that depends on the failed data (e.g. "Has conflicts") shows the same ErrorNote, not an empty state. "Try again" refetches only the failed query; it is `busy` (focus stays) while it runs. Use a notice instead for a failed one-off action (an install, a deploy).
+
+### Danger confirm (`dialogs/PromptDialog.tsx`, backend `ConfirmSpec`)
+
+- For an irreversible or costly action the backend sends a confirm prompt with `title`, `yes_label`, `no_label`, `danger: true` and optionally `option` (a checkbox label). The answer carries `{ yes, option_checked }`. All new fields are optional; a plain confirm renders as before ("Confirm", No / Yes).
+- Title is the question as a heading: "Uninstall SkyUI?" (one mod), "Uninstall 3 mods?" (several). The buttons name the outcome: yes "Uninstall SkyUI" / "Uninstall 3 mods", no "Keep mod" / "Keep mods". Never "Yes"/"OK" on a danger confirm.
+- Yes uses the `danger` Button tone; No is `default`. Focus starts on No ("Keep mod"), whatever `default_yes` says (that stays the CLI and Headless default), so a stray A or Enter keeps the mod.
+- Option: "Delete archive too", a pad-focusable checkbox, unchecked by default (opt-in). Unticked keeps the downloaded archive, which is what makes Undo possible; ticked deletes it and the result has no Undo.
+- While the answer is sent every button is `busy` (`aria-busy` + `aria-disabled`, focus stays on the pressed one), never native `disabled`.
+
+### Bulk selection bar (Mods load order, `views/mods/BulkBar.tsx`, `useSelection.ts`)
+
+- Each row has a checkbox-style select control as its own focus stop, left of the enable Toggle, named "Select <mod>". No range or Shift selection. `useSelection(ids)` holds the set: ids that leave the list are dropped on that render and stay dropped if they come back (an Undo does not reselect), and `list` gives the selection in list order for the bulk call.
+- When one or more rows are selected, a `role=region` bar labelled "Selected mods" sticks to the bottom of the list card (`sticky bottom-[calc(var(--main-pb,0px)*-1)] z-10`, `bg-ink-2 border-t border-hairline px-section py-3`, like the pagination toolbar; edge-to-edge margins come from the caller): the count ("3 selected", `text-label text-zinc-300 tabular-nums`, `mr-auto`), then `Button size="sm"` Enable, Disable, Uninstall (`danger` tone, goes through the danger confirm) and Clear (`ghost`), `gap-2`, wrapping when narrow. It renders nothing when the selection is empty.
+- B / Escape does not clear the selection (B is Back); Clear does. When the bar hides, focus returns to the row it came from (the select control of the row last toggled; after a bulk uninstall, the first remaining row after the removed ones, else before them), never to `<body>`. A polite announcement in the list's `role=status` line says "N selected" / "Selection cleared". While an action runs it is `busy` (spinner) and the other three are `inactive`; all stay focusable.
+
+### Move to position (Mods load order, `views/mods/MoveToPosition.tsx`)
+
+- Placement: in the mod's detail dialog (a "Load order position" section above the footer), not on the row. On the row the form (Top, Bottom, a `w-28` field, Move) would not fit beside the name, select, Toggle, arrows and Details at 1024px; in the dialog it is reached by pad through Details and stays open while moving, with the subtitle showing the live position. Every move (arrows and dialog) is announced in the list's `role=status` line: "<mod> moved to position N of M".
+- Besides the up/down IconButtons (`inactive` at the ends), a row can move straight to a place: `Button size="sm"` Top and Bottom (named "Move <mod> to top/bottom"; `inactive` when the row is already there), or a position number with a primary `sm` Move button. The backend takes `modMove(ref, "first" | "last" | "#N")`.
+- The position field is a number input (`TextField`, `w-28`) labelled "Position" with helper text "1–N" (N = rows in the list). It accepts a whole number within 1–N, else "Enter a position from 1 to N." The error shows from the first blur or submit on, then follows the typing (as profile names do). Move is `inactive` while the field is empty. Enter or A submits and clears the field; the row then shows at its new place and the pressed control keeps focus. `busy` makes every button `inactive`. Nothing uses native `disabled`.
 
 ### Empty (`feedback/Empty.tsx`)
 

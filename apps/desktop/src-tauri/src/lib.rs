@@ -132,6 +132,7 @@ pub fn run() {
             commands::mods_set_enabled,
             commands::mod_move,
             commands::mods_uninstall,
+            commands::mod_restore,
             commands::mod_reinstall,
             commands::thumbnail,
             commands::picture,

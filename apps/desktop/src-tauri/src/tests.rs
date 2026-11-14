@@ -301,3 +301,12 @@ fn processed_loader_links_emit_loader_pending() {
     assert_eq!(ev[0]["pending"][0]["preview_id"], "ab");
     assert_eq!(ev[0]["pending"][0]["op"], "install");
 }
+
+// Fails when the GUI uninstall stops capturing restore snapshots (no Undo
+// would ever be offered) or mod_restore stops using the same session store.
+#[test]
+fn gui_uninstall_captures_restore_snapshots_into_the_session_store() {
+    assert!(COMMANDS_RS.contains("appmods::uninstall(cx, &g, &refs, delete_archive, Some(&snaps))"));
+    assert!(COMMANDS_RS.contains("restore::restore(cx, &g, &snaps, &tokens)"));
+    assert_eq!(COMMANDS_RS.matches("state.0.restore.clone()").count(), 2);
+}

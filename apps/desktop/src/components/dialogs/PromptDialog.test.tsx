@@ -82,7 +82,9 @@ describe("prompt dialogs answer via prompt_answer", () => {
       url: "https://skse.silverlock.org",
     });
     expect(screen.getByText("Get it from the site.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Use this file" })).toBeDisabled();
+    // #8: inactive, not native disabled (focus must not drop to <body>).
+    expect(screen.getByRole("button", { name: "Use this file" })).toHaveAttribute("aria-disabled", "true");
+    expect(document.querySelector("button[disabled]")).toBeNull();
     await user.type(screen.getByLabelText("Path of the downloaded archive"), "/tmp/skse.7z");
     await user.click(screen.getByRole("button", { name: "Use this file" }));
     expect(await answered(t)).toEqual({ id, answer: { type: "path", path: "/tmp/skse.7z" } });
@@ -112,7 +114,8 @@ describe("prompt dialogs answer via prompt_answer", () => {
     });
     expect(screen.getByRole("heading", { name: "FOMOD installer: Demo" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /2K/ })).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByRole("radio", { name: /8K/ })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: /8K/ })).toHaveAttribute("aria-disabled", "true");
+    expect(document.querySelector("button[disabled]")).toBeNull();
     await user.click(screen.getByRole("radio", { name: /1K/ }));
     expect(screen.getByText("small")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Next" }));
@@ -175,6 +178,75 @@ describe("prompt dialogs answer via prompt_answer", () => {
     expect(screen.getByText("First?")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Yes" }));
     expect(await screen.findByText("Second?")).toBeInTheDocument();
+  });
+});
+
+describe("confirm: danger contract and busy (#1, #8)", () => {
+  const danger: Prompt = {
+    type: "confirm",
+    question: "Uninstall 1 mod(s)?",
+    default_yes: true,
+    title: "Uninstall SkyUI?",
+    yes_label: "Uninstall SkyUI",
+    no_label: "Keep mod",
+    danger: true,
+    option: "Delete archive too",
+  };
+
+  // Fails when a backend without the new fields (missing or null) no longer gets the plain dialog.
+  it.each([
+    ["missing", { type: "confirm", question: "Proceed?", default_yes: true }],
+    ["null", { type: "confirm", question: "Proceed?", default_yes: true, title: null, yes_label: null, no_label: null, danger: null, option: null }],
+  ] as [string, Prompt][])("legacy confirm with the new fields %s renders as before", async (_, prompt) => {
+    const { t, id, user } = await ask(prompt);
+    expect(screen.getByRole("heading", { name: "Confirm" })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    // default_yes=true still focuses Yes.
+    expect(document.activeElement).toHaveTextContent("Yes");
+    expect(screen.getByRole("button", { name: "No" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Yes" }));
+    expect(await answered(t)).toEqual({ id, answer: { type: "confirm", yes: true } });
+  });
+
+  // Fails when a danger confirm focuses the destructive button (default_yes is true for the CLI).
+  it("danger focuses Keep mod, tones the yes button danger and leaves the option unchecked", async () => {
+    const { t, id, user } = await ask(danger);
+    expect(screen.getByRole("heading", { name: "Uninstall SkyUI?" })).toBeInTheDocument();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Keep mod" }));
+    expect(screen.getByRole("button", { name: "Uninstall SkyUI" }).className).toContain("bg-rose-500/15");
+    const box = screen.getByRole("checkbox", { name: "Delete archive too" });
+    expect(box).toHaveAttribute("aria-checked", "false");
+    await user.click(screen.getByRole("button", { name: "Uninstall SkyUI" }));
+    expect(await answered(t)).toEqual({ id, answer: { type: "confirm", yes: true, option_checked: false } });
+  });
+
+  // Fails when the ticked option is not sent, or the checkbox cannot be reached by keyboard/pad.
+  it("the Delete archive too option is focusable and sent as option_checked", async () => {
+    const { t, id, user } = await ask(danger);
+    const box = screen.getByRole("checkbox", { name: "Delete archive too" });
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(box);
+    await user.keyboard(" ");
+    expect(box).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByRole("button", { name: "Uninstall SkyUI" }));
+    expect(await answered(t)).toEqual({ id, answer: { type: "confirm", yes: true, option_checked: true } });
+  });
+
+  // #8: fails when sending disables the buttons natively (focus drops to <body>).
+  it("while sending, buttons are busy and focus stays on the pressed button", async () => {
+    const { t, user } = await ask({ type: "confirm", question: "Proceed?", default_yes: true });
+    t.handlers.prompt_answer = () => new Promise(() => {});
+    const yes = screen.getByRole("button", { name: "Yes" });
+    await user.click(yes);
+    await waitFor(() => expect(yes).toHaveAttribute("aria-busy", "true"));
+    for (const b of screen.getAllByRole("button")) {
+      expect(b).not.toHaveAttribute("disabled");
+      expect(b).toHaveAttribute("aria-disabled", "true");
+    }
+    expect(document.activeElement).toBe(yes);
+    // A second press while busy sends nothing more.
+    await user.click(yes);
+    expect(t.callsOf("prompt_answer")).toHaveLength(1);
   });
 });
 

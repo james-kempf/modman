@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MAX_JOBS, resetUi, useUi } from "./store";
+import { ACTION_NOTICE_TTL, MAX_JOBS, resetUi, useUi } from "./store";
 
 const texts = () => useUi.getState().notices.map((n) => n.text);
 
@@ -49,6 +49,69 @@ describe("notices (T16 F5)", () => {
     vi.advanceTimersByTime(5_000);
     expect(texts()).toEqual(["again"]);
   });
+});
+
+describe("notice actions (T03)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    useUi.setState({ notices: [] });
+  });
+  afterEach(() => vi.useRealTimers());
+  const only = () => useUi.getState().notices[0]!;
+
+  // Fails when an action notice with a game is turned into a "Deploy now" one, or loses its game scope.
+  it("keeps the action and game, and offers no Deploy now", () => {
+    const onAction = vi.fn();
+    useUi.getState().notify("success", "Uninstalled SkyUI", "g", { label: "Undo", onAction });
+    expect(only()).toMatchObject({ game: "g", action: { label: "Undo" } });
+    expect(only().deploy).toBeUndefined();
+  });
+
+  // Fails when the existing deploy notice shape changes (no action, deploy flag set).
+  it("leaves deploy notices as they were", () => {
+    useUi.getState().notify("warn", "Changes are not in the game yet.", "g");
+    expect(only()).toEqual({ id: only().id, tone: "warn", text: "Changes are not in the game yet.", deploy: true, game: "g" });
+  });
+
+  // Fails when using the action does not dismiss first, runs twice, or does not call the handler.
+  it("runNoticeAction dismisses the notice, then calls the action once", () => {
+    const seen: number[] = [];
+    const onAction = vi.fn(() => seen.push(useUi.getState().notices.length));
+    useUi.getState().notify("info", "Removed", undefined, { label: "Undo", onAction });
+    const id = only().id;
+    useUi.getState().runNoticeAction(id);
+    useUi.getState().runNoticeAction(id);
+    expect(onAction).toHaveBeenCalledTimes(1);
+    expect(seen).toEqual([0]);
+    expect(texts()).toEqual([]);
+  });
+
+  // Fails when an Undo toast closes at the 6 s info TTL, before a pad user can reach it.
+  it("stays up for ACTION_NOTICE_TTL, then closes without calling the action", () => {
+    const onAction = vi.fn();
+    useUi.getState().notify("info", "Removed", undefined, { label: "Undo", onAction });
+    vi.advanceTimersByTime(ACTION_NOTICE_TTL - 1);
+    expect(texts()).toEqual(["Removed"]);
+    vi.advanceTimersByTime(1);
+    expect(texts()).toEqual([]);
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  // Fails when the timer dismisses a notice that has focus (focus would drop out from under the user).
+  it("waits while held and restarts the full TTL on release", () => {
+    useUi.getState().notify("info", "Removed", undefined, { label: "Undo", onAction: () => {} });
+    const id = only().id;
+    vi.advanceTimersByTime(ACTION_NOTICE_TTL - 1000);
+    useUi.getState().holdNotice(id, true);
+    vi.advanceTimersByTime(ACTION_NOTICE_TTL * 3);
+    expect(texts()).toEqual(["Removed"]);
+    useUi.getState().holdNotice(id, false);
+    vi.advanceTimersByTime(ACTION_NOTICE_TTL - 1);
+    expect(texts()).toEqual(["Removed"]);
+    vi.advanceTimersByTime(1);
+    expect(texts()).toEqual([]);
+  });
+
 });
 
 describe("CT2 per-game deploy-due state (D02/D04)", () => {

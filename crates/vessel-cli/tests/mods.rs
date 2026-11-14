@@ -739,3 +739,33 @@ fn auto_deploy_redeploys_after_changes() {
     env.run(&["disable", "Alpha"]).success();
     assert!(!game.join("Data/alpha.esp").exists());
 }
+
+/// stdout and stderr of one CLI run with the temp dir replaced by `<TMP>`.
+fn outputs(env: &Env, args: &[&str]) -> (String, String) {
+    let o = env.cmd().args(args).output().unwrap();
+    assert!(o.status.success(), "{args:?}: {o:?}");
+    let tmp = env.tmp.path().to_string_lossy().into_owned();
+    let norm = |b: &[u8]| String::from_utf8_lossy(b).replace(&tmp, "<TMP>");
+    (norm(&o.stdout), norm(&o.stderr))
+}
+
+// Fails when the uninstall restore work (snapshots, restore[] in the
+// result) changes a byte of what `vessel uninstall` prints: the CLI never
+// captures restore snapshots. Golden captured before that work landed.
+#[test]
+fn uninstall_output_is_byte_identical_golden() {
+    let (env, _) = setup();
+    three(&env);
+    let (out, err) = outputs(&env, &["uninstall", "Alpha"]);
+    let (out2, err2) = outputs(&env, &["uninstall", "Beta", "Gamma", "--delete-archive"]);
+    assert_eq!(out, "  \u{2212} Alpha\n[ OK ]  Uninstalled 1 mod(s).\n");
+    assert_eq!(err, "");
+    assert_eq!(
+        out2,
+        "  \u{2212} Beta\n  \u{2212} Gamma\n\
+         [INFO]  Deleted archive <TMP>/home/.local/share/vessel/testgame/downloads/Beta.zip\n\
+         [INFO]  Deleted archive <TMP>/home/.local/share/vessel/testgame/downloads/Gamma.zip\n\
+         [ OK ]  Uninstalled 2 mod(s).\n"
+    );
+    assert_eq!(err2, "");
+}

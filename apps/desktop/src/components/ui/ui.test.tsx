@@ -2,7 +2,8 @@
 // The shared Card: header placement and that the default look is unchanged.
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { Button, Card, CardSection, Row, SECTION_PAD, Segmented, Toggle } from ".";
+import { ArrowUpIcon } from "@phosphor-icons/react";
+import { Button, Card, CardSection, IconButton, Row, SECTION_PAD, Segmented, Toggle } from ".";
 
 const surface = (title: string) => screen.getByRole("heading", { name: title }).closest("section")!.lastElementChild!;
 
@@ -167,5 +168,27 @@ describe("Button nav focus", () => {
   ] as const)("toggle track stays >= 3:1 on the white focus fill (checked=%s)", (checked, track) => {
     render(<Toggle label="T" checked={checked} onChange={() => {}} />);
     expect(screen.getByRole("switch").innerHTML).toContain(track);
+  });
+});
+
+describe("IconButton", () => {
+  // Fails when IconButton has no inactive pass-through (callers fall back to native disabled, which drops focus).
+  it("passes inactive through as aria-disabled, never native disabled", () => {
+    render(<IconButton label="Up" icon={ArrowUpIcon} inactive />);
+    const b = screen.getByRole("button", { name: "Up" });
+    expect(b).toHaveAttribute("aria-disabled", "true");
+    expect(b).not.toBeDisabled();
+  });
+
+  // Fails when the glyph size cannot be set to 20 (T05 #25) or the default changes from 18.
+  it("renders an 18px glyph by default and 20px with size={20}", () => {
+    render(
+      <>
+        <IconButton label="Small" icon={ArrowUpIcon} />
+        <IconButton label="Large" icon={ArrowUpIcon} size={20} />
+      </>,
+    );
+    expect(screen.getByRole("button", { name: "Small" }).querySelector("svg")).toHaveAttribute("width", "18");
+    expect(screen.getByRole("button", { name: "Large" }).querySelector("svg")).toHaveAttribute("width", "20");
   });
 });

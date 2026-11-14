@@ -22,6 +22,7 @@ pub mod nexus;
 pub mod nxm;
 pub mod plugins;
 pub mod restage;
+pub mod restore;
 pub mod shortcut;
 pub mod thumbs;
 pub mod updates;
@@ -225,6 +226,29 @@ pub struct InstallPrompts {
     pub fomod: bool,
 }
 
+/// A yes/no question with display hints for front ends that can show them
+/// (see [`Ui::confirm_with`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConfirmSpec {
+    pub question: String,
+    pub title: Option<String>,
+    pub yes_label: Option<String>,
+    pub no_label: Option<String>,
+    /// Destructive "yes": a GUI focuses the "no" button. Does not change
+    /// the answer a non-interactive front end gives (`default_yes`).
+    pub danger: bool,
+    pub default_yes: bool,
+    /// Label of an extra checkbox, unchecked by default.
+    pub option: Option<String>,
+}
+
+/// Answer to a [`ConfirmSpec`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ConfirmAnswer {
+    pub yes: bool,
+    pub option_checked: bool,
+}
+
 /// Messages and questions of a front end. Every question has a
 /// non-interactive answer (the default), which [`Headless`] gives.
 pub trait Ui {
@@ -233,6 +257,15 @@ pub trait Ui {
     /// Yes/no question.
     fn confirm(&self, _question: &str, default_yes: bool) -> bool {
         default_yes
+    }
+    /// Yes/no question with title, labels, danger flag and an optional
+    /// checkbox. The default asks [`Ui::confirm`] and leaves the option
+    /// unchecked, so plain front ends behave as with `confirm`.
+    fn confirm_with(&self, spec: &ConfirmSpec) -> ConfirmAnswer {
+        ConfirmAnswer {
+            yes: self.confirm(&spec.question, spec.default_yes),
+            option_checked: false,
+        }
     }
     /// Free-text question; `None` = cannot ask (non-interactive).
     fn ask(&self, _question: &str, _default: &str) -> Option<String> {

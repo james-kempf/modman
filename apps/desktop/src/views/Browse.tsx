@@ -37,6 +37,7 @@ import {
   Segmented,
   Select,
   SearchField,
+  SKELETON_DELAY_MS,
   ViewFrame,
   ViewHeader,
   bytes,
@@ -88,9 +89,6 @@ const PERIOD_PHRASE: Record<Exclude<BrowsePeriod, "all">, string> = {
   week: "in the past week",
   day: "today",
 };
-
-/** How long a page change keeps the previous page up (dimmed) before skeletons replace it: a fast answer never flashes them. */
-const SKELETON_DELAY_MS = 300;
 
 export function Browse() {
   const { game, isLoading } = useActiveGame();

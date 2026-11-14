@@ -289,6 +289,8 @@ function useVisibleNotices() {
 function BottomStack({ island }: { island: JobEntry | null }) {
   const notices = useVisibleNotices();
   const dismiss = useUi((s) => s.dismiss);
+  const runNoticeAction = useUi((s) => s.runNoticeAction);
+  const holdNotice = useUi((s) => s.holdNotice);
   const deploy = useDeploy();
   if (!notices.length && !island) return null;
   return (
@@ -299,6 +301,8 @@ function BottomStack({ island }: { island: JobEntry | null }) {
             <Notice
               key={n.id}
               tone={n.tone}
+              act={n.action && { label: n.action.label, onAction: () => runNoticeAction(n.id) }}
+              onHold={n.action && ((held) => holdNotice(n.id, held))}
               action={
                 n.deploy && (
                   <Button

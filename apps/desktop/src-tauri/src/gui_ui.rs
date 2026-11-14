@@ -9,7 +9,7 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use vessel_core::app::{InstallPrompts, Msg, Ui};
+use vessel_core::app::{ConfirmAnswer, ConfirmSpec, InstallPrompts, Msg, Ui};
 use vessel_core::collections::{Manifest, ManifestMod};
 use vessel_core::deploy::Progress;
 use vessel_core::download::DownloadEvent;
@@ -106,18 +106,41 @@ impl Ui for GuiUi<'_> {
         );
     }
 
-    /// A closed dialog counts as "no".
     fn confirm(&self, question: &str, default_yes: bool) -> bool {
+        self.confirm_with(&ConfirmSpec {
+            question: question.to_string(),
+            default_yes,
+            ..ConfirmSpec::default()
+        })
+        .yes
+    }
+
+    /// A closed dialog counts as "no" with the option unchecked.
+    fn confirm_with(&self, spec: &ConfirmSpec) -> ConfirmAnswer {
         if !self.interactive {
-            return default_yes;
+            return ConfirmAnswer {
+                yes: spec.default_yes,
+                option_checked: false,
+            };
         }
-        matches!(
-            self.ask(PromptKind::Confirm {
-                question: question.to_string(),
-                default_yes,
-            }),
-            Some(Answer::Confirm { yes: true })
-        )
+        match self.ask(PromptKind::Confirm {
+            question: spec.question.clone(),
+            default_yes: spec.default_yes,
+            title: spec.title.clone(),
+            yes_label: spec.yes_label.clone(),
+            no_label: spec.no_label.clone(),
+            danger: spec.danger,
+            option: spec.option.clone(),
+        }) {
+            Some(Answer::Confirm {
+                yes,
+                option_checked,
+            }) => ConfirmAnswer {
+                yes,
+                option_checked: yes && option_checked,
+            },
+            _ => ConfirmAnswer::default(),
+        }
     }
 
     fn ask(&self, question: &str, default: &str) -> Option<String> {
@@ -269,6 +292,98 @@ mod tests {
         assert_eq!(a["text"], "hello world");
         assert_eq!(a["msg"]["level"], "info");
         assert_eq!(a["msg"]["spans"][1]["style"], "bold");
+    }
+
+    fn danger_spec() -> ConfirmSpec {
+        ConfirmSpec {
+            question: "Uninstall 1 mod(s)?".into(),
+            title: Some("Uninstall Alpha?".into()),
+            yes_label: Some("Uninstall Alpha".into()),
+            no_label: Some("Keep mod".into()),
+            danger: true,
+            default_yes: true,
+            option: Some("Delete archive too".into()),
+        }
+    }
+
+    // Fails when danger reaches non-interactive answers (default_yes must win).
+    #[test]
+    fn non_interactive_danger_confirm_takes_default_yes() {
+        let sink = Arc::new(Recorder::default());
+        let prompts = Prompts::default();
+        let ui = GuiUi::new(sink.clone(), &prompts, None, false);
+        assert_eq!(
+            ui.confirm_with(&danger_spec()),
+            ConfirmAnswer {
+                yes: true,
+                option_checked: false
+            }
+        );
+        assert!(sink.named(events::PROMPT).is_empty());
+    }
+
+    // Fails when the danger fields are dropped from the prompt, or the
+    // checkbox state is lost on the way back (or kept on a "no").
+    #[test]
+    fn danger_confirm_is_bridged_with_its_fields_and_option() {
+        let sink = Arc::new(Recorder::default());
+        let prompts = Arc::new(Prompts::default());
+        let (s2, p2) = (sink.clone(), prompts.clone());
+        let worker = std::thread::spawn(move || {
+            let ui = GuiUi::new(s2, &p2, Some(4), true);
+            (
+                ui.confirm_with(&danger_spec()),
+                ui.confirm_with(&danger_spec()),
+            )
+        });
+        let answer_next = |n: usize, a: Answer| {
+            for _ in 0..400 {
+                let evs = sink.named(events::PROMPT);
+                if evs.len() > n {
+                    let id = evs[n]["id"].as_u64().unwrap();
+                    assert!(prompts.answer(id, a));
+                    return evs[n].clone();
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            panic!("no prompt");
+        };
+        let ev = answer_next(
+            0,
+            Answer::Confirm {
+                yes: true,
+                option_checked: true,
+            },
+        );
+        assert_eq!(
+            ev["prompt"],
+            serde_json::json!({
+                "type": "confirm",
+                "question": "Uninstall 1 mod(s)?",
+                "default_yes": true,
+                "title": "Uninstall Alpha?",
+                "yes_label": "Uninstall Alpha",
+                "no_label": "Keep mod",
+                "danger": true,
+                "option": "Delete archive too",
+            })
+        );
+        answer_next(
+            1,
+            Answer::Confirm {
+                yes: false,
+                option_checked: true,
+            },
+        );
+        let (first, second) = worker.join().unwrap();
+        assert_eq!(
+            first,
+            ConfirmAnswer {
+                yes: true,
+                option_checked: true
+            }
+        );
+        assert_eq!(second, ConfirmAnswer::default());
     }
 
     fn plugin(name: &str) -> vessel_core::fomod::Plugin {

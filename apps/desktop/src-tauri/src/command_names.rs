@@ -35,6 +35,7 @@ pub const COMMANDS: &[&str] = &[
     "mods_set_enabled",
     "mod_move",
     "mods_uninstall",
+    "mod_restore",
     "mod_reinstall",
     "thumbnail",
     "picture",

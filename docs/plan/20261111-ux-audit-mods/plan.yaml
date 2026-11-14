@@ -1,0 +1,301 @@
+plan_id: 20261111-ux-audit-mods
+status: pending
+tldr: |
+  Fix all 29 Mods-view UX audit findings across 6 waves with at most 2 implementer streams at once.
+  Rev 3 (scope change): uninstall Undo is a full, lossless restore backed by new Rust support. T10 (stream B, wave 3)
+  adds a backend session store of restore snapshots keyed by opaque tokens (UninstallResult.restore[]) and mod_restore(tokens). Stream A owns apps/desktop/src/views/Mods.tsx
+  in order: T04 states/errors/focus, T05 hierarchy/nav/style, T06 profile undo/optimistic toggle/state lift/mock gaps,
+  T11 single-uninstall Undo via modRestore, T08 reorder/bulk integration (bulk Undo). Stream B owns the shared files:
+  T02 danger confirm + PromptDialog, T03 notify action/Toggle/DESIGN.md, T10 backend restore, T07 standalone
+  move/bulk components. T09 (browser tester) verifies in wave 6. Waves 1-2 are unchanged.
+created_at: 2026-11-11
+created_by: gem-planner
+revision: 4
+replan_count: 1
+planner_revision_used: true
+
+baseline:
+  objective: "Fix all 29 UX audit findings for the Mods view in /home/jkempf/Repositories/modman (branch rust-rewrite), desktop app apps/desktop/src plus the Rust backend crates/ where a finding needs it. User said: 'fix all'."
+  acceptance_criteria:
+    - "Each finding #1-#29 below is fixed, or listed as deliberately not fixed with a concrete reason."
+    - "Follow /home/jkempf/Repositories/modman/DESIGN.md. Any new token goes into DESIGN.md and index.css @theme first. Update DESIGN.md for any new pattern: undo toast, bulk bar, move-to-position, ErrorNote usage, danger confirm."
+    - "Gamepad and keyboard focus is never lost. No native disabled on focusable actions; use `inactive` or `busy`."
+    - "npm run typecheck passes and npx vitest run has 0 failures (currently 537/537) in apps/desktop. cargo test and cargo clippy pass for any touched Rust crate. Add tests for each behaviour change."
+    - "Do not commit."
+  captured_at: 2026-11-11
+
+replan:
+  reason: "User scope change after T01's verdict: uninstall Undo must be a full, lossless restore (FOMOD choices, collection membership, Nexus metadata, same uid, enabled state, position), backed by new Rust support. The multi-step frontend undo through existing IPC is lossy: fomod_choices and collection_mods cascade-delete, metadata is dropped, and the uid can change."
+  changed_tasks: [T06, T07, T08, T09, T10, T11]
+  added_tasks: [T10, T11]
+  removed_tasks: []
+  preserved_acceptance_criteria: ["All baseline acceptance criteria unchanged; wave 1 (T01 done, T04 done, T02 in progress) and wave 2 (T03, T05) unchanged."]
+  new_risks:
+    - "schema/data_flow: restore re-inserts mods rows with a fixed uid and the original id-linked rows (fomod_choices, collection_mods); a partial failure could leave orphan files or rows."
+    - "contract change: UninstallResult gains restore[] {token, uid, name, restorable, reason?} and a new mod_restore(tokens) command; snapshots stay in a backend session store (rev 3.1)."
+    - "Restore runs the installer non-interactively; a permissive Ui could overwrite another mod. Mitigation: a rejecting Ui plus uid, name and folder conflict checks."
+  progress_signal: "T01 completed (verdict a/b/c); T04 completed; T02 in progress. Rev 3.1 (revision 4): review warning folded in (token design, rejecting Ui, atomicity, losslessness, conflict and expiry); waves, ownership and dependencies unchanged."
+  revised_tasks: [T06, T08, T09]
+  invalidated_tasks: []
+  invalidated_assumptions: ["Rev 2 decisions '#1/#2 undo' (existing-IPC reinstall) and 'Undo failure policy' (frontend multi-step undo) are superseded by T10/T11."]
+
+decisions:
+  - "Mods.tsx (864 lines) is edited by one stream only (A), one task per wave (T04 > T05 > T06 > T08), so it never has two writers at once. Splitting the file was rejected: not requested, and it would add refactor risk."
+  - "#14 Segmented to Tabs: the Mods sub-tabs use Tabs with focusable (roving tabindex, arrows/D-pad, A/Enter) and are NOT bound to LB/RB. Tabs only listens for TAB_EVENT inside [data-nav-scope] (Dialog/Select), and the view is not a nav scope, so LB/RB keep cycling the app view bar. No nav changes needed; a test locks this in."
+  - "#1 backend: add an optional richer confirm (title, yes/no labels, danger flag, optional checkbox option) as a new Ui trait method with a default impl that calls confirm(question, default_yes) and returns the option at its default (unchecked), so the CLI and Headless keep working. Core default_yes for uninstall stays true: CliUi::confirm returns default_yes with no tty and on Enter (crates/vessel-cli/src/ui.rs:229-241), and Headless returns it (crates/vessel-core/src/app.rs:233-235). Which GUI button gets focus is a GUI-only concern: danger=true means PromptDialog autofocuses the no ('Keep mod') button. Only gui_ui.rs and PromptDialog read it."
+  - "Rev 3 wave layout: T10 (backend restore) takes stream B in wave 3, so T07 moves to wave 4 (still stream B), T08 to wave 5 and T09 to wave 6. Rev 2's T06 is split: T06 (wave 3, stream A) keeps #2/#21/#23 plus the uninstall confirm wiring and mock gaps; the new T11 (wave 4, stream A) adds the single-uninstall Undo once T10 has landed."
+  - "User decision (authoritative): deleting the uninstall archive is opt-in. The danger confirm has a 'Delete archive too' checkbox option, off by default, for single and bulk uninstall. The backend deletes archives when delete_archive || option_checked. A kept archive means Undo is offered. A ticked option means the archive is deleted and there is no Undo for that uninstall. The frontend always calls modsUninstall(refs, false) and decides on Undo from UninstallResult.archives (deleted list): empty = Undo, non-empty = no Undo."
+  - "Prompt serde contract: new Prompt::Confirm fields title/yes_label/no_label/option use #[serde(skip_serializing_if = \"Option::is_none\")]; danger uses #[serde(default)]; the confirm Answer gains option_checked with #[serde(default)] (false). TS types mark these optional and also accept null (string | null), so missing and null both behave as legacy."
+  - "#1 undo (rev 3.1, user choice 'Full restore (backend)'; orchestrator adopted the reviewer's token design): snapshots stay in the backend. A GUI uninstall opts in through an app-layer parameter (capture_restore); it then stores one RestoreSnapshot per mod in an in-memory, per-game store keyed by an opaque random token (not derived from a path or uid), which lives for the session (TTL optional). UninstallResult gains only restore: [{token, uid, name, restorable, reason?}] with reason folder_install | archive_deleted | outside_downloads. mod_restore(tokens) takes tokens only. Undo availability comes ONLY from restorable; the frontend never re-derives it from archives or snapshots. The CLI never opts in, so its output is byte-identical."
+  - "#2 undo (T01 b, lossless with existing IPC): auto-save a 'before-<name>' profile and offer Undo in the toast. Prefixing an already-valid name keeps it valid under profiles.rs:11-16. save_profile asks 'Overwrite profile?' on an existing name (app/mods.rs:171-185), so a flow-owned snapshot is replaced by profileDelete then profileSave. Undo is profileLoad(snapshot)."
+  - "CLI `vessel restore` is out of scope (default no): vessel-cli stays unchanged apart from compiling against the new UninstallResult field."
+  - "Restore safety (rev 3.1): no snapshot leaves the backend, so there is no untrusted-snapshot input. At restore time the backend still checks that the archive exists (archive_missing), that the uid, name and install folder are free (conflict), and that the token is known and not expired (expired). Positions are clamped to 1..len+1. Restore uses a rejecting Ui: every confirm or choose cancels or errors, mapped to conflict or install_failed. It never uses Headless or default_yes."
+  - "Mock ownership for mod_restore (rev 3.1): T11 owns the mock stub (mods_uninstall returns restore[], mod_restore handler, and an entry in demo.test.ts's command list). demo.test.ts:107 checks a hand-kept command list, not ipc/commands.ts, so T10's gates pass without a mock handler. T06 and T10 share a worktree in wave 3, so each re-runs typecheck and vitest once the other's edits have settled, before reporting."
+  - "Restore atomicity (rev 3.1): give the install pipeline a caller-owned transaction where feasible. Otherwise use a compensating rollback: remove the row through the same path remove_mods uses, delete the staged and extracted files, and leave no child rows. Bulk restore applies tokens by snapshot position, lowest first, and continues past a failed mod with per-mod results. Losslessness: the snapshot copies the whole mods row generically (every column) and every column of each child row. Every table with an FK to mods across ALL migrations is either snapshotted or recorded as not needed, and child rows are remapped if mods.id changes."
+  - "#2 snapshot naming: the flow tracks the snapshot names it created (per game, in the store's Mods UI slice). If 'before-<name>' exists and this flow made it, it is replaced (re-saved), so at most one snapshot per source profile accumulates. If it exists and the flow did not make it (a user profile), the flow picks the first free 'before-<name>.<n>' (n=2,3,...). A user profile is never overwritten. Undo calls profileLoad(snapshot) directly, never the auto-saving load handler, so Undo creates no new snapshot."
+  - "Undo failure policy (rev 3.1): modRestore returns per-mod results with typed errors (archive_missing, conflict, expired, install_failed). Each failed mod gets one error notice naming the mod and the reason, successes get one success notice, and the list always refetches afterwards. A collection that no longer exists is skipped with a warning."
+  - "#23 (store lift) moves to T06 and is not in T05, because T03 also edits app/store.ts in wave 2."
+  - "#12/#13 are split: T07 (stream B, wave 4) builds standalone components and a hook in new files with unit tests; T08 (stream A, wave 5) wires them into Mods.tsx. This keeps two streams busy without sharing a file."
+  - "#13 selection model: each load-order row gets a checkbox-style select control as its own spatial focus stop, left of the enable Toggle. A sticky bulk bar shows when 1+ rows are selected: count plus Enable/Disable/Uninstall/Clear. B/Escape is not used to clear, because B is Back. No range or shift-select (YAGNI)."
+  - "SKELETON_DELAY_MS moves from views/Browse.tsx into components/ui/styles.ts (or the ui index) so Browse and Mods share one constant (#22, reuse)."
+  - "Independent verification task T09 (browser tester) was added because the 'focus never lost' and gamepad criteria cannot be shown by unit tests alone."
+
+assumptions:
+  - "Notice.tsx already renders an optional action, but store.notify(tone, text, game) has no generic action. T03 adds one (label + handler) and does not create a new toast surface."
+  - "Button supports inactive. IconButton currently maps only busy to inactive, so T04 (stream A, wave 1) adds an inactive pass-through and the 20px glyph size used by #25."
+  - "The danger confirm reaches the GUI through apps/desktop/src-tauri/src/{prompt.rs,gui_ui.rs} and ipc/types.ts Prompt 'confirm'. The demo backend in apps/desktop/src/mock must emit the new optional fields."
+  - "modMove(reference, spec, arg) accepts the specs first, last and #N (ipc/commands.ts:240)."
+  - "InstallMeta.uid and InstallMeta.fomod_choices already exist (crates/vessel-core/src/mods/install.rs:43-48), so restore can reuse the install pipeline with a fixed uid and replayed choices instead of a new installer."
+  - "The baseline is 537/537 vitest; the pre-existing vite process pid 220199 must not be touched."
+
+shared_context:
+  mods_view:
+    - "Hot file: apps/desktop/src/views/Mods.tsx (864 lines). Finding line refs are from audit at commit 3a141d6 and drift as earlier tasks land; re-locate by content."
+    - "Primitives: components/ui (Tabs focusable roving; ErrorNote {children, actions}; Empty renders action only in titled form; Badge; LIST_ROW = 'rounded-inner px-3 py-2.5 transition-colors duration-base' in styles.ts; IconButton busy->inactive; Toggle has busy (aria-disabled, focusable) but no spinner)."
+    - "IPC: modsSetEnabled(ids[]), modMove(ref, spec first|last|#N), modsUninstall(refs[], deleteArchive), modReinstall, install, modDetail, profilesList/Save/Load/Delete (ipc/commands.ts 227-342)."
+    - "Rules: DESIGN.md first for new tokens/patterns; no native disabled on focusable actions (inactive/busy); tokens text-caption/label/body, text-fg/fg-2, opacity-stale, {hue}-400/10,/15,-300 tints; inset box-shadow highlight is overridden by ring-* but not outline; Tailwind v4 transition lists must name translate/scale; tab adornment spacing uses pad: variant."
+    - "Gates per task: in apps/desktop `npm run typecheck` and `npx vitest run` 0 failures; add a test per behaviour change; no commits."
+
+tasks:
+  - id: T01
+    title: "Undo feasibility for uninstall (#1) and profile load (#2)"
+    description: "Research only, reuse rung. Answer with evidence: (a) after modsUninstall(refs, false), can existing IPC (install from local archive path, modReinstall, or other) reinstall the mod, and can its enabled state and load-order position be restored (modsSetEnabled + modMove #N)? Is the archive path known to the frontend (ModsView fields / UninstallResult)? (b) Can profileSave('before-<name>') snapshot the current enabled set and order losslessly so that profileLoad restores it? Does profileSave overwrite an existing name, or fail? (c) Does the mock/demo backend support install-from-archive and profiles? Return a feasible/not-feasible verdict per item with the exact call sequence."
+    wave: 1
+    depends_on: []
+    agent: gem-researcher
+    exploration_mode: question
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "For #1 and #2: a verdict (feasible / not feasible) with an ordered IPC call sequence, or a concrete blocker, each citing file:line."
+      - "Lists any backend gap that would need new Rust code for undo, so the orchestrator can decide on the fallback."
+    handoff:
+      constraints: ["Read-only; no code changes."]
+      relevant_context:
+        - "apps/desktop/src/ipc/commands.ts:227-342; crates/vessel-core/src/app/mods.rs:88-140; crates/vessel-core/src/mods/profiles.rs; apps/desktop/src/mock/"
+
+  - id: T02
+    title: "Danger confirm contract + PromptDialog busy (#1 backend, #8)"
+    description: "New code, justified: the prompt payload has no title, labels or danger flag. Add a Ui trait method (e.g. confirm_with(ConfirmSpec{question,title,yes_label,no_label,danger,default_yes})) with a default impl that delegates to confirm(). The spec also carries an optional checkbox option (label, default false), and the method returns {yes, option_checked}. Implement it in the Tauri gui_ui.rs/prompt.rs: #[serde(skip_serializing_if = \"Option::is_none\")] on title/yes_label/no_label/option, #[serde(default)] on danger, and #[serde(default)] option_checked on the confirm Answer. Extend the TS Prompt confirm and Answer types (fields optional and string | null) and the mock backend. mods.rs uninstall: one target -> title 'Uninstall <name>?', yes 'Uninstall <name>', no 'Keep mod'; N targets -> 'Uninstall N mods?' / 'Keep mods'; danger=true; option 'Delete archive too' (default off); default_yes stays TRUE (CLI/Headless semantics). Archives are deleted when delete_archive || option_checked. PromptDialog Confirm: render p.title (fallback 'Confirm'), danger tone on yes, autofocus No when p.danger (else the existing default_yes rule), render the option as a pad-focusable checkbox (unchecked) and send option_checked, and use busy instead of disabled on ALL PromptDialog buttons (#8)."
+    wave: 1
+    depends_on: []
+    agent: gem-implementer
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "Uninstall prompt payload carries title/yes_label/no_label/danger=true/option 'Delete archive too' and default_yes=true; a Rust unit test asserts this (single and multi target)."
+      - "A cargo test runs uninstall through Headless and asserts it still proceeds (the mods are removed) and keeps archives when delete_archive=false. A second test asserts option_checked=true deletes the archives and reports them in UninstallResult.archives."
+      - "CLI unchanged: CliUi call sites and its [Y/n] hint are untouched (git diff shows no behavioural edit in crates/vessel-cli); cargo test and cargo clippy -D warnings pass for vessel-core, vessel-cli and src-tauri."
+      - "Legacy compatibility: a Rust test serialises a plain confirm (no new fields) and asserts the JSON equals the legacy shape {type, question, default_yes}, and deserialises a legacy answer {type, yes} with option_checked=false. TS tests render a confirm with the new fields missing, and with them null, both as before."
+      - "PromptDialog has no native disabled on any button; while sending, buttons are busy (aria-disabled, focusable); a vitest asserts focus stays on the pressed button."
+      - "PromptDialog autofocuses 'Keep mod' when danger is set; the danger button uses the existing danger tone; the 'Delete archive too' checkbox is unchecked by default, focusable, and its state is sent as option_checked (vitest)."
+      - "npm run typecheck and npx vitest run pass (0 failures)."
+    handoff:
+      constraints: ["Do not touch views/Mods.tsx, store.ts or DESIGN.md (other streams).", "No commits."]
+      relevant_context:
+        - "crates/vessel-core/src/app.rs:234 trait Ui fn confirm(&self, question, default_yes) -> bool (default returns default_yes)."
+        - "crates/vessel-core/src/app/mods.rs:113-115 uninstall: confirm(&format!(\"Uninstall {} mod(s)?\", n), true)."
+        - "GUI bridge: apps/desktop/src-tauri/src/gui_ui.rs, prompt.rs; TS Prompt confirm at ipc/types.ts:694; PromptDialog.tsx Confirm at ~83-104 (title 'Confirm', No/Yes, disabled={sending})."
+        - "CLI implementers: crates/vessel-cli/src/ui.rs:229-241 (returns default_yes with no tty and on Enter), context.rs:45; Headless default at crates/vessel-core/src/app.rs:233-235. Do not change these semantics."
+      high_risk_signals: ["Prompt payload/IPC contract change: keep new fields optional and backward compatible."]
+
+  - id: T04
+    title: "Mods.tsx states, errors and focus (#3 #4 #5 #6 #7 #9 #10 #11 #19 #20 #22)"
+    description: "Reuse rung: ErrorNote actions, Empty titled form, inactive/busy, shared SKELETON_DELAY_MS. #3 move up/down inactive={busy||!prev/next} (add an inactive pass-through to IconButton, plus a 20px glyph size option if it is missing, for T05's #25). #4 mods load error -> ErrorNote \"Couldn't read the mod list.\" + raw error + Try again (refetch). #5 and #19 conflicts error -> ErrorNote + Try again, also under the 'Has conflicts' filter. #6 profile name helper text with the [A-Za-z0-9._-] rule plus inline validation on blur (mirror the profiles.rs regex). #7 Install updates inactive + visible reason. #9 profile delete arm disarms after ~4s or on blur, fixed width, notify 'Deleted profile <name>'. #10 profiles loading branch (no 'No saved profiles.' flash). #11 detail error line + retry instead of '…'. #20 no-match state hides the empty Load order card, and the copy names the active filters. #22 move SKELETON_DELAY_MS from Browse.tsx to components/ui/styles.ts and delay Loading… by 300ms in Mods."
+    wave: 1
+    depends_on: []
+    agent: gem-implementer
+    context_cluster: mods_view
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "Each of #3 #4 #5 #6 #7 #9 #10 #11 #19 #20 #22 has at least one vitest that fails on the old behaviour."
+      - "No native disabled attribute remains on focusable actions in Mods.tsx (grep disabled= in Mods.tsx finds only non-focusable or justified uses); focus stays on Move up at the top row."
+      - "Browse.tsx imports the shared SKELETON_DELAY_MS; Browse tests still pass."
+      - "IconButton accepts inactive and renders a 20px glyph via its size prop (ui test)."
+      - "npm run typecheck and npx vitest run pass (0 failures)."
+    handoff:
+      constraints: ["Stream A, wave 1. Owns these files: views/Mods.tsx (+ tests), components/ui/controls/IconButton.tsx, components/ui/styles.ts, components/ui/index.ts, views/Browse.tsx (import only). Stream B (T02) does not touch them. Do not touch PromptDialog, store.ts or DESIGN.md.", "No commits."]
+
+  - id: T03
+    title: "Shared primitives + DESIGN.md patterns (notify action, Toggle spinner, docs)"
+    description: "Reuse rung: extend the existing notify/Notice surface and Toggle; no new toast system. store.notify gains an optional action {label, onAction} that Notice renders as a button (pad focusable, dismisses on use). Undo toasts get a TTL long enough to act on, documented. Toggle busy shows an inline spinner while keeping its focus and aria-disabled. DESIGN.md (+ index.css @theme first for any new token): document the undo toast, bulk selection bar, move-to-position, ErrorNote usage (copy formula + Try again), danger confirm (title/labels, focus on keep, opt-in 'Delete archive too' option off by default; Undo only when the archive is kept), and Tabs inside a view (focusable, no LB/RB)."
+    wave: 2
+    depends_on: [T02]
+    agent: gem-implementer
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "notify(tone, text, game?, action?) works; the existing deploy-action notices are unchanged; store tests cover the action call and dismissal."
+      - "Notice action button is keyboard/pad reachable; a vitest asserts it."
+      - "Toggle busy renders a spinner and stays focusable (aria-disabled, no native disabled); test added."
+      - "DESIGN.md has sections for undo toast, bulk bar, move-to-position, ErrorNote usage, danger confirm and in-view Tabs; any new token exists in both DESIGN.md and index.css @theme."
+      - "npm run typecheck and npx vitest run pass (0 failures)."
+    handoff:
+      constraints: ["Files: app/store.ts (+test), components/ui/feedback/Notice.tsx, notice render site in app/App.tsx if needed, components/ui/controls/Toggle.tsx, DESIGN.md, index.css. Do not touch views/Mods.tsx.", "No commits."]
+
+  - id: T05
+    title: "Mods.tsx hierarchy, nav and style (#14 #15 #16 #17 #18 #24-#29)"
+    description: "Reuse rung: Tabs, Badge, LIST_ROW, tokens. #14 header Segmented -> Tabs focusable (roving), not LB/RB-bound; test that LB/RB still cycle app views while on Mods. #15 detail footer: Close is the default tone, Uninstall danger on the left (justify-between). #16 profile Load default tone, Delete ghost/danger. #17 conflict/plugin/update rows open the mod's Details (or jump to it in Load order); rows become real actions, not bare li tabIndex=0. #18 changed-since-deploy banner gets a Deploy now action (reuse the run.ts deploy path) and the {hue}-400/10,/15,-300 tint. #24 opacity-stale. #25 IconButton size 20 (support comes from T04; if it is missing, stop and report). #26 LIST_ROW on highlighted rows. #27 tabular-nums on sizes and counts. #28 Loaders links to Requirements. #29 snap text-[11.5/12.5/13.5/14.5px] and text-zinc-* to text-caption/label/body and text-fg/fg-2."
+    wave: 2
+    depends_on: [T04]
+    agent: gem-implementer
+    context_cluster: mods_view
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "Mods.tsx has no Segmented import, no arbitrary text-[N px] sizes and no text-zinc-* (grep proves it); style.test.ts passes."
+      - "Tabs: role=tablist/tab, roving tabindex; a test shows LB/RB (TAB_EVENT / PageUp/PageDown) still switch app views from the Mods view."
+      - "Conflict/plugin/update rows are activatable (Enter/A) and open the right mod's Details; test added."
+      - "The banner has a working action and the tint formula; detail footer and profile row tones as specified; tests for #15 #16 #18 #28."
+      - "npm run typecheck and npx vitest run pass (0 failures)."
+    handoff:
+      constraints: ["Files: views/Mods.tsx (+ tests) only, unless a token is missing (then stop and report; T03 owns DESIGN.md).", "Do not touch app/store.ts (T03 in the same wave).", "No commits."]
+      relevant_context: ["Tabs only attaches LB/RB inside [data-nav-scope] (components/ui/controls/Tabs.tsx:91-106); App view bar at app/App.tsx:231-258; nav/actions.test.ts:84-145 shows existing LB/RB scope tests."]
+
+  - id: T06
+    title: "Profile undo, optimistic toggle, state lift, uninstall wiring, mock gaps (#2 #21 #23, #1 confirm wiring)"
+    description: "Uses T01's verdict (b, c), T02's confirm contract and T03's notify action. #1 (no Undo yet; T11 adds it): the detail-dialog and row uninstall use modsUninstall(refs, false) with T02's danger confirm; the success notice says 'Uninstalled <name>' or 'Uninstalled <name> and deleted its archive'. #2: before profileLoad, snapshot to 'before-<name>' (collision rule in decisions: a flow-owned snapshot is replaced by profileDelete then profileSave; a user profile is never overwritten, so use 'before-<name>.<n>'), then load, then notify with Undo calling profileLoad(snapshot) directly, not the auto-saving handler. #21: optimistic Toggle with the busy spinner and rollback plus an error notice on failure. #23: lift Mods tab and filter state into the store. Mock (T01 c): mod_move accepts first/last/#N; profile_load reorders; the profile_save overwrite confirm defaults to true like Rust; install honours archive targets without always prompting; fixture mods get archive paths (keep one archive:null folder install)."
+    wave: 3
+    depends_on: [T01, T02, T03, T05]
+    agent: gem-implementer
+    context_cluster: mods_view
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "The Mods view always calls modsUninstall(refs, false) through T02's danger confirm; both success notice variants are tested."
+      - "Profile load creates the before-snapshot first and Undo restores it (test)."
+      - "Snapshot collisions: a user profile 'before-<name>' is never overwritten and 'before-<name>.2' is used; a flow-owned snapshot is replaced via profileDelete + profileSave, not duplicated (tests)."
+      - "Profile Undo calls profileLoad(snapshot) and creates no new snapshot, so profileSave is not called again (test)."
+      - "Toggle flips immediately, shows a spinner while the job runs, and reverts with an error notice on failure (test)."
+      - "Tab and filter persist across a view switch and return (test)."
+      - "Mock gap tests: mod_move first/last/#N, profile_load reorders, the profile_save confirm defaults to yes, install from an archive target needs no prompt, and fixtures expose non-null archives plus one folder install."
+      - "Focus (document.activeElement, never body): after a single uninstall it lands on the neighbouring row's control, or on the list heading when the list is empty; after a profile load it stays on that profile's Load button; after profile Undo it stays in the profiles list (tests)."
+      - "npm run typecheck and npx vitest run pass (0 failures)."
+    handoff:
+      constraints: ["Files: views/Mods.tsx (+ tests), app/store.ts (Mods UI state slice only), apps/desktop/src/mock/* (demo.ts, fixtures.ts). Do not touch ipc/commands.ts, ipc/types.ts or Rust (T10, same wave).", "No commits."]
+      relevant_context:
+        - "T01 (b): app save_profile confirms 'Overwrite profile?' default yes (crates/vessel-core/src/app/mods.rs:171-185)."
+        - "T01 (c): mock mod_move before/after only (demo.ts:306-322); profile_load no reorder (demo.ts:445-461); profile_save confirm default false; install ignores archive targets and always prompts (demo.ts:326-354); fixtures archive:null (fixtures.ts:78)."
+      high_risk_signals: ["Overwrite operation (profile load): a failed snapshot save must abort the load with an error notice."]
+
+  - id: T10
+    title: "Backend lossless restore: token store + mod_restore (#1 Undo backend)"
+    description: "New code, justified: the existing IPC cannot restore fomod_choices, collection_mods, Nexus metadata or the uid (T01 a). Reuse the install pipeline (InstallMeta.uid, InstallMeta.fomod_choices, mods/install.rs:43-48). Steps: (0) List every table with an FK to mods across ALL migrations (crates/vessel-core/migrations/*), and decide for each one: snapshot it, or record why not. (1) The app-layer uninstall gets an opt-in capture_restore parameter (the GUI passes true; the CLI never does). When it is set, before deleting, capture a RestoreSnapshot per mod: the whole mods row copied generically (every column), every column of every FK child row in scope (fomod_choices, collection_mods, any others found in step 0), enabled, position and the archive path. Store it in an in-memory, per-game session store keyed by an opaque random token. UninstallResult gains restore: Vec<{token, uid, name, restorable, reason?}> with #[serde(default, skip_serializing_if = \"Vec::is_empty\")]; reason is folder_install | archive_deleted | outside_downloads, and restorable is false whenever a reason is set. (2) restore(game, tokens) looks up each token (unknown or expired gives expired), sorts by snapshot position (lowest first), and per mod checks that the archive exists (archive_missing) and that the uid, name and install folder are free (conflict). It installs from the archive with the fixed uid and replayed fomod_choices through a REJECTING Ui: any confirm or choose cancels or errors, mapped to conflict or install_failed; never Headless or default_yes. It writes the row, child rows (remapped if mods.id changes; collections that no longer exist are skipped with a warning), enabled and the position clamped to 1..len+1. Atomic per mod: a caller-owned transaction around the install pipeline where feasible, otherwise a compensating rollback (remove via the remove_mods path, delete staged and extracted files, no child rows left). A token is consumed on success. Returns per-mod results {uid, name, ok | error kind + message, warnings}. (3) A src-tauri mod_restore command taking tokens only (job or call, matching mods_uninstall), modRestore(tokens, game?) in ipc/commands.ts, and the types in ipc/types.ts (optional or nullable fields). vessel-cli unchanged; no `vessel restore`. No mock edits (T11 owns the mod_restore mock; demo.test.ts:107 uses a hand-kept list)."
+    wave: 3
+    depends_on: [T02]
+    agent: gem-implementer
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "FK inventory: the report lists every table with an FK to mods across all migrations, each marked snapshotted or not-needed with a reason. A test asserts the snapshot covers every column of the mods row (it is built from the table's column list, not a hand-kept field list)."
+      - "Round-trip cargo test: install a mod with FOMOD choices, add it to a collection, set enabled and a non-edge position, uninstall with capture_restore (archive kept), restore by token. The mod store contents match (every mods column and every child row, including fomod_choices, collection_mods and the uid, position and enabled), and after a deploy the deployed file set matches."
+      - "Bulk round-trip test: 3 mods at non-adjacent positions come back at their original positions (applied lowest first)."
+      - "Clamping test: uninstall a single mod, reorder or remove other mods, restore it. Its position is clamped to 1..len+1 and the restore succeeds."
+      - "Conflict test: after the uninstall, install a different mod with the same name or install folder, then restore. The other mod (row, files, position) is untouched, and restore returns a typed conflict error. A uid already in use also gives conflict."
+      - "Rejecting Ui test: the restore path uses a Ui whose confirm or choose returns cancel or Err, mapped to conflict or install_failed. A test proves restore never reaches Headless or default_yes (for example a Ui that records calls and rejects, with the restore still typed-failing instead of proceeding)."
+      - "Atomicity test: inject a failure after the install committed (a forced error in the collection_mods write or the position write). Afterwards there is no mods row, no child rows and no staged or extracted files for that mod; other mods in the same bulk call still restore."
+      - "Errors: archive deleted after the uninstall gives archive_missing for that mod while the rest of a bulk restore succeeds; an unknown or already-used token gives expired."
+      - "Tokens are opaque and random: a test shows they contain no path, uid or name and are unique per capture."
+      - "restorable/reason: a folder install gives restorable=false with folder_install; option_checked deletion gives archive_deleted; an archive outside the downloads dir gives outside_downloads; a kept archive gives restorable=true with no reason."
+      - "CLI unchanged: a test pins vessel-cli uninstall output (stdout/stderr) byte-identical to the pre-change output (golden), the CLI does not pass capture_restore, and UninstallResult without capture serializes exactly as before (no restore key). Legacy UninstallResult JSON deserializes; a TS test parses both shapes."
+      - "cargo test and cargo clippy -D warnings pass for vessel-core, vessel-cli and src-tauri. After T06's mock edits settle (same worktree), npm run typecheck and npx vitest run pass (0 failures), re-run before reporting."
+    handoff:
+      constraints: ["Stream B. Files: crates/vessel-core (app/mods.rs, mods/*, a new restore module, tests), apps/desktop/src-tauri/src (command registration, permissions/capabilities if required), apps/desktop/src/ipc/commands.ts, apps/desktop/src/ipc/types.ts. No DB schema migration unless unavoidable (justify in the report). Do not touch views/*, app/store.ts or apps/desktop/src/mock/* (T06 owns the mock in wave 3; T11 adds the mod_restore mock).", "Shared worktree with T06: re-run all gates after both tasks' edits have settled.", "No commits."]
+      relevant_context:
+        - "T01 (a): fomod_choices and collection_mods are ON DELETE CASCADE (crates/vessel-core/migrations/0004_collections.sql:21-23,30-31); the uid can change on reinstall (mods/install.rs:280-298); UninstallResult at app/mods.rs:84-90 and ipc/types.ts:287-292; modReinstall needs an installed mod; ModRecord.archive is nullable."
+        - "T02 has already extended the uninstall confirm and delete_archive || option_checked in app/mods.rs."
+      high_risk_signals: ["schema/data_flow: re-inserting rows with a fixed uid and FK children; transactional or compensating rollback required.", "Non-interactive install on restore: must use a rejecting Ui, never default_yes.", "IPC contract change: UninstallResult.restore[] and mod_restore(tokens)."]
+
+  - id: T11
+    title: "Single-uninstall Undo via modRestore(tokens) + mod_restore mock (#1 Undo)"
+    description: "Wire the uninstall success notice to Undo. The toast offers Undo only for entries of UninstallResult.restore with restorable=true, and never re-derives availability from archives or paths. Undo makes one modRestore(tokens) call. Results follow the rev 3.1 failure policy: an error notice per failed mod by kind (archive_missing, conflict, expired, install_failed), one success notice, and always a refetch. When restorable=false, the notice gives the reason in plain words (folder install, archive deleted, archive outside the downloads folder) and offers no Undo. Put the toast and restore wiring in a reusable helper that takes N restore entries, so T08 uses it for bulk. Mock (owned here): mods_uninstall returns restore[] (token, uid, name, restorable, reason) per the backend rules; mod_restore(tokens) re-adds the fixture mod with the same uid, metadata, enabled and position, supports injected failures per kind, and returns expired for unknown or used tokens. Add mod_restore to demo.test.ts's command list."
+    wave: 4
+    depends_on: [T06, T10]
+    agent: gem-implementer
+    context_cluster: mods_view
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "Undo shows only when restorable is true. With restorable=false for folder_install, archive_deleted and outside_downloads, there is no Undo and the notice gives the reason (3 tests). A test fails if the view derives availability from anything other than restorable."
+      - "Undo makes exactly one modRestore call with the tokens only (no paths or snapshots), and the mod comes back with the same uid, enabled state and position in the mock (test)."
+      - "Archive deleted between the uninstall and Undo: the mock returns archive_missing, an error notice names the mod, and the list refetches (test)."
+      - "An expired or unknown token (for example Undo pressed twice) gives a typed expired error notice and a refetch (test)."
+      - "Failure injection for conflict and install_failed, and for a rejection of the whole IPC call: each gives an error notice naming the mod and reason, plus a refetch (tests)."
+      - "demo.test.ts lists mod_restore, and a demo test round-trips uninstall -> mod_restore(token)."
+      - "Focus after Undo lands on the restored row's control, never body (test)."
+      - "npm run typecheck and npx vitest run pass (0 failures)."
+    handoff:
+      constraints: ["Files: views/Mods.tsx (+ tests), a small helper next to it (e.g. views/mods/restore.ts), apps/desktop/src/mock/* (+ demo.test.ts). Do not touch the views/mods/ files that T07 creates in the same wave (BulkBar, MoveToPosition, useSelection), or ipc/*.", "No commits."]
+
+  - id: T07
+    title: "Standalone move-to-position and bulk-selection components (#12 #13 parts)"
+    description: "New code in new files, justified: no existing primitive. Create a useSelection hook (ids set, toggle, clear, prune on list change), a BulkBar component (count, Enable/Disable/Uninstall/Clear, sticky, role=region with a label, pad reachable, actions busy not disabled), and a MoveMenu/MoveToPosition control (Move to top, Move to bottom, Move to position #N with validated number input; emits spec 'first'|'last'|'#N'). Put them under apps/desktop/src/views/mods/ with unit tests. Follow the DESIGN.md patterns from T03."
+    wave: 4
+    depends_on: [T03]
+    agent: gem-implementer
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "The hook, BulkBar and MoveToPosition each have vitest coverage: selection prune, bar hidden at 0, actions emit callbacks, position input rejects out-of-range or non-integer values and emits the right spec."
+      - "No native disabled on focusable controls; all controls are reachable with arrows/Tab in tests."
+      - "No edits to views/Mods.tsx or to T11's restore helper."
+      - "npm run typecheck and npx vitest run pass (0 failures)."
+    handoff:
+      constraints: ["Stream B. Files: new files under views/mods/ only (useSelection, BulkBar, MoveToPosition + tests).", "No commits."]
+
+  - id: T08
+    title: "Wire reorder and bulk actions into Mods.tsx (#12 #13, bulk Undo)"
+    description: "Integrate T07 into the Load order. Each row gets a select control (its own spatial stop, left of the Toggle) and the move menu (top/bottom/#N via modMove). A polite live region announces moves ('<name> moved to position N of M') and selection counts, extending the existing role=status. BulkBar actions: Enable/Disable via modsSetEnabled(ids), and Uninstall via modsUninstall(refs, false) with T02's danger confirm ('Uninstall N mods?', 'Delete archive too' off by default). Bulk Undo uses T11's helper: one modRestore(tokens) call over the entries with restorable=true (availability only from restorable; positions applied lowest first in the backend). Clear empties the selection. Focus after a bulk action or move stays on a sensible element (the moved row's control or the bar)."
+    wave: 5
+    depends_on: [T07, T11]
+    agent: gem-implementer
+    context_cluster: mods_view
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "Move to top/bottom/#N call modMove with first/last/#N and the live region announces the new position (tests)."
+      - "Selecting 2+ rows shows the bar with the count; Enable/Disable send one modsSetEnabled call with all ids; Uninstall sends one modsUninstall call with all refs and deleteArchive=false (tests)."
+      - "Bulk Undo: with archives kept, one modRestore call with the tokens of all restorable entries restores every mod to its original position in the mock. With the option ticked (all restorable=false) there is no Undo. With mixed folder and archive mods, only restorable entries are sent and the notice names the rest with their reason (tests)."
+      - "Bulk partial failure: one archive deleted between the uninstall and Undo gives archive_missing for that mod, the rest of the bulk restore succeeds, and the list refetches. One injected conflict likewise. Expired tokens give a typed expired notice (tests)."
+      - "Focus is not lost after move, bulk action, bulk Undo or Clear (tests assert document.activeElement)."
+      - "npm run typecheck and npx vitest run pass (0 failures)."
+    handoff:
+      constraints: ["Files: views/Mods.tsx (+ tests); trivial fixes in views/mods/* allowed.", "No commits."]
+
+  - id: T09
+    title: "Browser verification of focus, gamepad and visuals"
+    description: "Run the demo backend in a new vite dev server on a free port. Never touch pid 220199. Reuse the Playwright scripts in /tmp/claude-1000/-home-jkempf-Repositories-modman/6296548f-9d80-418c-a5ba-429dd3637026/scratchpad/pw/. Check html[data-pad] and keyboard: Mods sub-tabs, LB/RB still switching app views, move-up at the top row, uninstall confirm focus and 'Delete archive too' off by default, toast Undo reachable, Undo shown only for restorable entries and restoring the same mod in the demo (same name, enabled state and position, single and bulk), no Undo when the archive was deleted or the mod is a folder install, a second Undo press giving the expired notice, an injected conflict or archive_missing (where the demo allows) giving an error notice with focus kept, profile load Undo, bulk bar, error/loading states, and screenshots at 1280x800 and 1024x640. Also run the full gates: npm run typecheck, npx vitest run, and cargo test + cargo clippy for touched crates."
+    wave: 6
+    depends_on: [T08]
+    agent: gem-browser-tester
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "A table with one row per finding #1-#29: verified / not-fixed-with-reason, plus evidence (screenshot path or test name)."
+      - "No case found where focus lands on body or is lost, in keyboard or pad mode."
+      - "No horizontal overflow at 1024x640 or 1280x800."
+      - "All gates green: typecheck, vitest 0 failures, cargo test and cargo clippy -D warnings for vessel-core, vessel-cli and src-tauri, including T10's round-trip, conflict, atomicity and CLI byte-identity tests."
+      - "The verification table has rows for the Undo flag (restorable only), expired token, conflict and archive_missing, each verified in the demo or marked 'unit-test only' with the test name."
+    handoff:
+      constraints: ["Do not kill pid 220199; stop only processes this task started.", "No code changes; report defects for a fix loop."]

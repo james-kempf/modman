@@ -287,7 +287,7 @@ describe("CT2 D10/D11 result notices", () => {
   it("profile save: declined overwrite keeps the name; a save says so", async () => {
     let result: number | null = null;
     const { user } = await open("mods", { profile_save: () => result });
-    await user.click(await screen.findByRole("button", { name: "Profiles" }));
+    await user.click(await screen.findByRole("tab", { name: "Profiles" }));
     const field = await screen.findByLabelText("Save the current mod set as");
     await user.type(field, "evening");
     await user.click(screen.getByRole("button", { name: "Save profile" }));
@@ -314,7 +314,7 @@ describe("CT2 D10/D11 result notices", () => {
     await user.click(await screen.findByRole("button", { name: "Details" }));
     await user.click(await screen.findByRole("button", { name: "Uninstall" }));
     await waitFor(() => expect(noticeTexts()).toContain("Uninstalled SkyUI"));
-    await user.click(screen.getByRole("button", { name: "Updates" }));
+    await user.click(screen.getByRole("tab", { name: "Updates" }));
     await user.click(await screen.findByRole("button", { name: "Check for updates" }));
     await user.click(await screen.findByRole("button", { name: "Install updates" }));
     await waitFor(() => expect(noticeTexts()).toContain("Installed 1 update"));
