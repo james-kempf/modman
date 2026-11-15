@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+# vessel-game-support: complete
+# Sources: docs/game-support/schedule1.md
 # Ported from the legacy bash tool game_preset (L269-300).
 domain = "schedule1"
 name = "Schedule I"
@@ -6,4 +8,21 @@ steam_appid = 3164500
 subdir = "."
 target = "game_dir"
 profile = "melonloader"
-support = "experimental"
+support = "tested"
+
+# The game has no native Linux build: it runs under Proton. Mods are
+# MelonLoader .dll files in Mods/ (and Plugins/, UserLibs/, UserData/ for
+# the mods that ship them), all in the game root.
+
+# MelonLoader: Unity mod loader. The Windows x64 zip holds a MelonLoader/
+# folder plus the proxy version.dll and dobby.dll. Under Proton the proxy
+# only loads with a native-first `version` DLL override.
+[[loaders]]
+key = "melonloader"
+name = "MelonLoader"
+required_paths = ["version.dll", "MelonLoader"]
+# A mod pack that bundles MelonLoader next to mods is not the loader.
+forbidden_paths = ["Mods"]
+detect = ["MelonLoader", "dobby.dll"]
+[loaders.launch]
+dll_overrides = ["version"]
