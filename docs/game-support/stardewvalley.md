@@ -34,12 +34,11 @@ None
 - Hardware verification is not done.
 
 ## Check results
-The shell was denied mid-run, so none of these were run. Run them before merging.
-- `cargo fmt --all -- --check`: not run
-- `cargo clippy -p vessel-core --all-targets --locked -- -D warnings`: not run
-- `cargo test -p vessel-core --locked games::`: not run
-- `cargo test -p vessel-core --locked loaders::`: not run
-- `check_game_support_note.py`: not run
+Run on 2026-11-15 after rebasing on develop, with the app::games test fix applied.
+- `check_game_support_note.py --definition crates/vessel-core/definitions/stardewvalley.toml --note docs/game-support/stardewvalley.md`: pass (outcome: full, gaps: none)
+- `cargo fmt --all -- --check`: pass
+- `cargo clippy -p vessel-core --all-targets --locked -- -D warnings`: pass
+- `cargo test -p vessel-core --locked`: pass (lib 510 passed, 2 ignored; integration tests 129 passed; 0 failed)
 
 ## Manual test
 Install a mod, deploy, launch, uninstall (plan section 4.4). Promotion to tested here is based on research, not hardware testing.
