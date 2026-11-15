@@ -98,7 +98,8 @@ describe("Browse cards (Browse-1)", () => {
   });
 
   // Fails when Remove in the details dialog removes through anything but mods_uninstall (by Nexus id) /
-  // collection_remove (by slug, mods not kept), or an installed item's dialog still offers Install.
+  // collection_remove (by slug, mods not kept), an installed item's dialog still offers Install, or an
+  // installed mod's dialog lacks Reinstall (mod_reinstall by Nexus id, FOMOD options asked).
   it("the details dialog of an installed mod or collection offers Remove and removes it", async () => {
     const { t, user } = await open("browse", {
       browse: (a) =>
@@ -107,10 +108,16 @@ describe("Browse cards (Browse-1)", () => {
           : { kind: "collections", total: 1, collections: [coll("cur", { installed_revision: 3 })] },
       mods_uninstall: () => ({ done: true, mods: 1, archives: [], after: { deployed: null, needs_deploy: true } }),
       collection_remove: () => ({ removed: true, uninstalled: 10, after: { deployed: null, needs_deploy: true } }),
+      mod_reinstall: () => ({ installed: { name: "Mod 8", files: 2 } }),
     });
     await user.click(await screen.findByRole("button", { name: "Mod 8" }));
     let dlg = await screen.findByRole("dialog", { name: "Mod 8" });
     expect(within(dlg).queryByRole("button", { name: /^Install/ })).toBeNull();
+    await user.click(within(dlg).getByRole("button", { name: "Reinstall Mod 8" }));
+    await waitFor(() => expect(t.callsOf("mod_reinstall")).toEqual([expect.objectContaining({ reference: "8", fomod: "ask" })]));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await user.click(await screen.findByRole("button", { name: "Mod 8" }));
+    dlg = await screen.findByRole("dialog", { name: "Mod 8" });
     await user.click(within(dlg).getByRole("button", { name: "Remove Mod 8" }));
     await waitFor(() => expect(t.callsOf("mods_uninstall")).toEqual([{ game: null, refs: ["8"], delete_archive: false }]));
     await user.keyboard("{Escape}");

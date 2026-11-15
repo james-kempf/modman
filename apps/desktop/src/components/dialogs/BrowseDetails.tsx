@@ -4,7 +4,8 @@
 // description (About tab), plus the collection's revision from collection_info
 // and its mods as the same mod cards Browse lists (Mods tab; a listed mod opens
 // its own details dialog inside the collection), and the item's actions
-// (Install / Remove, passed in by Browse). Tabs switch with LB/RB
+// (Install, or Reinstall / Remove when installed). The Mods view opens the
+// same mod dialog for its rows. Tabs switch with LB/RB
 // (PageUp/PageDown) or a click. The dialogs keep their full height across tabs.
 // Focus returns to the card on close.
 
@@ -143,15 +144,22 @@ interface DialogProps {
   returnFocus?: HTMLElement | null;
 }
 
+/** A mod's details (Browse cards, collection mods and the Mods view's rows): Details and About tabs, its actions, Close. */
 export function ModDetailsDialog({
   game,
   m,
+  uid,
   onClose,
+  onRemoved,
   returnFocus,
 }: {
   game: string;
   m: SearchHit;
+  /** The installed mod's id (Mods view): Remove and Reinstall target it, so a mod without a Nexus id has them too. */
+  uid?: string;
   onClose: () => void;
+  /** The mod was removed (the Mods view moves focus off its row). */
+  onRemoved?: () => void;
   /** Where focus goes on close (the card). */
   returnFocus?: HTMLElement | null;
 }) {
@@ -165,7 +173,7 @@ export function ModDetailsDialog({
       returnFocus={returnFocus}
       wide
       fixedHeight
-      footer={<ActionRow actions={<ModActions game={game} m={m} onAccepted={onClose} />} onClose={onClose} />}
+      footer={<ActionRow actions={<ModActions game={game} m={m} uid={uid} onAccepted={onClose} onRemoved={onRemoved} />} onClose={onClose} />}
     >
       <Tabs label="Mod" tabs={MOD_TABS} value={tab} onChange={setTab} start={LB} end={RB}>
         {tab === "details" ? (

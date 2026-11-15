@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Install and Remove for a Nexus mod or collection item, shared by the browse cards' details dialogs
-// and a collection's mods, so both show the same actions. Installing or removing refreshes the browse
+// Install, Remove and Reinstall for a Nexus mod or collection item, shared by the browse cards' details
+// dialogs, a collection's mods and the Mods view's details, so all show the same actions. Installing or removing refreshes the browse
 // and collection views.
 
-import { showMsg, type ToastMsg } from "../../app/toast";
+import { showMsg, showToast, type ToastMsg } from "../../app/toast";
 import { useQueryClient } from "@tanstack/react-query";
-import { DownloadSimpleIcon, TrashIcon } from "@phosphor-icons/react";
+import { ArrowsClockwiseIcon, DownloadSimpleIcon, TrashIcon } from "@phosphor-icons/react";
 import { useBusy, useRun } from "../../app/run";
 import { PROMPT_ANSWERED, type PromptAnsweredDetail } from "../dialogs/PromptDialog";
 import { useUi } from "../../app/store";
@@ -14,7 +14,7 @@ import type { InstallResult, SearchHit } from "../../ipc/types";
 import { removedMsg } from "../../views/Collections";
 import { uninstalledMsg } from "../../views/Mods";
 import { installKey } from "../../views/Requirements";
-import { Button } from "../ui";
+import { Button, count } from "../ui";
 
 export function installedMsg(r: InstallResult): ToastMsg {
   if (r.installed) {
@@ -34,12 +34,14 @@ export function installedMsg(r: InstallResult): ToastMsg {
  * (a loader-installed item gets its own kind and route).
  */
 export type Removable =
-  | { kind: "mod"; nexusId: number; name: string }
+  /** `ref`: the mod's uid, or its Nexus id (the backend resolves it to the installed mod). */
+  | { kind: "mod"; ref: string; name: string }
   | { kind: "loader"; loaderKey: string; nexusId: number; name: string }
   | { kind: "collection"; slug: string; name: string };
 
 /** The run label/busy key of removing an item (shared with its install where the views share one). */
-const removeKey = (r: Removable) => (r.kind === "collection" ? `Collection ${r.slug}` : installKey(String(r.nexusId)));
+const removeKey = (r: Removable) =>
+  r.kind === "collection" ? `Collection ${r.slug}` : installKey(r.kind === "mod" ? r.ref : String(r.nexusId));
 
 /** The job kind of a mod/collection removal (its confirmation prompt names the job). */
 const REMOVE_JOB = { mod: "mods_uninstall", collection: "collection_remove" } as const;
@@ -101,12 +103,13 @@ const once = (onAccepted?: () => void) => {
 /**
  * Remove an installed browse item; the backend asks for confirmation (the app's confirm prompt).
  * `onAccepted` (close the details dialog) runs on Yes, or when it was removed without asking; never on No.
+ * `onRemoved` runs once a mod was removed.
  */
 function useRemove(game: string) {
   const run = useRun();
   const qc = useQueryClient();
   const openConsent = useUi((s) => s.openLoaderConsent);
-  return async (r: Removable, onAccepted?: () => void) => {
+  return async (r: Removable, onAccepted?: () => void, onRemoved?: () => void) => {
     const key = removeKey(r);
     const accept = once(onAccepted);
     switch (r.kind) {
@@ -117,10 +120,12 @@ function useRemove(game: string) {
         return;
       }
       case "mod": {
-        // A bare Nexus id resolves to the installed mod.
-        const res = await onPicked(REMOVE_JOB.mod, accept, () => run("Uninstall", () => ipc.modsUninstall([String(r.nexusId)], false), { key }), true);
+        const res = await onPicked(REMOVE_JOB.mod, accept, () => run("Uninstall", () => ipc.modsUninstall([r.ref], false), { key }), true);
         if (!res) return;
-        if (res.done) accept?.();
+        if (res.done) {
+          accept?.();
+          onRemoved?.();
+        }
         showMsg(res.done ? "success" : "info", uninstalledMsg(res, r.name));
         break;
       }
@@ -139,7 +144,17 @@ function useRemove(game: string) {
 }
 
 /** The details dialog's Remove: the backend (or the loader consent) confirms; `onAccepted` once confirmed. */
-export function RemoveButton({ game, item, onAccepted }: { game: string; item: Removable; onAccepted?: () => void }) {
+export function RemoveButton({
+  game,
+  item,
+  onAccepted,
+  onRemoved,
+}: {
+  game: string;
+  item: Removable;
+  onAccepted?: () => void;
+  onRemoved?: () => void;
+}) {
   const remove = useRemove(game);
   const busy = useBusy(removeKey(item));
   return (
@@ -148,34 +163,70 @@ export function RemoveButton({ game, item, onAccepted }: { game: string; item: R
       busy={busy}
       aria-label={`Remove ${item.name}`}
       icon={<TrashIcon aria-hidden size={16} />}
-      onClick={() => void remove(item, onAccepted)}
+      onClick={() => void remove(item, onAccepted, onRemoved)}
     >
       Remove
     </Button>
   );
 }
 
+/** Reinstall an installed mod from its archive, asking the FOMOD options again; `onAccepted` (close the dialog) right away. */
+function ReinstallButton({ target, name, onAccepted }: { target: string; name: string; onAccepted?: () => void }) {
+  const run = useRun();
+  const busy = useBusy(installKey(target));
+  return (
+    <Button
+      busy={busy}
+      aria-label={`Reinstall ${name}`}
+      title="Reinstall (choose FOMOD options)"
+      icon={<ArrowsClockwiseIcon aria-hidden size={16} />}
+      onClick={async () => {
+        onAccepted?.();
+        const r = await run("Reinstall", () => ipc.modReinstall(target, { fomod: "ask" }), { key: installKey(target) });
+        if (r) showToast("success", "Reinstalled", { detail: `${r.installed.name} · ${count(r.installed.files, "file")}` });
+      }}
+    >
+      Reinstall
+    </Button>
+  );
+}
 
 /**
- * Install (or Remove, when the mod is installed) for a Nexus mod, as its details dialog shows them.
+ * Install (or Remove and Reinstall, when the mod is installed) for a Nexus mod, as its details dialog shows them.
  * `onAccepted` (close the dialog), on Install: once the mod's file list (mod_files, the same rows the backend
  * picks from) shows a single file, i.e. no file choice is coming; with several files, on the pick in the
  * backend's file chooser (the first answer that picks something to this install job's prompts), never on its
- * Cancel. Also once the install succeeds. On Remove: on a confirmed Yes.
+ * Cancel. Also once the install succeeds. On Remove: on a confirmed Yes. On Reinstall: right away.
+ * `uid` (an installed mod's id) is what Remove and Reinstall target, else the Nexus id.
  */
-export function ModActions({ game, m, onAccepted }: { game: string; m: SearchHit; onAccepted?: () => void }) {
+export function ModActions({
+  game,
+  m,
+  uid,
+  onAccepted,
+  onRemoved,
+}: {
+  game: string;
+  m: SearchHit;
+  uid?: string;
+  onAccepted?: () => void;
+  onRemoved?: () => void;
+}) {
   const run = useRun();
   const qc = useQueryClient();
   const name = m.name ?? `Mod ${m.modId ?? "?"}`;
   const key = installKey(String(m.modId));
   const busy = useBusy(key);
-  if (m.installed && m.modId !== null) {
+  const ref = uid ?? (m.modId !== null ? String(m.modId) : null);
+  if (m.installed && ref !== null) {
+    // A loader has no mods row to reinstall; it is removed through its consent flow.
+    if (m.loader && m.modId !== null)
+      return <RemoveButton game={game} item={{ kind: "loader", loaderKey: m.loader, nexusId: m.modId, name }} onAccepted={onAccepted} />;
     return (
-      <RemoveButton
-        game={game}
-        item={m.loader ? { kind: "loader", loaderKey: m.loader, nexusId: m.modId, name } : { kind: "mod", nexusId: m.modId, name }}
-        onAccepted={onAccepted}
-      />
+      <>
+        <ReinstallButton target={ref} name={name} onAccepted={onAccepted} />
+        <RemoveButton game={game} item={{ kind: "mod", ref, name }} onAccepted={onAccepted} onRemoved={onRemoved} />
+      </>
     );
   }
   const install = async () => {

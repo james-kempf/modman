@@ -61,16 +61,16 @@ describe("CT2 D01 dialogs", () => {
   // Fails when the dialog renders inside the view (a transformed ancestor traps its fixed backdrop) and the header stays live.
   it("render in a portal on <body>, fixed, and make the app inert", async () => {
     const m = mod({ name: "SkyUI" });
-    const { user } = await open("mods", { mods_list: () => ({ mods: [m], changed_since_deploy: false }), mod_detail: () => ({ mod: m, collections: [], fomod: [], wins: 0, loses: 0, url: null }) });
+    const { user } = await open("mods", { mods_list: () => ({ mods: [m], changed_since_deploy: false }) });
     await user.click(await screen.findByRole("button", { name: "Details" }));
     const dialog = await screen.findByRole("dialog");
     expect(main().contains(dialog)).toBe(false);
     const backdrop = dialog.parentElement!;
     expect(backdrop.parentElement).toBe(document.body);
     expect(backdrop.className).toMatch(/\bfixed inset-0\b/);
-    // Fits short windows: scrolls inside, height bound to the viewport.
-    expect(dialog.className).toMatch(/max-h-\[calc\(100vh-2rem\)\]/);
-    expect(dialog.className).toMatch(/overflow-y-auto/);
+    // Fits short windows: height bound to the viewport, the tab's pane scrolls inside.
+    expect(dialog.className).toMatch(/h-\[calc\(100vh-2rem\)\]/);
+    expect(dialog.querySelector("[data-scroll-pane]")!.className).toMatch(/overflow-y-auto/);
     const tab = document.querySelector("[data-tab=settings]")!;
     expect(tab.closest("[inert]")).not.toBeNull();
     await user.keyboard("{Escape}");
@@ -312,7 +312,6 @@ describe("CT2 D10/D11 result notices", () => {
     const m = mod({ name: "SkyUI" });
     const { user } = await open("mods", {
       mods_list: () => ({ mods: [m], changed_since_deploy: false }),
-      mod_detail: () => ({ mod: m, collections: [], fomod: [], wins: 0, loses: 0, url: null }),
       mods_uninstall: () => ({ done: true, mods: 1, archives: [], after: afterChange({ needs_deploy: false }) }),
       updates_check: () => ({ checked: 1, fetched: 1, stopped_early: false, installed: 0, updates: [{ mod: m, file: { file_id: 1, name: "f", version: "2" }, pinned: false }] }),
       updates_install: () => ({ checked: 1, fetched: 1, stopped_early: false, installed: 1, updates: [] }),
@@ -320,7 +319,7 @@ describe("CT2 D10/D11 result notices", () => {
       collection_remove: () => ({ removed: true, uninstalled: 2, after: afterChange({ needs_deploy: false }) }),
     });
     await user.click(await screen.findByRole("button", { name: "Details" }));
-    await user.click(await screen.findByRole("button", { name: "Uninstall" }));
+    await user.click(await screen.findByRole("button", { name: "Remove SkyUI" }));
     await waitFor(() => expect(noticeTexts()).toContain("Uninstalled · SkyUI"));
     await user.click(screen.getByRole("tab", { name: "Updates" }));
     await user.click(await screen.findByRole("button", { name: "Check for updates" }));

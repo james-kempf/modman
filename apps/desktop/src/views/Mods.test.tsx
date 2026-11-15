@@ -206,29 +206,6 @@ describe("#10 profiles loading", () => {
   });
 });
 
-describe("#11 mod details read error", () => {
-  // Fails when a failed mod_detail leaves "…" forever with no error or retry.
-  it("shows the error and Try again in the dialog", async () => {
-    let broken = true;
-    const m = mod({ name: "SkyUI" });
-    const { user } = await open({
-      mods_list: listed([m]),
-      mod_detail: () => {
-        if (broken) throw { message: "no such mod" };
-        return { mod: m, collections: [], fomod: [], wins: 1, loses: 0, url: null };
-      },
-    });
-    await user.click(await screen.findByRole("button", { name: "Details" }));
-    const dialog = await screen.findByRole("dialog");
-    expect(await within(dialog).findByText(/Couldn't read this mod's details\./)).toBeInTheDocument();
-    expect(within(dialog).getByText("no such mod")).toBeInTheDocument();
-    expect(within(dialog).queryByText("…")).toBeNull();
-    broken = false;
-    await user.click(within(dialog).getByRole("button", { name: "Try again" }));
-    expect(await within(dialog).findByText("wins 1 · loses 0")).toBeInTheDocument();
-  });
-});
-
 describe("load order priority hint", () => {
   // Fails when the priority rule (which mod wins a file clash) is lost with the removed header line,
   // or goes back into a page header instead of the Load order card it explains.

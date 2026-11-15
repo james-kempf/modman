@@ -19,7 +19,6 @@ async function open(handlers: Record<string, Handler> = {}) {
 
 const listed = (mods: ReturnType<typeof mod>[], changed = false) => () => ({ mods, changed_since_deploy: changed });
 const sections = () => screen.findByRole("tablist", { name: "Mods sections" });
-const detailOf = (m: ReturnType<typeof mod>) => () => ({ mod: m, collections: [], fomod: [], wins: 0, loses: 0, url: null });
 
 describe("#14 sub-tabs are focusable Tabs, not bound to LB/RB", () => {
   // Fails when the sub-tabs are a Segmented group (no tablist/roving tabindex) or arrows select instead of moving focus.
@@ -55,25 +54,42 @@ describe("#14 sub-tabs are focusable Tabs, not bound to LB/RB", () => {
   });
 });
 
-describe("#15 detail dialog footer", () => {
-  // Fails when Close is the primary (accent) button or Uninstall sits among the safe actions on the right.
-  it("puts Uninstall (danger) apart on the left and Close (default tone, focused) at the right end", async () => {
-    const m = mod({ name: "SkyUI" });
-    const { user } = await open({ mods_list: listed([m]), mod_detail: detailOf(m) });
+describe("#15 detail dialog (the Browse mod details dialog)", () => {
+  // Fails when the Mods tab opens its own dialog instead of Browse's (no Details/About tabs or Nexus facts),
+  // shows load-order position controls, or loses Reinstall / Remove before a focused Close.
+  it("shows Browse's tabs and facts, Reinstall and Remove before a focused Close, and no move controls", async () => {
+    const m = mod({ name: "SkyUI", author: "schlangster", nexus_mod_id: 12604 });
+    const { user } = await open({ mods_list: listed([m]) });
     await user.click(await screen.findByRole("button", { name: "Details" }));
-    const dialog = await screen.findByRole("dialog");
-    const uninstall = within(dialog).getByRole("button", { name: "Uninstall" });
-    const reinstall = within(dialog).getByRole("button", { name: /Reinstall/ });
+    const dialog = await screen.findByRole("dialog", { name: "SkyUI" });
+    expect(within(dialog).getByText("by schlangster")).toBeInTheDocument();
+    expect(within(dialog).getByRole("tab", { name: "Details" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("tab", { name: "About" })).toBeInTheDocument();
+    for (const v of ["Endorsements", "Nexus id", "12604", "Installed"]) expect(dialog).toHaveTextContent(v);
+    expect(within(dialog).queryByText("Load order position")).toBeNull();
+    expect(within(dialog).queryByRole("button", { name: /^Move / })).toBeNull();
+    expect(within(dialog).queryByLabelText("Position")).toBeNull();
+    expect(within(dialog).queryByRole("button", { name: /^Install/ })).toBeNull();
+    const reinstall = within(dialog).getByRole("button", { name: "Reinstall SkyUI" });
+    const remove = within(dialog).getByRole("button", { name: "Remove SkyUI" });
     const close = within(dialog).getByRole("button", { name: "Close" });
-    expect(close.className).not.toMatch(/bg-accent-400/);
-    expect(close.className).toMatch(/bg-fill-2/);
-    expect(uninstall.className).toMatch(/bg-rose-500/);
-    const footer = uninstall.parentElement!;
-    expect(footer.className).toMatch(/justify-between/);
-    expect(footer.contains(close) && !close.parentElement!.contains(uninstall)).toBe(true);
-    expect(uninstall.compareDocumentPosition(reinstall) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(reinstall.compareDocumentPosition(close) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(reinstall.compareDocumentPosition(remove) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(close.parentElement!.lastElementChild).toBe(close);
     await waitFor(() => expect(document.activeElement).toBe(close));
+  });
+
+  // Fails when Reinstall or Remove of a mod without a Nexus id is missing or targets anything but its uid.
+  it("Reinstall and Remove target the mod's uid, so a mod without a Nexus id has them", async () => {
+    const m = mod({ name: "Local Mod" });
+    const { t, user } = await open({
+      mods_list: listed([m]),
+      mod_reinstall: () => ({ installed: { name: "Local Mod", files: 3 } }),
+    });
+    await user.click(await screen.findByRole("button", { name: "Details" }));
+    const dialog = await screen.findByRole("dialog", { name: "Local Mod" });
+    expect(within(dialog).getByRole("button", { name: "Remove Local Mod" })).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Reinstall Local Mod" }));
+    await waitFor(() => expect(t.callsOf("mod_reinstall")).toEqual([expect.objectContaining({ reference: m.uid, fomod: "ask" })]));
   });
 });
 
@@ -101,7 +117,6 @@ describe("#17 conflict, plugin and update rows open the mod's Details", () => {
   const ref = (m: ReturnType<typeof mod>) => ({ id: m.id, uid: m.uid, name: m.name, priority: m.position });
   const handlers = {
     mods_list: listed([a, b]),
-    mod_detail: (args: { reference?: string }) => detailOf(args?.reference === a.uid ? a : b)(),
     conflicts: () => ({
       files: [{ rel_path: "textures/sky.dds", winner: ref(b), losers: [ref(a)], plugin: false }],
       plugins: [

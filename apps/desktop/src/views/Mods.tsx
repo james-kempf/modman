@@ -15,7 +15,7 @@ import {
   type ModsTab,
   type StateFilter,
 } from "../app/store";
-import { Dialog } from "../components/dialogs/Dialog";
+import { ModDetailsDialog } from "../components/dialogs/BrowseDetails";
 import { openView } from "../nav/actions";
 import {
   ArrowDownIcon,
@@ -29,7 +29,6 @@ import {
   FunnelSimpleIcon,
   StackIcon,
   SwordIcon,
-  TrashIcon,
 } from "@phosphor-icons/react";
 import {
   Badge,
@@ -38,7 +37,6 @@ import {
   CardSection,
   Empty,
   ErrorNote,
-  Fact,
   IconButton,
   LIST_ROW,
   SKELETON_DELAY_MS,
@@ -52,7 +50,6 @@ import {
   VIEW_FRAME,
   ViewFrame,
   bytes,
-  count,
   cx,
   when,
 } from "../components/ui";
@@ -62,12 +59,12 @@ import type {
   InstalledLoader,
   ModView,
   ProfileLoaded,
+  SearchHit,
   UninstallResult,
   UpdateReport,
 } from "../ipc/types";
 import { NoGame } from "../components/shell/NoGame";
 import { BulkBar, type BulkAction } from "./mods/BulkBar";
-import { MoveToPosition, type MoveSpec } from "./mods/MoveToPosition";
 import { useSelection } from "./mods/useSelection";
 
 // "Load order", not "Mods": the app's view bar already has a tab named Mods.
@@ -281,7 +278,7 @@ function ModList({ game }: { game: string }) {
     const lost = !document.activeElement || document.activeElement === document.body;
     if (lost && el.isConnected) el.focus();
   }, [mods.data]);
-  const move = async (m: ModView, spec: MoveSpec | "before" | "after", arg: string | null = null) => {
+  const move = async (m: ModView, spec: "before" | "after", arg: string) => {
     keep.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const r = await run("Move", () => ipc.modMove(m.uid, spec, arg, game), { key: MOVE });
     if (r) say(`${m.name} moved to position ${r.to} of ${r.of}`);
@@ -524,11 +521,7 @@ function ModList({ game }: { game: string }) {
       )}
       {detail && (
         <ModDetailDialog
-          // The live row: its position follows moves made from the dialog.
-          mod={list.find((m) => m.uid === detail.uid) ?? detail}
-          total={list.length}
-          moving={moving}
-          onMove={(spec) => void move(list.find((m) => m.uid === detail.uid) ?? detail, spec)}
+          mod={detail}
           game={game}
           onClose={() => setDetail(null)}
           onUninstalled={(uid) => {
@@ -759,144 +752,41 @@ function SelectBox({
   );
 }
 
+/** An installed mod's details: the Browse mod details dialog, for the mod's row. */
 function ModDetailDialog({
   mod,
   game,
-  total,
-  moving = false,
-  onMove,
   onClose,
   onUninstalled,
 }: {
   mod: ModView;
   game: string;
-  /** Rows in the load order (positions run 1..total). */
-  total?: number;
-  moving?: boolean;
-  /** Move this mod to the top, the bottom or position N (the dialog stays open). */
-  onMove?: (spec: MoveSpec) => void;
   onClose: () => void;
   /** The mod was uninstalled (the caller moves focus off its row). */
   onUninstalled?: (uid: string) => void;
 }) {
-  const run = useRun();
-  const q = useQuery({
-    queryKey: ["mod", game, mod.uid],
-    queryFn: () => ipc.modDetail(mod.uid, game),
-  });
-  const d = q.data;
+  // Only what the mods row knows: the Nexus-only stats (picture, downloads, endorsements, updated) stay unknown.
+  const hit: SearchHit = {
+    modId: mod.nexus_mod_id,
+    name: mod.name,
+    author: mod.author,
+    version: mod.version,
+    summary: null,
+    downloads: null,
+    endorsements: null,
+    thumbnailUrl: null,
+    category: mod.category,
+    updatedAt: null,
+    installed: true,
+  };
   return (
-    <Dialog
-      title={mod.name}
-      subtitle={`#${mod.position} · ${mod.uid}`}
-      onBack={onClose}
-      wide
-    >
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-4 md:grid-cols-3">
-        <Fact k="Version" v={mod.version ?? "?"} />
-        <Fact k="Author" v={mod.author ?? "?"} />
-        <Fact k="Source" v={mod.source} />
-        <Fact k="Installed" v={when(mod.installed_at)} />
-        <Fact k="Files" v={`${mod.file_count} · ${bytes(mod.size)}`} />
-        <Fact
-          k="Conflicts"
-          v={d ? `wins ${d.wins} · loses ${d.loses}` : q.isError ? "—" : "…"}
-        />
-      </dl>
-      {q.isError && (
-        <div className="mt-5">
-          <ReadError
-            what="this mod's details"
-            error={q.error}
-            retrying={q.isFetching}
-            onRetry={() => void q.refetch()}
-          />
-        </div>
-      )}
-      {d?.url && (
-        <p className="mt-5 font-mono text-label break-all">
-          <a
-            href={d.url}
-            className="text-accent-300 underline underline-offset-4 [--focus-text:var(--color-accent-700)]"
-            onClick={(e) => {
-              // The webview must not navigate: the backend opens the page in the browser.
-              e.preventDefault();
-              void run(
-                "Open Nexus page",
-                () => ipc.modOpenPage(mod.uid, game),
-                { key: "Open Nexus page" },
-              );
-            }}
-          >
-            {d.url}
-          </a>
-        </p>
-      )}
-      {d && d.fomod.length > 0 && (
-        <div className="mt-5">
-          <h3 className="eyebrow mb-2">Installer choices</h3>
-          <ul className="grid gap-1 text-label text-fg">
-            {d.fomod.map((s) => (
-              <li key={s.step}>
-                <span className="text-dim">{s.step}:</span>{" "}
-                {s.options.join(", ") || "—"}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {onMove && total !== undefined && total > 1 && (
-        <div className="mt-5">
-          <h3 className="eyebrow mb-2">Load order position</h3>
-          <MoveToPosition
-            name={mod.name}
-            position={mod.position}
-            total={total}
-            busy={moving}
-            onMove={onMove}
-          />
-        </div>
-      )}
-      {/* Destructive action apart on the left; the safe default (Close) at the right end. */}
-      <div className="mt-7 flex flex-wrap justify-between gap-2">
-        <Button
-          tone="danger"
-          icon={<TrashIcon aria-hidden size={15} />}
-          onClick={async () => {
-            onClose();
-            // The backend asks: a danger confirm with "Delete archive too" (off by default), so never true here.
-            const r = await run("Uninstall", () =>
-              ipc.modsUninstall([mod.uid], false),
-            );
-            if (!r) return;
-            showMsg(r.done ? "success" : "info", uninstalledMsg(r, mod.name));
-            if (r.done) onUninstalled?.(mod.uid);
-          }}
-        >
-          Uninstall
-        </Button>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            icon={<ArrowsClockwiseIcon aria-hidden size={15} />}
-            onClick={async () => {
-              onClose();
-              const r = await run("Reinstall", () =>
-                ipc.modReinstall(mod.uid, { fomod: "ask" }),
-              );
-              if (r)
-                showToast("success", "Reinstalled", {
-                  detail: `${r.installed.name} · ${count(r.installed.files, "file")}`,
-                });
-            }}
-          >
-            Reinstall (choose FOMOD options)
-          </Button>
-          <Button data-autofocus onClick={onClose}>
-            Close
-          </Button>
-        </div>
-      </div>
-    </Dialog>
+    <ModDetailsDialog
+      game={game}
+      m={hit}
+      uid={mod.uid}
+      onClose={onClose}
+      onRemoved={() => onUninstalled?.(mod.uid)}
+    />
   );
 }
 

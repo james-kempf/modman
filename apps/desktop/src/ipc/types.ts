@@ -265,18 +265,6 @@ export interface ModsView {
   /** Mods installed as a loader; removed through the loader uninstall flow. */
   loaders: InstalledLoader[];
 }
-export interface FomodStepView {
-  step: string;
-  options: string[];
-}
-export interface ModDetail {
-  mod: ModRecord;
-  collections: string[];
-  fomod: FomodStepView[];
-  wins: number;
-  loses: number;
-  url: string | null;
-}
 export interface MoveResult {
   uid: string;
   from: number;

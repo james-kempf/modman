@@ -58,43 +58,7 @@ async function bulkUninstall(user: ReturnType<typeof userEvent.setup>, n: number
   await waitFor(() => expect(texts().some((x) => x.startsWith(`Uninstalled · ${n} mods`))).toBe(true));
 }
 
-describe("#12 move to position (detail dialog)", () => {
-  // Fails when a move sends the wrong spec, is not announced, or drops focus from the pressed control.
-  it.each<[string, "first" | "last" | "#2", string, string[]]>([
-    ["bottom", "last", "Immersive Armors moved to position 3 of 3", ["SkyUI", "Unofficial Patch", "Immersive Armors"]],
-    ["top", "first", "Immersive Armors moved to position 1 of 3", ["Immersive Armors", "SkyUI", "Unofficial Patch"]],
-  ])("Move to %s calls modMove(uid, %s) and announces it", async (where, spec, said, after) => {
-    const { t, user } = await demoApp();
-    // Start from the middle so both ends move.
-    await user.click(within(screen.getByTitle("Immersive Armors").closest("li")!).getByRole("button", { name: "Move Immersive Armors up" }));
-    await waitFor(() => expect(order()).toEqual(["SkyUI", "Immersive Armors", "Unofficial Patch"]));
-    const uid = await uidOf(t, "Immersive Armors");
-    await user.click(within(screen.getByTitle("Immersive Armors").closest("li")!).getByRole("button", { name: "Details" }));
-    const dlg = await screen.findByRole("dialog");
-    const btn = within(dlg).getByRole("button", { name: `Move Immersive Armors to ${where}` });
-    await user.click(btn);
-    await waitFor(() => expect(order()).toEqual(after));
-    expect(t.callsOf("mod_move").at(-1)).toEqual({ game: GAME, reference: uid, spec, arg: null });
-    await waitFor(() => expect(announced()).toContain(said));
-    expect(document.activeElement).toBe(btn);
-  });
-
-  // Fails when a typed position is not sent as "#N" or the dialog loses focus.
-  it("Position 2 + Move calls modMove(uid, '#2'); the subtitle follows", async () => {
-    const { t, user } = await demoApp();
-    const uid = await uidOf(t, "SkyUI");
-    await user.click(within(screen.getByTitle("SkyUI").closest("li")!).getByRole("button", { name: "Details" }));
-    const dlg = await screen.findByRole("dialog");
-    await user.type(within(dlg).getByLabelText("Position"), "2");
-    const go = within(dlg).getByRole("button", { name: "Move" });
-    await user.click(go);
-    await waitFor(() => expect(order()).toEqual(["Unofficial Patch", "SkyUI", "Immersive Armors"]));
-    expect(t.callsOf("mod_move").at(-1)).toEqual({ game: GAME, reference: uid, spec: "#2", arg: null });
-    await waitFor(() => expect(announced()).toContain("SkyUI moved to position 2 of 3"));
-    await waitFor(() => expect(within(dlg).getByText(new RegExp(`^#2 · ${uid}`))).toBeTruthy());
-    expect(document.activeElement).toBe(go);
-  });
-
+describe("#12 row moves", () => {
   // Fails when an up/down move is not announced or loses focus.
   it("Move down is announced and keeps focus on the button", async () => {
     const { user } = await demoApp();

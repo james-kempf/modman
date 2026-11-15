@@ -27,7 +27,6 @@ function modList(names: string[], archives: string[] = []) {
     mods: () => mods,
     handlers: {
       mods_list: () => ({ mods, changed_since_deploy: false }),
-      mod_detail: (a: Args) => ({ mod: mods.find((m) => m.uid === a!.reference), collections: [], fomod: [], wins: 0, loses: 0, url: null }),
       mods_uninstall: (a: Args) => {
         mods = mods.filter((m) => !(a!.refs as string[]).includes(m.uid));
         return { done: true, mods: 1, archives, after: quiet };
@@ -39,7 +38,7 @@ function modList(names: string[], archives: string[] = []) {
 async function uninstall(user: ReturnType<typeof userEvent.setup>, name: string) {
   const row = (await screen.findByTitle(name)).closest("li")!;
   await user.click(within(row).getByRole("button", { name: "Details" }));
-  await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Uninstall" }));
+  await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: `Remove ${name}` }));
 }
 
 describe("#1 uninstall wiring", () => {

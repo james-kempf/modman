@@ -44,7 +44,6 @@ import type {
   InstallResult,
   Launched,
   LoginResult,
-  ModDetail,
   ModsView,
   MoveResult,
   NxmReceived,
@@ -226,14 +225,8 @@ export const openFolder = (game: string, which: GameFolder) => call<string>("ope
 // ── mods ────────────────────────────────────────────────────
 
 export const modsList = (game?: Game) => call<ModsView>("mods_list", { game: game ?? null });
-/** reference: #position, uid, name, Nexus id or a unique name part. */
-export const modDetail = (reference: string, game?: Game) =>
-  call<ModDetail>("mod_detail", { game: game ?? null, reference });
 /** Opens an http/https link (from a description) in the browser; the backend rejects other schemes. */
 export const openUrl = (url: string) => call<string>("open_url", { url });
-/** Opens the mod's Nexus page in the browser; returns the URL. */
-export const modOpenPage = (reference: string, game?: Game) =>
-  call<string>("mod_open_page", { game: game ?? null, reference });
 /** Job (auto-deploy may run). ids = ModRecord.id. */
 export const modsSetEnabled = (ids: number[], enabled: boolean, game?: Game) =>
   call<AfterChange>("mods_set_enabled", { game: game ?? null, ids, enabled });
