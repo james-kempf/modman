@@ -9,14 +9,14 @@
 // folder prefilled, since only the user knows its Nexus domain. Tiles are plain buttons in grids, so spatial navigation
 // moves between them in 2D.
 
-import { CheckIcon, FlaskIcon, PlusIcon, LightningIcon } from "@phosphor-icons/react";
+import { CheckIcon, PlusIcon, LightningIcon } from "@phosphor-icons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { errMsg } from "../app/bridge";
 import { useGames } from "../app/queries";
 import { useDeployDue, useRun } from "../app/run";
 import { useUi } from "../app/store";
-import { Badge, Button, CARD_TILE, Empty, ErrorNote, SearchField, ViewFrame, ViewHeader, cx, monogram } from "../components/ui";
+import { Badge, Button, CARD_TILE, Empty, ErrorNote, SearchField, SupportBadge, ViewFrame, ViewHeader, cx, monogram } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import type { Detected, GameView, Support } from "../ipc/types";
 import { openView } from "../nav/actions";
@@ -173,16 +173,7 @@ function SupportMark({ support }: { support: Support | null }) {
         <Badge>Unsupported</Badge>
       </span>
     );
-  return support === "experimental" ? (
-    <span data-testid="experimental-badge" className="inline-flex" title="Not tested end to end; may need manual fixes">
-      <Badge tone="amber">
-        <FlaskIcon aria-hidden size={12} weight="bold" />
-        Experimental
-      </Badge>
-    </span>
-  ) : (
-    <Badge>Tested</Badge>
-  );
+  return <SupportBadge support={support} />;
 }
 
 /** Games found in Steam that are not managed yet; picking one adds it. */

@@ -113,7 +113,6 @@ describe("game library", () => {
     await overview();
   });
 
-  // Fails when an experimental game is not labelled, or a tested one is labelled experimental.
   // A5/A6. Fails when the filter leaves the header's centered slot, gamepad Y does not focus it, or it loses the
   // shared longer width (capped so narrow windows do not scroll sideways).
   it("the search sits centered in the header, wide, and gamepad Y focuses it", async () => {
@@ -127,11 +126,14 @@ describe("game library", () => {
     expect(document.activeElement).toBe(box);
   });
 
-  it("labels support: experimental vs tested", async () => {
+  // Fails when an experimental game loses its label, or a tested game shows any support badge (e.g. "Tested").
+  it("labels experimental games; tested games get no support badge", async () => {
     await library();
     expect(within(tile("Cyberpunk 2077")).getByTestId("experimental-badge")).toHaveTextContent("Experimental");
-    expect(within(tile("Skyrim Special Edition")).queryByTestId("experimental-badge")).toBeNull();
-    expect(tile("Skyrim Special Edition")).toHaveAccessibleDescription(/Tested/);
+    const sse = tile("Skyrim Special Edition");
+    expect(within(sse).queryByTestId("experimental-badge")).toBeNull();
+    expect(within(sse).queryByText(/tested/i)).toBeNull();
+    expect(sse).not.toHaveAccessibleDescription(/tested/i);
   });
 
   // Fails when a game whose deploy is due (backend flag or a change this session) has no marker.
