@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# User service: one run of scripts/run-game-support.sh (see scripts/README.md).
+# Install (not done automatically):
+#   ln -s "$PWD/scripts/systemd/vessel-game-support."{service,timer} ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now vessel-game-support.timer
+# Edit WorkingDirectory/ExecStart if the repo is not at ~/Repositories/modman.
+[Unit]
+Description=Vessel: research and add support for one pending game
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Repositories/modman
+# claude, gh and cargo live in user paths that systemd does not add.
+Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/Repositories/modman/scripts/run-game-support.sh
+TimeoutStartSec=4h
+Nice=10

@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Weekly trigger for vessel-game-support.service. Not enabled by default.
+[Unit]
+Description=Weekly Vessel game-support run
+
+[Timer]
+OnCalendar=Mon *-*-* 06:17:00
+RandomizedDelaySec=30m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
