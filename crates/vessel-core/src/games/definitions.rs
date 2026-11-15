@@ -379,8 +379,13 @@ mod tests {
     #[test]
     fn every_other_preset_is_experimental() {
         for d in builtin_definitions() {
-            if !["skyrimspecialedition", "cyberpunk2077", "stardewvalley"]
-                .contains(&d.domain.as_str())
+            if ![
+                "skyrimspecialedition",
+                "cyberpunk2077",
+                "stardewvalley",
+                "schedule1",
+            ]
+            .contains(&d.domain.as_str())
             {
                 assert_eq!(d.support, Support::Experimental, "{}", d.domain);
             }
@@ -462,6 +467,50 @@ mod tests {
         assert!(claims(cet, &cet_zip));
         assert!(!claims(red4ext, &cet_zip));
         assert!(claims(red4ext, &probe(&["red4ext/RED4ext.dll"])));
+    }
+
+    /// Catches: schedule1.toml losing the MelonLoader entry, its `version`
+    /// DLL override or the tested level, and the loader claiming a mod pack
+    /// or a plain mod DLL.
+    #[test]
+    fn schedule1_declares_the_melonloader_loader() {
+        let defs = builtin_definitions();
+        let d = find_definition(&defs, "schedule1").unwrap();
+        assert_eq!(d.support, Support::Tested);
+        assert_eq!(d.steam_appid, Some(3164500));
+        assert_eq!(
+            (d.subdir.as_str(), d.profile.as_str()),
+            (".", "melonloader")
+        );
+        assert!(d.plugins.is_none() && d.ue4ss.is_none() && d.shared_files.is_empty());
+        assert_eq!(d.loaders.len(), 1);
+        let ml = &d.loaders[0];
+        assert_eq!(ml.key, "melonloader");
+        assert_eq!(ml.launch.dll_overrides, ["version"]);
+        assert_eq!(ml.detect, ["MelonLoader", "dobby.dll"]);
+        assert!(crate::requirements::TOOLS.iter().any(|t| t.key == ml.key));
+
+        use crate::loaders::LoaderPlugin;
+        let claims = |entries: &[&str]| {
+            let p = crate::loaders::ArchiveProbe {
+                entries: entries.iter().map(|s| s.to_string()).collect(),
+                ..Default::default()
+            };
+            crate::loaders::DeclarativeLoader::new(ml.clone())
+                .matches(&crate::loaders::GameCtx::default(), &p)
+                .is_some()
+        };
+        assert!(claims(&[
+            "version.dll",
+            "dobby.dll",
+            "MelonLoader/net6/MelonLoader.dll"
+        ]));
+        assert!(!claims(&["Mods/SomeMod.dll"]));
+        assert!(!claims(&[
+            "version.dll",
+            "MelonLoader/a.dll",
+            "Mods/SomeMod.dll"
+        ]));
     }
 
     #[test]
