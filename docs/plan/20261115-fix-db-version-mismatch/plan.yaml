@@ -1,0 +1,125 @@
+plan_id: 20261115-fix-db-version-mismatch
+status: pending
+tldr: |
+  Vessel on the Steam Deck (deck@192.168.1.19) refuses its DB: "database schema version 8 is newer
+  than this Vessel supports (7)". Migration 8 (nexus_games) came from a local build whose code was
+  later discarded and never committed. The current rust-rewrite code stops at version 7. Migration 8
+  only added things: two cache tables and one index. Every other table matches the version 7 schema
+  exactly. Fix: stop Vessel, take a verified backup, roll the DB back to version 7 by dropping the
+  objects migration 8 added and deleting schema_migrations row 8 in one transaction, then confirm
+  Vessel starts cleanly. The only data lost is the Nexus games cache (5726 rows). It can be
+  rebuilt and is kept in the backup and a SQL dump.
+created_at: "2026-11-15"
+created_by: gem-planner
+revision: 1
+replan_count: 0
+planner_revision_used: false
+
+findings:
+  host: deck@192.168.1.19 (SteamOS; jkempf@ is not authorized, so use deck@)
+  binary: /home/deck/Documents/Applications/vessel.AppImage (mtime 2026-11-15 11:54, 135567864 bytes; supports schema 7 according to its error message). Older /home/deck/Documents/Applications/modman.AppImage also present, not in use.
+  run_mode: desktop AppImage launched from Steam as a non-Steam shortcut (reaper SteamLaunch AppId=3266385942); PID 74126 was running during inspection
+  db_path: /home/deck/.local/share/vessel/vessel.db (68.7 MB, WAL mode; -wal was 0 bytes and -shm present at inspection)
+  log_path: /home/deck/.local/state/vessel/vessel.log
+  remote_db_version: 8 (rows 1-7 applied_at 1793449655; row 8 'nexus_games' applied_at 1793754503 = 2026-11-04T01:08Z)
+  expected_version: 7 (crates/vessel-core/src/store.rs MIGRATIONS, last = 7 'loaders')
+  error_text: "database schema version 8 is newer than this Vessel supports (7); upgrade Vessel"  # vessel.log 2026-11-15T17:54:34Z, repeated at 17:55:25Z in loader startup recovery and the auto-update check
+  migration_8_objects: [table nexus_games (5726 rows), table nexus_games_meta (1 row, refreshed_at 1793754784), index nexus_games_name]
+  schema_diff_vs_v7: none outside migration 8 objects (full sqlite_master SQL compared against crates/vessel-core/migrations/0001-0007)
+  migrate_marker: no migration.json found under ~/.config/vessel; the legacy marker is not involved
+  migration_8_source: none in any ref, stash, or unreachable commit; it exists only as design text in docs/plan/20261101-nexus-game-support/plan.md
+  repo_refs_to_nexus_games: none in crates/ or apps/
+
+decisions:
+  - "Fix path: downgrade the DB to version 7 (drop migration 8 objects and its schema_migrations row). Do not upgrade the binary. Reason: the objective is to match the current code; no code for migration 8 exists to build from, and migration 8 only added a rebuildable cache."
+  - "Rejected: rebuilding migration 8 in the code. Reason: that is feature work (nexus-game-support) outside this objective; recorded as follow-up under risks."
+  - "Rejected: editing only schema_migrations and leaving the tables in place. Reason: when the future migration 8 adds CREATE TABLE nexus_games, it would fail on the leftover table."
+  - "Backup (W2) and downgrade (W3) are separate waves. Reason: the irreversible change is gated on a backup that has been checked."
+  - "Single specialist (gem-devops) throughout. Reason: remote ops only, no code change."
+
+assumptions:
+  - deck@192.168.1.19 key-based SSH keeps working (confirmed during planning).
+  - Vessel can be stopped (SIGTERM, or the user closes it) without losing work; nothing is being deployed or downloaded at that moment.
+  - sqlite3 3.x on the remote (/usr/bin/sqlite3) supports .backup and transactional DROP TABLE.
+  - Losing the nexus_games cache is acceptable; the current version 7 code never reads it.
+  - The user can relaunch Vessel from Steam or Desktop mode for the final check.
+
+tasks:
+  - id: T1
+    title: Read-only remote inspection
+    description: "Done during planning (see findings). Rung: reuse (sqlite3 CLI on host)."
+    wave: 1
+    depends_on: []
+    agent: gem-devops
+    status: completed
+    retries_used: 0
+    acceptance_criteria:
+      - Remote DB version, expected version, DB path, binary, run mode and exact error text recorded in findings.
+
+  - id: T2
+    title: Stop Vessel and take a verified DB backup
+    description: "Rung: platform (sqlite3 .backup, sha256sum). No new code."
+    wave: 2
+    depends_on: [T1]
+    agent: gem-devops
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "`pgrep -f vessel.AppImage` returns nothing (Vessel fully stopped) before the backup."
+      - "Backup at /home/deck/.local/share/vessel/db-backup-20261115/vessel.db.v8.bak made with `sqlite3 vessel.db \".backup '<path>'\"`; `PRAGMA integrity_check` on the backup returns ok."
+      - "Backup reports MAX(version)=8 and the same row counts as the live DB for every table (counts saved to db-backup-20261115/rowcounts.v8.txt)."
+      - "sha256 of the backup saved to db-backup-20261115/SHA256SUMS; a copy of the backup is scp-ed to /home/jkempf/vessel-deck-backups/20261115/ on this workstation (outside the repo) and its sha256 matches."
+      - "SQL dump of nexus_games and nexus_games_meta written to db-backup-20261115/nexus_games.v8.sql."
+    handoff:
+      constraints:
+        - "SSH as deck@192.168.1.19 only."
+        - "Stop with SIGTERM to PID of /home/deck/Documents/Applications/vessel.AppImage and wait up to 30s; if it is still running, stop and ask the user to close it. No SIGKILL."
+        - "Do not modify vessel.db in this task."
+        - "Do not use Steam's backup or deploy features; /home/deck/.local/share/vessel/backups holds mod backups, not DB backups."
+      high_risk_signals: [irreversible]
+
+  - id: T3
+    title: Downgrade DB schema from version 8 to version 7
+    description: "Rung: platform (one sqlite3 transaction). Removes only migration 8 objects."
+    wave: 3
+    depends_on: [T2]
+    agent: gem-devops
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "T2 backup exists, its sha256 matches SHA256SUMS, and Vessel is still stopped before any write."
+      - "Run as a single transaction: BEGIN IMMEDIATE; DROP INDEX nexus_games_name; DROP TABLE nexus_games; DROP TABLE nexus_games_meta; DELETE FROM schema_migrations WHERE version = 8; COMMIT. Abort on any error (sqlite3 -bail)."
+      - "After COMMIT: `PRAGMA wal_checkpoint(TRUNCATE)` and `PRAGMA integrity_check` returns ok."
+      - "SELECT MAX(version) FROM schema_migrations = 7; no sqlite_master object named nexus_games*."
+      - "Row counts of every remaining table match rowcounts.v8.txt."
+    handoff:
+      constraints:
+        - "No other DDL or DML. Do not touch rows 1-7 of schema_migrations."
+        - "If any precheck fails, stop and report; do not run the transaction."
+      relevant_context:
+        - "DB: /home/deck/.local/share/vessel/vessel.db (WAL mode)."
+        - "Migration 8 objects: table nexus_games, table nexus_games_meta, index nexus_games_name. The rest of the schema is identical to crates/vessel-core/migrations/0001-0007."
+      high_risk_signals: [migration, schema_change, irreversible]
+
+  - id: T4
+    title: Verify Vessel starts clean on schema 7
+    description: "Rung: reuse (app's own startup Store::open path plus its log)."
+    wave: 4
+    depends_on: [T3]
+    agent: gem-devops
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "User relaunches Vessel (Steam shortcut or Desktop mode); `pgrep -f vessel.AppImage` shows it running."
+      - "New lines in /home/deck/.local/state/vessel/vessel.log since relaunch contain no 'newer than this Vessel supports' and no 'loader startup recovery failed' / 'startup auto-update check failed' mentioning schema."
+      - "SELECT MAX(version) FROM schema_migrations still = 7 after startup (opened read-only)."
+      - "Mods and profiles are still listed in the app; table row counts match rowcounts.v8.txt."
+    handoff:
+      constraints:
+        - "Read-only after relaunch; if verification fails, carry out the rollback below and report."
+      relevant_context:
+        - "Rollback (if T3 or T4 fails): stop Vessel; cp db-backup-20261115/vessel.db.v8.bak /home/deck/.local/share/vessel/vessel.db; rm -f vessel.db-wal vessel.db-shm; check the sha256. This brings back schema 8 and therefore the original mismatch; the only real way forward from there is a Vessel build that ships migration 8."
+
+risks:
+  - "Follow-up: when nexus-game-support is rebuilt, its migration must be numbered 8 and create nexus_games, nexus_games_meta and nexus_games_name from scratch. The downgrade leaves nothing that would conflict."
+  - "The same mismatch will come back if a build with an uncommitted migration is run against this Deck DB again. Keep experimental builds on a separate data dir."
