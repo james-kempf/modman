@@ -379,10 +379,28 @@ mod tests {
     #[test]
     fn every_other_preset_is_experimental() {
         for d in builtin_definitions() {
-            if !["skyrimspecialedition", "cyberpunk2077"].contains(&d.domain.as_str()) {
+            if !["skyrimspecialedition", "cyberpunk2077", "stardewvalley"]
+                .contains(&d.domain.as_str())
+            {
                 assert_eq!(d.support, Support::Experimental, "{}", d.domain);
             }
         }
+    }
+
+    /// Catches: stardewvalley.toml losing its Mods deploy root or stardew
+    /// profile, dropping the tested level, or declaring a `smapi` loader that
+    /// would collide with the built-in Rust plugin of the same key.
+    #[test]
+    fn stardew_deploys_to_mods_and_leaves_smapi_to_the_builtin_plugin() {
+        let defs = builtin_definitions();
+        let d = find_definition(&defs, "stardewvalley").unwrap();
+        assert_eq!(d.support, Support::Tested);
+        assert_eq!(d.steam_appid, Some(413150));
+        assert_eq!(d.subdir, "Mods");
+        assert_eq!(d.profile, "stardew");
+        assert_eq!(d.target, Target::GameDir);
+        assert!(d.plugins.is_none() && d.ue4ss.is_none() && d.shared_files.is_empty());
+        assert!(d.loaders.is_empty());
     }
 
     /// Catches: cyberpunk2077.toml losing a loader, its Nexus id, its Proton
