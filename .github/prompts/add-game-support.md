@@ -66,7 +66,60 @@ Answer, with a source for every claim:
   Nexus mod id, what files the archive contains, where they are installed,
   how to tell they are installed, whether they are tied to the game build,
   and any launch option or DLL override needed under Proton.
+- Every distribution route of each loader / script extender / framework
+  (see "Loader routes" below).
 - Anything Vessel's schema cannot express yet.
+
+### Loader routes
+
+A loader often reaches users by more than one route, and Vessel must
+handle each of them. For every loader, script extender and framework:
+
+1. List every distribution route:
+   - its Nexus mod page on `DOMAIN` (the mod id), and the mod id on any
+     other domain it is cross-listed on (for example `site`);
+   - off-site sources: GitHub releases (`owner/repo` and asset name), the
+     official site, Thunderstore;
+   - what each route actually ships: the loader archive itself, or an
+     installer (`.exe`) that downloads or writes the loader. A Nexus page
+     that ships only an installer is a different route from the GitHub zip.
+2. Find out how popular mods declare the requirement. Open the
+   requirements of at least five of the most-endorsed mods that need the
+   loader and record, for each style you find: a Nexus "requirements"
+   entry linking the loader's mod page (which mod id, which domain), or an
+   "off-site requirements" entry (its name and URL, for example a GitHub
+   or wiki link).
+3. Map each route to the definition so that Vessel both (i) recognizes a
+   mod-page requirement or an off-site requirement as that loader and
+   offers to install it, and (ii) registers the loader as a loader, not as
+   a regular mod, when the user installs it from that route. What Vessel
+   handles today:
+   - A Nexus page on `DOMAIN` whose archive matches `required_paths`:
+     handled by `loaders.nexus_mod_id` + `loaders.required_paths`. A
+     mod-page requirement then shows "install <id>", and the download is
+     claimed as the loader.
+   - A Nexus page that ships an installer or any archive that does not
+     match `required_paths`: Gap. Declarative loaders never run downloaded
+     code, so the archive is installed as a regular mod.
+   - A Nexus page on another domain: Gap (`nexus_mod_id` is for `DOMAIN`
+     only; the download is unverified).
+   - An off-site requirement or off-site download (GitHub, official site):
+     Gap. Vessel recognizes known tool names (`requirements.rs` `TOOLS`)
+     but cannot download from a URL, so it never offers the install.
+   - A loader built into Vessel's Rust code (for example SMAPI for
+     `stardewvalley`): name the definition field that selects it, for
+     example `domain`, and only for the routes that plugin handles.
+4. If the schema cannot express a route, that route is a Gap: add a Gaps
+   bullet naming the loader, the route and the Rust change needed, and keep
+   `support = "experimental"`. Never claim full support while a loader
+   route is unhandled.
+5. If you cannot verify a route (for example the Nexus page returns HTTP
+   403), try search results and pages that link to it (READMEs, guides,
+   Thunderstore). If it is still unverified, treat it as unhandled: mark
+   it Gap and add a Gaps bullet "unverified route: <loader> <route>; ...".
+   An unverified route keeps the game experimental.
+
+Record the result in the `## Loader routes` table of the note (section 5).
 
 If sources disagree, say so and pick the most recent primary source.
 Never invent a path, appid or mod id. If you cannot verify a value, leave
@@ -92,6 +145,8 @@ Rules for the definition:
 - Add `[[loaders]]` entries for the loaders/script extenders the game
   needs, with `required_paths`, `detect`, `payload` and `launch` that match
   your research. Use `couples_to` when the loader is tied to the game build.
+  Set `nexus_mod_id` when the loader's Nexus page on `DOMAIN` ships an
+  archive that matches `required_paths` (see "Loader routes").
 - Set `support` from the Gaps result (section 5):
   - Gaps is `None` (the game is fully supported by config alone):
     `support = "tested"`.
@@ -114,7 +169,7 @@ Rules for the definition:
 
 If full support needs Rust changes outside the allowed files (a new
 profile, a new staging rule, a new requirements tool key, a new loader
-kind), do not write that code. Record each one under "Gaps" in the note.
+kind, a loader route the schema cannot express), do not write that code. Record each one under "Gaps" in the note.
 Only list real Rust changes there; open questions and nice-to-haves go in
 their own sections.
 
@@ -149,6 +204,12 @@ Deploy root, layouts, load order, Proton notes.
 ## Loaders and script extenders
 | Name | Nexus id | Installs to | Detect | Build-coupled | Launch change | Source |
 
+## Loader routes
+| Loader | Route | Identifier | Handled by |
+|---|---|---|---|
+| <loader> | Nexus page | <DOMAIN> <mod id> | `loaders.nexus_mod_id` + `loaders.required_paths` |
+| <loader> | Off-site requirement | <URL> | Gap |
+
 ## Configuration changes
 Bullet list of every field added or changed, each with its source.
 
@@ -179,7 +240,32 @@ The body of `## Gaps` (blank lines ignored) must be exactly one of:
   line (file or module and what must change), and the definition keeps
   `support = "experimental"`.
 
-Nothing else may appear in that section. Check it with:
+Nothing else may appear in that section.
+
+### Loader routes format (machine-checked)
+
+The body of `## Loader routes` (blank lines ignored) must be exactly one of:
+
+- the single line `None`, only when the game has no loader, script
+  extender or framework at all (built-in ones such as SMAPI count), and
+  the definition has no `[[loaders]]`; or
+- a table with exactly the header `| Loader | Route | Identifier | Handled by |`,
+  its separator row and at least one row per route from section 2:
+  - `Loader`: the loader's `key` or `name` from `[[loaders]]` (every
+    `[[loaders]]` entry needs at least one row);
+  - `Route`: Nexus page, Nexus page (other domain), Nexus requirement,
+    Off-site requirement, GitHub release, official site, ...;
+  - `Identifier`: domain + mod id, or the URL / `owner/repo`;
+  - `Handled by`: either the word `Gap`, or one or more backticked
+    definition fields joined by `+` or `,`. A `loaders.<field>` must be
+    set on that loader's `[[loaders]]` entry; any other field (for example
+    `domain`) must be set in the definition.
+
+Each `Gap` row needs a Gaps bullet that names its loader, and any `Gap`
+row means the outcome cannot be full support: Gaps `None` with a `Gap`
+row fails the check.
+
+Check both sections with:
 
 ```sh
 python3 <CHECKER> \

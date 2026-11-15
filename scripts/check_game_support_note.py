@@ -7,11 +7,25 @@ section, ignoring blank lines, is either exactly `None` (no Rust changes
 needed) or one or more lines that each start with `- ` (one needed Rust
 change per bullet). Anything else is an error.
 
+Loader routes format: the body of `## Loader routes` is either exactly
+`None` (the game has no loaders, script extenders or frameworks) or a
+Markdown table with the header `| Loader | Route | Identifier | Handled by |`
+and at least one row. `Handled by` is either the word `Gap` or one or more
+backticked definition fields (`profile`, `loaders.nexus_mod_id`,
+`loaders.launch.dll_overrides`, ...) separated by `,` or `+`.
+
 Rules:
 - Gaps `None`        -> the definition must have support = "tested".
 - Gaps bullet list   -> the definition must have support = "experimental".
 - The definition must contain the completion marker either way.
 - The note must have a non-empty `## Sources` section.
+- `## Loader routes` is required. `None` is only allowed when the
+  definition has no `[[loaders]]`; otherwise every `[[loaders]]` entry
+  needs at least one row (matched by key or name).
+- A `loaders.<field>` reference must be set on the `[[loaders]]` entry the
+  row names; any other field must be set in the definition.
+- A `Gap` row needs a Gaps bullet that names its loader, and makes the
+  outcome partial: Gaps `None` with a `Gap` row is an error.
 
 Prints `outcome` (full | partial) and the gaps. Under GitHub Actions also
 writes `outcome`, `outcome_label` and a multi-line `gaps` to $GITHUB_OUTPUT.
@@ -22,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 import tomllib
 import uuid
@@ -42,10 +57,94 @@ def section(note: str, title: str) -> list[str] | None:
     return lines if found else None
 
 
+ROUTES_HEADER = ["loader", "route", "identifier", "handled by"]
+FIELD = re.compile(r"`([^`]+)`")
+
+
+def cells(row: str) -> list[str]:
+    return [c.strip() for c in row.strip().strip("|").split("|")]
+
+
+def norm(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def loader_entry(loaders: list[dict], name: str) -> dict | None:
+    n = norm(name)
+    return next(
+        (l for l in loaders if n in (norm(l.get("key", "")), norm(l.get("name", "")))), None
+    )
+
+
+def field_set(table: dict, path: list[str]) -> bool:
+    node = table
+    for part in path:
+        if not isinstance(node, dict) or part not in node:
+            return False
+        node = node[part]
+    return True
+
+
+def check_routes(
+    note_path: Path, body: list[str] | None, defn: dict, gap_items: list[str]
+) -> tuple[list[str], int]:
+    """Errors for `## Loader routes`, and the number of `Gap` rows."""
+    where = f"{note_path}: '## Loader routes'"
+    if body is None:
+        return [f"{where} section missing"], 0
+    loaders = defn.get("loaders", [])
+    if body == ["None"]:
+        if loaders:
+            keys = ", ".join(l.get("key", "?") for l in loaders)
+            return [f"{where} is None but the definition has [[loaders]] ({keys})"], 0
+        return [], 0
+    if len(body) < 3 or [c.lower() for c in cells(body[0])] != ROUTES_HEADER:
+        return [
+            f"{where} must be exactly 'None' or a table with header "
+            "'| Loader | Route | Identifier | Handled by |' and at least one row"
+        ], 0
+    errors, gaps, named = [], 0, set()
+    for row in body[2:]:
+        c = cells(row)
+        if len(c) != 4 or not all(c):
+            errors.append(f"{where}: row '{row}' needs 4 non-empty cells")
+            continue
+        loader, _route, _ident, handled = c
+        entry = loader_entry(loaders, loader)
+        if entry is not None:
+            named.add(id(entry))
+        if handled == "Gap":
+            gaps += 1
+            if not any(norm(loader) in norm(g) for g in gap_items):
+                errors.append(f"{where}: '{loader}' row is a Gap but no Gaps bullet names it")
+            continue
+        fields = FIELD.findall(handled)
+        if not fields or re.sub(r"`[^`]+`|[\s,+]", "", handled):
+            errors.append(
+                f"{where}: handled-by '{handled}' must be 'Gap' or backticked definition fields"
+            )
+            continue
+        for f in fields:
+            path = f.split(".")
+            if path[0] == "loaders":
+                ok = entry is not None and field_set(entry, path[1:]) and len(path) > 1
+                if not ok:
+                    errors.append(
+                        f"{where}: '{f}' is not set on a [[loaders]] entry for '{loader}'"
+                    )
+            elif not field_set(defn, path):
+                errors.append(f"{where}: '{f}' is not set in the definition")
+    for l in loaders:
+        if id(l) not in named:
+            errors.append(f"{where}: no row for [[loaders]] '{l.get('key', '?')}'")
+    return errors, gaps
+
+
 def check(definition: Path, note_path: Path) -> tuple[list[str], str, list[str]]:
     errors: list[str] = []
     text = definition.read_text(encoding="utf-8")
-    support = tomllib.loads(text).get("support", "experimental")
+    defn = tomllib.loads(text)
+    support = defn.get("support", "experimental")
     if MARKER not in text.splitlines():
         errors.append(f"{definition}: completion marker '{MARKER}' missing")
     if not note_path.is_file():
@@ -66,6 +165,15 @@ def check(definition: Path, note_path: Path) -> tuple[list[str], str, list[str]]
     else:
         errors.append(
             f"{note_path}: '## Gaps' must be exactly 'None' or a list of '- ' bullets"
+        )
+
+    route_errors, gap_rows = check_routes(
+        note_path, section(note, "Loader routes"), defn, items
+    )
+    errors += route_errors
+    if outcome == "full" and gap_rows:
+        errors.append(
+            f"{note_path}: Gaps is None but {gap_rows} loader route(s) are a Gap"
         )
 
     if outcome == "full" and support != "tested":

@@ -22,7 +22,10 @@ PR), run `scripts/run-game-support.sh` instead.
    (`git switch -c <branch>`), or to work on the current branch.
 4. Read `.github/prompts/add-game-support.md` and follow it exactly, with
    DOMAIN, NAME, DEFINITION and BRANCH from step 1 and
-   CHECKER=`scripts/check_game_support_note.py`. Make every file change
+   CHECKER=`scripts/check_game_support_note.py`. Do the "Loader routes"
+   research in its section 2 for every loader: sample the requirements of
+   several top mods, and list every route (Nexus page, off-site sources)
+   and how mods declare it. Make every file change
    with Edit or Write, never with `python`, `sed` or heredoc scripts. A
    denied shell command does not mean Bash is unavailable; the allowed
    commands still work. Before finishing, run `cargo fmt --all -- --check`,
@@ -32,7 +35,12 @@ PR), run `scripts/run-game-support.sh` instead.
    --note docs/game-support/<domain>.md`, the same check the runner uses:
    Gaps `None` must go with `support = "tested"` (full support), Gaps
    bullets with `support = "experimental"` (partial, Rust changes needed).
-   Fix any error it reports. Promotion to tested here is based on
+   It also requires the `## Loader routes` section: `None` only for a game
+   with no loaders, otherwise one table row per distribution route of every
+   loader (Nexus page, cross-listed Nexus page, off-site requirement,
+   GitHub release, ...), each handled by a backticked definition field or
+   `Gap` with a Gaps bullet naming the loader. Any `Gap` row rules out full
+   support. Fix any error it reports. Promotion to tested here is based on
    research, not hardware testing.
 6. Show `git status` and `git diff --stat` for the allowed files only.
    Do not commit, push or open a PR. Tell the user the commands the
