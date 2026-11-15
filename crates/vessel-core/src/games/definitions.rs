@@ -379,10 +379,71 @@ mod tests {
     #[test]
     fn every_other_preset_is_experimental() {
         for d in builtin_definitions() {
-            if d.domain != "skyrimspecialedition" {
+            if !["skyrimspecialedition", "cyberpunk2077"].contains(&d.domain.as_str()) {
                 assert_eq!(d.support, Support::Experimental, "{}", d.domain);
             }
         }
+    }
+
+    /// Catches: cyberpunk2077.toml losing a loader, its Nexus id, its Proton
+    /// DLL override or the build coupling, and the game dropping its tested
+    /// level.
+    #[test]
+    fn cyberpunk_declares_red4ext_cet_and_redscript_loaders() {
+        let defs = builtin_definitions();
+        let cp = find_definition(&defs, "cyberpunk2077").unwrap();
+        assert_eq!(cp.support, Support::Tested);
+        assert!(cp.plugins.is_none() && cp.ue4ss.is_none());
+        let keys: Vec<_> = cp.loaders.iter().map(|l| l.key.as_str()).collect();
+        assert_eq!(keys, ["red4ext", "cet", "redscript"]);
+        let get = |k: &str| cp.loaders.iter().find(|l| l.key == k).unwrap();
+
+        let red4ext = get("red4ext");
+        assert_eq!(red4ext.nexus_mod_id, Some(2380));
+        assert_eq!(red4ext.launch.dll_overrides, ["winmm"]);
+        assert_eq!(
+            red4ext.couples_to.as_deref(),
+            Some("bin/x64/Cyberpunk2077.exe")
+        );
+        assert_eq!(red4ext.detect, ["red4ext/RED4ext.dll"]);
+
+        let cet = get("cet");
+        assert_eq!(cet.nexus_mod_id, Some(107));
+        assert_eq!(cet.launch.dll_overrides, ["version"]);
+        assert_eq!(cet.couples_to, red4ext.couples_to);
+        assert_eq!(cet.detect, ["bin/x64/plugins/cyber_engine_tweaks.asi"]);
+
+        let reds = get("redscript");
+        assert_eq!(reds.nexus_mod_id, Some(1511));
+        assert!(reds.launch.is_empty());
+
+        // Every loader key is a known requirements tool.
+        for l in &cp.loaders {
+            assert!(
+                crate::requirements::TOOLS.iter().any(|t| t.key == l.key),
+                "{}",
+                l.key
+            );
+        }
+        // Each loader claims its own archive and not another loader's.
+        let probe = |entries: &[&str]| crate::loaders::ArchiveProbe {
+            entries: entries.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        };
+        let ctx = crate::loaders::GameCtx::default();
+        use crate::loaders::LoaderPlugin;
+        let claims = |l: &LoaderDef, p: &crate::loaders::ArchiveProbe| {
+            crate::loaders::DeclarativeLoader::new(l.clone())
+                .matches(&ctx, p)
+                .is_some()
+        };
+        let cet_zip = probe(&[
+            "bin/x64/plugins/cyber_engine_tweaks.asi",
+            "bin/x64/version.dll",
+        ]);
+        assert!(claims(cet, &cet_zip));
+        assert!(!claims(red4ext, &cet_zip));
+        assert!(claims(red4ext, &probe(&["red4ext/RED4ext.dll"])));
     }
 
     #[test]

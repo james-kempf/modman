@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+# vessel-game-support: complete
+# Sources: docs/game-support/cyberpunk2077.md
 # Ported from the legacy bash tool game_preset (L269-300).
 domain = "cyberpunk2077"
 name = "Cyberpunk 2077"
@@ -6,4 +8,39 @@ steam_appid = 1091500
 subdir = "."
 target = "game_dir"
 profile = "cyberpunk"
-support = "experimental"
+support = "tested"
+
+# The game has no native Linux build: everything runs under Proton. Both
+# script-extender proxies below need a native-first DLL override, and both
+# need the real VC++ 2022 runtime in the prefix (vcrun2022, not Vortex-style
+# Windows installs). RED4ext and CET are checked against the game build.
+
+# RED4ext: plugin loader (red4ext/plugins/*). Loaded through winmm.dll.
+[[loaders]]
+key = "red4ext"
+name = "RED4ext"
+nexus_mod_id = 2380
+required_paths = ["**/RED4ext.dll"]
+detect = ["red4ext/RED4ext.dll"]
+couples_to = "bin/x64/Cyberpunk2077.exe"
+[loaders.launch]
+dll_overrides = ["winmm"]
+
+# Cyber Engine Tweaks: Lua mods + console. Loaded through version.dll and
+# needs RED4ext.
+[[loaders]]
+key = "cet"
+name = "Cyber Engine Tweaks"
+nexus_mod_id = 107
+required_paths = ["**/cyber_engine_tweaks.asi"]
+detect = ["bin/x64/plugins/cyber_engine_tweaks.asi"]
+couples_to = "bin/x64/Cyberpunk2077.exe"
+[loaders.launch]
+dll_overrides = ["version"]
+
+# redscript: script compiler for r6/scripts/*.reds mods.
+[[loaders]]
+key = "redscript"
+name = "redscript"
+nexus_mod_id = 1511
+required_paths = ["**/scc.exe"]
