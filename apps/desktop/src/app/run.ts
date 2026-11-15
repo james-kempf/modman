@@ -3,6 +3,8 @@
 // and the structured AfterChange result (auto-deploy ran / deploy due), kept
 // per game: the game a command ran for is the one whose deploy is due.
 
+import { cancelledMsg, failedMsg, showMsg, type ToastMsg } from "./toast";
+import { count } from "../components/ui/format";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import * as ipc from "../ipc/commands";
@@ -64,7 +66,7 @@ export function applyAfterChange(a: AfterChange, game: string | null): void {
   const ui = useUi.getState();
   if (a.deployed) {
     if (game) ui.clearDeployDue(game);
-    ui.notify("success", deployedText(a.deployed));
+    showMsg("success", deployedMsg(a.deployed));
   } else if (a.needs_deploy && game) {
     ui.markDeployDue(game);
   }
@@ -119,8 +121,8 @@ export function useRun(): Run {
       } catch (e) {
         const msg = errMsg(e);
         // A cancelled prompt is the user's choice, not an error.
-        if (isCancelError(msg)) ui.notify("info", `${label} cancelled.`);
-        else ui.notify("error", `${label}: ${msg}`);
+        if (isCancelError(msg)) showMsg("info", cancelledMsg(label));
+        else showMsg("error", failedMsg(label, msg));
         return undefined;
       } finally {
         ui.setBusy(label, false);
@@ -146,12 +148,13 @@ export function useDeployDue(game: string | null): boolean {
   return !!game && (pending || !!mods.data?.changed_since_deploy);
 }
 
-export function deployedText(r: DeployReport): string {
-  const parts = [`Deployed ${r.placed} files from ${r.mods} mods`];
-  if (r.conflicts.length) parts.push(`${r.conflicts.length} conflicts`);
+/** A deploy's toast: "Deployed" · "N files · M mods[ · X conflicts][ · Y skipped][ · couldn't write plugins.txt: …]". */
+export function deployedMsg(r: DeployReport): ToastMsg {
+  const parts = [count(r.placed, "file"), count(r.mods, "mod")];
+  if (r.conflicts.length) parts.push(count(r.conflicts.length, "conflict"));
   if (r.skipped.length) parts.push(`${r.skipped.length} skipped`);
-  if (r.plugins?.state === "failed") parts.push(`plugins.txt failed: ${r.plugins.detail}`);
-  return parts.join(", ");
+  if (r.plugins?.state === "failed") parts.push(`couldn't write plugins.txt: ${r.plugins.detail}`);
+  return { title: "Deployed", detail: parts.join(" · ") };
 }
 
 /**
@@ -169,13 +172,14 @@ export function useDeploy(): (game?: string) => Promise<DeployReport | undefined
         "Deploy",
         async () => {
           const since = useUi.getState().stamp();
-          useUi.getState().setDeployGame(id ?? null);
           // The game is named: switching games mid-deploy does not retarget it.
-          const r = await ipc.deploy({}, id).finally(() => useUi.getState().setDeployGame(null));
+          const r = await ipc.deploy({}, id);
           const ui = useUi.getState();
           if (id) ui.clearDeployDue(id, since);
-          const text = deployedText(r);
-          ui.notify(r.plugins?.state === "failed" ? "warn" : "success", g ? `${g.name}: ${text}` : text);
+          const m = deployedMsg(r);
+          // The game is named only when it is not the active one (the app bar names the active game).
+          if (g && g.id !== activeGame(qc)?.id) m.detail = `${g.name} · ${m.detail}`;
+          showMsg(r.plugins?.state === "failed" ? "warn" : "success", m);
           return r;
         },
         { key: "Deploy" },

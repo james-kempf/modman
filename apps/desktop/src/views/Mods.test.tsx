@@ -20,7 +20,7 @@ async function open(handlers: Record<string, Handler> = {}) {
 const fail = (message: string) => () => {
   throw { message };
 };
-const notices = () => useUi.getState().notices.map((n) => n.text);
+const notices = () => [useUi.getState().toast].flatMap((x) => (x ? [x] : [])).map((n) => (n.detail ? `${n.text} · ${n.detail}` : n.text));
 const listed = (mods: ReturnType<typeof mod>[]) => () => ({ mods, changed_since_deploy: false });
 const tab = (user: ReturnType<typeof userEvent.setup>, name: string) =>
   screen.findByRole("tab", { name }).then((b) => user.click(b));
@@ -187,7 +187,7 @@ describe("#9 profile delete arm", () => {
     await screen.findByText("evening");
     await user.click(del());
     await user.click(del());
-    await waitFor(() => expect(notices()).toContain("Deleted profile evening"));
+    await waitFor(() => expect(notices()).toContain("Deleted · Profile evening"));
     expect(t.callsOf("profile_delete")).toHaveLength(1);
   });
 });

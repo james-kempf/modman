@@ -3,12 +3,13 @@
 // URL/slug. Proceed, optional mods, manual downloads and FOMOD choices come
 // from the backend as prompt dialogs.
 
+import { showMsg, type ToastMsg } from "../app/toast";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { errMsg } from "../app/bridge";
 import { useActiveGame } from "../app/queries";
 import { useBusy, useRun } from "../app/run";
-import { useUi, type NoticeTone } from "../app/store";
+import type { ToastTone } from "../app/store";
 import {
   ArrowsClockwiseIcon,
   BooksIcon,
@@ -28,23 +29,23 @@ const OPTIONAL = [
   { value: "none", label: "None" },
 ] as const;
 
-export function collectionText(r: CollectionResult): string {
-  if (r.cancelled) return `${r.slug}: cancelled`;
-  if (r.up_to_date) return `${r.slug} is up to date`;
-  const parts = [`${r.slug}: ${r.installed} installed`, `${r.present} already present`];
+export function collectionMsg(r: CollectionResult): ToastMsg {
+  if (r.cancelled) return { title: "Cancelled", detail: `Collection ${r.slug}` };
+  if (r.up_to_date) return { title: "Already current", detail: `Collection ${r.slug}` };
+  const parts = [`Collection ${r.slug}`, `${r.installed} installed`, `${r.present} already present`];
   if (r.removed) parts.push(`${r.removed} removed`);
   if (r.failed.length) parts.push(`${r.failed.length} failed`);
-  return parts.join(", ");
+  return { title: "Installed", detail: parts.join(" · ") };
 }
 
 /** Notice tone of a collection result: a cancel is neutral, failures warn. */
-export function collectionTone(r: CollectionResult): NoticeTone {
+export function collectionTone(r: CollectionResult): ToastTone {
   return r.cancelled ? "info" : r.failed.length ? "warn" : "success";
 }
 
-export function removedText(slug: string, r: CollectionRemoved): string {
-  if (!r.removed) return `Collection ${slug} was kept.`;
-  return r.uninstalled ? `Removed collection ${slug} and ${r.uninstalled} mods` : `Removed collection ${slug}`;
+export function removedMsg(slug: string, r: CollectionRemoved): ToastMsg {
+  if (!r.removed) return { title: "Kept", detail: `Collection ${slug}` };
+  return { title: "Removed", detail: r.uninstalled ? `Collection ${slug} · ${r.uninstalled} mods` : `Collection ${slug}` };
 }
 
 /** The look-up field (focus goes there when the focused collection row is removed). */
@@ -70,12 +71,11 @@ export function Collections() {
 function Installed({ game }: { game: string }) {
   const q = useQuery({ queryKey: ["collections", game], queryFn: () => ipc.collectionsList(game) });
   const run = useRun();
-  const notify = useUi((s) => s.notify);
   const list = q.data ?? [];
   const remove = async (slug: string, keepMods: boolean) => {
     const r = await run("Remove collection", () => ipc.collectionRemove(slug, keepMods), { key: `Collection ${slug}` });
     if (!r) return;
-    notify(r.removed ? "success" : "info", removedText(slug, r));
+    showMsg(r.removed ? "success" : "info", removedMsg(slug, r));
     if (!r.removed) return;
     // The row (and the button that had focus) goes away: keep focus in the view.
     await q.refetch();
@@ -134,7 +134,7 @@ function Installed({ game }: { game: string }) {
                     const r = await run("Update collection", () => ipc.collectionUpdate({ reference: c.slug }), {
                       key: `Collection ${c.slug}`,
                     });
-                    if (r) notify(collectionTone(r), collectionText(r));
+                    if (r) showMsg(collectionTone(r), collectionMsg(r));
                   }}
                 >
                   Update
@@ -156,7 +156,6 @@ function Installed({ game }: { game: string }) {
 
 function Lookup() {
   const run = useRun();
-  const notify = useUi((s) => s.notify);
   const [ref, setRef] = useState("");
   const [info, setInfo] = useState<CollectionInfo | null>(null);
   const [optional, setOptional] = useState<(typeof OPTIONAL)[number]["value"]>("ask");
@@ -171,7 +170,7 @@ function Lookup() {
       { key: "Install collection" },
     );
     if (!r) return;
-    notify(collectionTone(r), collectionText(r));
+    showMsg(collectionTone(r), collectionMsg(r));
     // The panel shows the installed revision now ("Install this revision").
     if (!r.cancelled) {
       const fresh = await ipc.collectionInfo(info.slug, info.game).catch(() => null);

@@ -3,6 +3,7 @@
 // and a collection's mods, so both show the same actions. Installing or removing refreshes the browse
 // and collection views.
 
+import { showMsg, type ToastMsg } from "../../app/toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { DownloadSimpleIcon, TrashIcon } from "@phosphor-icons/react";
 import { useBusy, useRun } from "../../app/run";
@@ -10,22 +11,22 @@ import { PROMPT_ANSWERED, type PromptAnsweredDetail } from "../dialogs/PromptDia
 import { useUi } from "../../app/store";
 import * as ipc from "../../ipc/commands";
 import type { InstallResult, SearchHit } from "../../ipc/types";
-import { removedText } from "../../views/Collections";
-import { uninstalledText } from "../../views/Mods";
+import { removedMsg } from "../../views/Collections";
+import { uninstalledMsg } from "../../views/Mods";
 import { installKey } from "../../views/Requirements";
 import { Button } from "../ui";
 
-export function installedText(r: InstallResult): string {
+export function installedMsg(r: InstallResult): ToastMsg {
   if (r.installed) {
     const i = r.installed;
-    return `Installed ${i.name} (${i.files} files${i.replaced ? `, replaced ${i.replaced}` : ""})`;
+    return { title: "Installed", detail: `${i.name} · ${i.files} files${i.replaced ? ` · replaced ${i.replaced}` : ""}` };
   }
   if (r.collection) {
     const c = r.collection;
-    if (c.cancelled) return `Collection ${c.slug}: cancelled`;
-    return `Collection ${c.slug}: ${c.installed} installed, ${c.present} present, ${c.failed.length} failed`;
+    if (c.cancelled) return { title: "Cancelled", detail: `Collection ${c.slug}` };
+    return { title: "Installed", detail: `Collection ${c.slug} · ${c.installed} installed · ${c.present} present · ${c.failed.length} failed` };
   }
-  return "Nothing installed";
+  return { title: "Nothing installed" };
 }
 
 /**
@@ -104,7 +105,6 @@ const once = (onAccepted?: () => void) => {
 function useRemove(game: string) {
   const run = useRun();
   const qc = useQueryClient();
-  const notify = useUi((s) => s.notify);
   const openConsent = useUi((s) => s.openLoaderConsent);
   return async (r: Removable, onAccepted?: () => void) => {
     const key = removeKey(r);
@@ -121,14 +121,14 @@ function useRemove(game: string) {
         const res = await onPicked(REMOVE_JOB.mod, accept, () => run("Uninstall", () => ipc.modsUninstall([String(r.nexusId)], false), { key }), true);
         if (!res) return;
         if (res.done) accept?.();
-        notify(res.done ? "success" : "info", uninstalledText(res, r.name));
+        showMsg(res.done ? "success" : "info", uninstalledMsg(res, r.name));
         break;
       }
       case "collection": {
         const res = await onPicked(REMOVE_JOB.collection, accept, () => run("Remove collection", () => ipc.collectionRemove(r.slug, false), { key }), true);
         if (!res) return;
         if (res.removed) accept?.();
-        notify(res.removed ? "success" : "info", removedText(r.slug, res));
+        showMsg(res.removed ? "success" : "info", removedMsg(r.slug, res));
         void qc.invalidateQueries({ queryKey: ["collections", game] });
         break;
       }
@@ -166,7 +166,6 @@ export function RemoveButton({ game, item, onAccepted }: { game: string; item: R
 export function ModActions({ game, m, onAccepted }: { game: string; m: SearchHit; onAccepted?: () => void }) {
   const run = useRun();
   const qc = useQueryClient();
-  const notify = useUi((s) => s.notify);
   const name = m.name ?? `Mod ${m.modId ?? "?"}`;
   const key = installKey(String(m.modId));
   const busy = useBusy(key);
@@ -196,7 +195,7 @@ export function ModActions({ game, m, onAccepted }: { game: string; m: SearchHit
     const r = await onPicked("install", accept, () => run("Install", () => ipc.install({ target: String(m.modId), fomod: "ask" }), { key }), false, job);
     if (!r) return;
     accept?.();
-    notify("success", installedText(r));
+    showMsg("success", installedMsg(r));
     void qc.invalidateQueries({ queryKey: ["browse", game] });
     void qc.invalidateQueries({ queryKey: ["collection-info"] });
   };

@@ -3,6 +3,7 @@
 // `app_ready` exactly once (after every listener is registered, so no
 // startup-check or forwarded nxm event is lost).
 
+import { showToast } from "./toast";
 import type { QueryClient } from "@tanstack/react-query";
 import { appReady } from "../ipc/commands";
 import { on } from "../ipc/events";
@@ -32,7 +33,8 @@ export function startBridge(qc: QueryClient): Promise<ReadyInfo | null> {
       on("vessel:deploy-progress", (e) => ui.onDeployProgress(e)),
       on("vessel:nxm", (e) => {
         ui.onNxm(e);
-        if (e.status === "rejected") ui.notify("error", `nxm link rejected: ${e.error ?? "unknown"}`);
+        if (e.status === "rejected")
+          showToast("error", "Download failed", { detail: e.error ?? "Nexus Mods refused the download link" });
         void qc.invalidateQueries({ queryKey: ["downloads"] });
       }),
       on("vessel:startup-check", (c) => ui.setStartupCheck(c)),
@@ -49,7 +51,7 @@ export function startBridge(qc: QueryClient): Promise<ReadyInfo | null> {
       noteRecovered(info.loader_recovered?.filter((r) => r.action.kind === "rollback_offered").length ?? 0);
       return info;
     } catch (e) {
-      ui.notify("error", `Backend not ready: ${errMsg(e)}`);
+      showToast("error", "Startup failed", { detail: `Vessel's backend didn't start: ${errMsg(e)} · Restart Vessel` });
       return null;
     }
   })();
@@ -61,7 +63,7 @@ let recoveredNoted = false;
 function noteRecovered(n: number): void {
   if (!n || recoveredNoted) return;
   recoveredNoted = true;
-  useUi.getState().notify("warn", "A loader install was interrupted. Open Requirements to roll it back or keep it.");
+  showToast("warn", "Install interrupted", { detail: "A loader install was interrupted · Open Requirements to roll it back or keep it" });
 }
 
 /** Test helper: forget the started bridge and drop its listeners. */

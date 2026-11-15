@@ -2,6 +2,7 @@
 // Mods: load order list (search and filters; enable, move, reinstall,
 // uninstall, details), file/plugin conflicts, updates and profiles.
 
+import { showMsg, showToast, type ToastMsg } from "../app/toast";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { errMsg } from "../app/bridge";
@@ -51,6 +52,7 @@ import {
   VIEW_FRAME,
   ViewFrame,
   bytes,
+  count,
   cx,
   when,
 } from "../components/ui";
@@ -66,7 +68,6 @@ import type {
 import { NoGame } from "../components/shell/NoGame";
 import { BulkBar, type BulkAction } from "./mods/BulkBar";
 import { MoveToPosition, type MoveSpec } from "./mods/MoveToPosition";
-import { useUninstallNotice, type UndoFocus } from "./mods/restore";
 import { useSelection } from "./mods/useSelection";
 
 // "Load order", not "Mods": the app's view bar already has a tab named Mods.
@@ -235,23 +236,6 @@ function ModList({ game }: { game: string }) {
     heading.tabIndex = -1;
     heading.focus();
   }, [refocus, mods.data]);
-  // After Undo of an uninstall: focus the restored row once the refetched list has it.
-  const [restoredTick, bumpRestored] = useState(0);
-  useEffect(() => {
-    const uid = restoreFocus;
-    if (!uid || !mods.data?.mods.some((m) => m.uid === uid)) return;
-    const row = document.querySelector<HTMLElement>(`[data-mod-details="${uid}"]`);
-    if (!row) return;
-    restoreFocus = null;
-    row.focus();
-  }, [restoredTick, mods.data]);
-  const undoFocus: UndoFocus = {
-    onUndo: holdListFocus,
-    onRestored: (uids) => {
-      restoreFocus = uids[0];
-      bumpRestored((n) => n + 1);
-    },
-  };
   const conflicts = useQuery({
     queryKey: ["conflicts", game],
     queryFn: () => ipc.conflicts(game),
@@ -269,7 +253,6 @@ function ModList({ game }: { game: string }) {
   const shownKey = shown.map((m) => m.uid).join("\n");
   const shownUids = useMemo(() => (shownKey ? shownKey.split("\n") : []), [shownKey]);
   const sel = useSelection(shownUids);
-  const uninstalled = useUninstallNotice(game, undoFocus);
   const [bulkBusy, setBulkBusy] = useState<BulkAction | null>(null);
   // Polite announcements (moves, selection counts) inside the list's status line.
   const [said, say] = useState("");
@@ -327,7 +310,7 @@ function ModList({ game }: { game: string }) {
     const r = await bulk("uninstall", () => ipc.modsUninstall(uids, false, game));
     if (!r) return;
     const one = uids.length === 1 ? list.find((m) => m.uid === uids[0])?.name : undefined;
-    uninstalled(r, uninstalledText(r, one ?? `${uids.length} mods`));
+    showMsg(r.done ? "success" : "info", uninstalledMsg(r, one ?? `${uids.length} mods`));
     if (!r.done) return;
     anchor.current = near?.uid ?? null;
     sel.clear();
@@ -548,7 +531,6 @@ function ModList({ game }: { game: string }) {
           onMove={(spec) => void move(list.find((m) => m.uid === detail.uid) ?? detail, spec)}
           game={game}
           onClose={() => setDetail(null)}
-          undoFocus={undoFocus}
           onUninstalled={(uid) => {
             const i = shown.findIndex((m) => m.uid === uid);
             const near = i < 0 ? undefined : (shown[i + 1] ?? shown[i - 1]);
@@ -702,55 +684,30 @@ function ModFilters({
 }
 
 /** The uninstall notice; names the deleted archive(s) when the confirm's "Delete archive too" was ticked. */
-export function uninstalledText(r: UninstallResult, name: string): string {
-  if (!r.done) return `${name} was not uninstalled.`;
+export function uninstalledMsg(r: UninstallResult, name: string): ToastMsg {
+  if (!r.done) return { title: "Kept", detail: `${name} was not uninstalled` };
   const n = r.archives.length;
-  if (r.mods === 1)
-    return n ? `Uninstalled ${name} and deleted its archive` : `Uninstalled ${name}`;
-  return n
-    ? `Uninstalled ${r.mods} mods and deleted ${n} ${n === 1 ? "archive" : "archives"}`
-    : `Uninstalled ${r.mods} mods`;
+  if (r.mods === 1) return { title: "Uninstalled", detail: n ? `${name} · archive deleted` : name };
+  return {
+    title: "Uninstalled",
+    detail: n ? `${r.mods} mods · ${n} ${n === 1 ? "archive" : "archives"} deleted` : `${r.mods} mods`,
+  };
 }
 
-/**
- * The profile the load flow snapshots the current mod set to before loading `source`:
- * "before-<source>", or the first "before-<source>.<n>" (n = 2, 3, ...) that is free or
- * one this flow saved. `replace`: it exists and is the flow's own, so delete it first.
- * A profile the flow did not save (`owned`) is the user's and is never picked.
- */
-export function snapshotName(
-  source: string,
-  existing: string[],
-  owned: string[],
-): { name: string; replace: boolean } {
-  const base = `before-${source}`;
-  for (let n = 1; ; n++) {
-    const name = n === 1 ? base : `${base}.${n}`;
-    if (!existing.includes(name)) return { name, replace: false };
-    if (owned.includes(name)) return { name, replace: true };
-  }
-}
-
-export function profileLoadedText(name: string, r: ProfileLoaded): string {
-  const parts = [`Loaded profile ${name}`];
+export function profileLoadedMsg(name: string, r: ProfileLoaded): ToastMsg {
+  const parts = [`Profile ${name}`];
   if (r.missing) parts.push(`${r.missing} of its mods are no longer installed`);
   if (r.added_disabled)
     parts.push(`${r.added_disabled} mods not in it were disabled`);
-  return parts.join("; ");
+  return { title: "Loaded", detail: parts.join(" · ") };
 }
 
-export function updatesInstalledText(r: UpdateReport): string {
-  if (!r.installed) return "No updates were installed.";
-  return `Installed ${r.installed} ${r.installed === 1 ? "update" : "updates"}`;
+export function updatesInstalledMsg(r: UpdateReport): ToastMsg {
+  if (!r.installed) return { title: "No updates", detail: "Nothing was installed" };
+  return { title: "Updated", detail: `${r.installed} ${r.installed === 1 ? "update" : "updates"} installed` };
 }
 
-/**
- * The restored mod whose row takes focus after Undo. Module scope, not state: the
- * Undo notice outlives the dialog and may outlive the list that offered it.
- */
-let restoreFocus: string | null = null;
-
-/** Undo was pressed and its notice is going away: hold focus on the list heading, else the Mods tab. */
+/** Focus fell out of the list (its rows went away): hold it on the list heading, else the Mods tab. */
 function holdListFocus() {
   const heading = document.querySelector<HTMLElement>("[data-mods-heading] h2");
   const target =
@@ -810,7 +767,6 @@ function ModDetailDialog({
   onMove,
   onClose,
   onUninstalled,
-  undoFocus,
 }: {
   mod: ModView;
   game: string;
@@ -822,12 +778,8 @@ function ModDetailDialog({
   onClose: () => void;
   /** The mod was uninstalled (the caller moves focus off its row). */
   onUninstalled?: (uid: string) => void;
-  /** Focus during and after Undo of the uninstall. */
-  undoFocus?: UndoFocus;
 }) {
   const run = useRun();
-  const notify = useUi((s) => s.notify);
-  const uninstalled = useUninstallNotice(game, undoFocus);
   const q = useQuery({
     queryKey: ["mod", game, mod.uid],
     queryFn: () => ipc.modDetail(mod.uid, game),
@@ -917,8 +869,7 @@ function ModDetailDialog({
               ipc.modsUninstall([mod.uid], false),
             );
             if (!r) return;
-            // Undo only for the backend's restorable entries (restore.ts).
-            uninstalled(r, uninstalledText(r, mod.name));
+            showMsg(r.done ? "success" : "info", uninstalledMsg(r, mod.name));
             if (r.done) onUninstalled?.(mod.uid);
           }}
         >
@@ -933,10 +884,9 @@ function ModDetailDialog({
                 ipc.modReinstall(mod.uid, { fomod: "ask" }),
               );
               if (r)
-                notify(
-                  "success",
-                  `Reinstalled ${r.installed.name} (${r.installed.files} files)`,
-                );
+                showToast("success", "Reinstalled", {
+                  detail: `${r.installed.name} · ${count(r.installed.files, "file")}`,
+                });
             }}
           >
             Reinstall (choose FOMOD options)
@@ -1130,7 +1080,6 @@ function Conflicts({ game }: { game: string }) {
 function Updates({ game }: { game: string }) {
   const run = useRun();
   const qc = useQueryClient();
-  const notify = useUi((s) => s.notify);
   const checking = useBusy("Check updates");
   const installing = useBusy("Install updates");
   // Kept in the query cache, so the Mods list can filter on it ("Has updates").
@@ -1172,7 +1121,7 @@ function Updates({ game }: { game: string }) {
               );
               if (!r) return;
               setReport(r);
-              notify(r.installed ? "success" : "info", updatesInstalledText(r));
+              showMsg(r.installed ? "success" : "info", updatesInstalledMsg(r));
             }}
           >
             Install updates
@@ -1249,53 +1198,14 @@ function Profiles({ game }: { game: string }) {
     queryFn: () => ipc.profilesList(game),
   });
   const run = useRun();
-  const notify = useUi((s) => s.notify);
-  const markSnapshot = useUi((s) => s.markProfileSnapshot);
   const saving = useBusy("Save profile");
   const [loading, setLoading] = useState<string | null>(null);
   const [name, setName] = useState("");
-  /**
-   * Load a profile: first save the current mod set as a snapshot profile (aborting if
-   * that fails), then load, then offer Undo, which loads the snapshot directly.
-   */
   const load = async (source: string) => {
-    let snap = "";
     setLoading(source);
-    const r = await run(
-      "Load profile",
-      async () => {
-        const existing = (await ipc.profilesList(game)).map((p) => p.name);
-        const owned = useUi.getState().modsUi.snapshots[game] ?? [];
-        const pick = snapshotName(source, existing, owned);
-        snap = pick.name;
-        // save_profile would ask "Overwrite profile?": replace the flow's own snapshot without asking.
-        if (pick.replace) await ipc.profileDelete(snap, game);
-        if ((await ipc.profileSave(snap, game)) === null)
-          throw {
-            message: `couldn't save the current mod set as ${snap}, so ${source} was not loaded`,
-          };
-        markSnapshot(game, snap, true);
-        return ipc.profileLoad(source, game);
-      },
-      { key: "Load profile" },
-    );
+    const r = await run("Load profile", () => ipc.profileLoad(source, game), { key: "Load profile" });
     setLoading(null);
-    if (!r) return;
-    notify("success", profileLoadedText(source, r), game, {
-      label: "Undo",
-      onAction: () => void undo(snap, source),
-    });
-  };
-  /** Undo a load: load the snapshot itself (no new snapshot). Focus stays in the profiles list. */
-  const undo = async (snap: string, source: string) => {
-    document
-      .querySelector<HTMLElement>(`[data-profile-load="${snap}"]`)
-      ?.focus();
-    const r = await run("Undo profile load", () => ipc.profileLoad(snap, game), {
-      key: "Load profile",
-    });
-    if (r)
-      notify("success", `Restored the mod set from before loading ${source}`);
+    if (r) showMsg("success", profileLoadedMsg(source, r));
   };
   // Validation shows from the first blur (or submit) on, then follows the typing.
   const [touched, setTouched] = useState(false);
@@ -1323,13 +1233,8 @@ function Profiles({ game }: { game: string }) {
             // undefined = failed (error notice shown), null = overwrite declined: keep the name either way.
             if (r === undefined) return;
             if (r === null)
-              return notify("info", `Profile ${n} was not overwritten.`);
-            // Saved by the user: theirs now, even if the load flow made a snapshot of that name.
-            markSnapshot(game, n, false);
-            notify(
-              "success",
-              `Saved profile ${n} (${r} ${r === 1 ? "mod" : "mods"})`,
-            );
+              return showToast("info", "Kept", { detail: `Profile ${n} was not overwritten` });
+            showToast("success", "Saved", { detail: `Profile ${n} · ${r} ${r === 1 ? "mod" : "mods"}` });
             setName("");
             setTouched(false);
           }}
@@ -1398,8 +1303,7 @@ function Profiles({ game }: { game: string }) {
                     );
                     // undefined = failed (the error notice is shown).
                     if (r === undefined) return;
-                    markSnapshot(game, p.name, false);
-                    notify("success", `Deleted profile ${p.name}`);
+                    showToast("success", "Deleted", { detail: `Profile ${p.name}` });
                   }}
                 >
                   {armed === p.name ? "Press again to delete" : "Delete"}

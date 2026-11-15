@@ -1,117 +1,92 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ACTION_NOTICE_TTL, MAX_JOBS, resetUi, useUi } from "./store";
+import { MAX_JOBS, TOAST_MIN_DWELL_MS, resetUi, useUi } from "./store";
 
-const texts = () => useUi.getState().notices.map((n) => n.text);
+const texts = () => [useUi.getState().toast].flatMap((x) => (x ? [x] : [])).map((n) => n.text);
 
 describe("notices (T16 F5)", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    useUi.setState({ notices: [] });
+    resetUi();
   });
   afterEach(() => vi.useRealTimers());
+  const D = TOAST_MIN_DWELL_MS;
 
   it("collapses a repeated notice instead of stacking it", () => {
-    useUi.getState().notify("warn", "Changes are not in the game yet.", "g");
-    useUi.getState().notify("warn", "Changes are not in the game yet.", "g");
-    expect(texts()).toEqual(["Changes are not in the game yet."]);
+    useUi.getState().showToast("warn", "Not deployed", { detail: "Changes are not in the game yet." });
+    vi.advanceTimersByTime(D);
+    useUi.getState().showToast("warn", "Not deployed", { detail: "Changes are not in the game yet." });
+    expect(texts()).toEqual(["Not deployed"]);
   });
 
-  it("keeps at most 3 notices", () => {
-    for (const t of ["a", "b", "c", "d"]) useUi.getState().notify("error", t);
-    expect(texts()).toEqual(["b", "c", "d"]);
+  // Fails when the store keeps several shown notices again: there is one shown toast; waiting writes show
+  // one after another, in arrival order.
+  it("holds one shown notice; rapid writes show in order", () => {
+    for (const t of ["a", "b", "c", "d"]) useUi.getState().showToast("error", t);
+    const seen = [texts()[0]];
+    for (let i = 0; i < 3; i++) {
+      vi.advanceTimersByTime(D);
+      seen.push(texts()[0]);
+    }
+    expect(seen).toEqual(["a", "b", "c", "d"]);
   });
 
-  it("auto-dismisses info/success after 6 s and warn after 10 s", () => {
-    useUi.getState().notify("success", "Deployed");
-    useUi.getState().notify("info", "fyi");
-    useUi.getState().notify("warn", "careful");
-    vi.advanceTimersByTime(6_001);
-    expect(texts()).toEqual(["careful"]);
-    vi.advanceTimersByTime(4_000);
+  // Fails when a TTL changes, or the replacing notice keeps the old one's tone timing.
+  it("auto-dismisses info/success after 6 s and warn/error after 10 s, by the shown notice's tone", () => {
+    useUi.getState().showToast("success", "Deployed");
+    vi.advanceTimersByTime(5_999);
+    expect(texts()).toEqual(["Deployed"]);
+    vi.advanceTimersByTime(1);
+    expect(texts()).toEqual([]);
+    useUi.getState().showToast("info", "fyi");
+    vi.advanceTimersByTime(D);
+    useUi.getState().showToast("error", "boom");
+    vi.advanceTimersByTime(9_999);
+    expect(texts()).toEqual(["boom"]);
+    vi.advanceTimersByTime(1);
     expect(texts()).toEqual([]);
   });
 
-  it("closes errors and deploy notices after their timeout too", () => {
-    useUi.getState().notify("error", "boom");
-    useUi.getState().notify("warn", "deploy?", "g");
-    vi.advanceTimersByTime(9_999);
-    expect(texts()).toEqual(["boom", "deploy?"]);
+  // Fails when the replaced notice's timer still runs and closes the newer one early.
+  it("a stale timer never closes the newer notice", () => {
+    useUi.getState().showToast("info", "first");
+    const firstId = useUi.getState().toast!.id;
+    vi.advanceTimersByTime(5_000);
+    useUi.getState().showToast("warn", "second");
+    // The first notice's 6 s mark passes: the second (10 s from its own start) stays.
+    vi.advanceTimersByTime(1_500);
+    expect(texts()).toEqual(["second"]);
+    // A late dismiss for the replaced id is a no-op.
+    useUi.getState().closeToast(firstId);
+    expect(texts()).toEqual(["second"]);
+    vi.advanceTimersByTime(8_499);
+    expect(texts()).toEqual(["second"]);
     vi.advanceTimersByTime(1);
     expect(texts()).toEqual([]);
   });
 
   // Fails when the replaced duplicate's timer dismisses the new one early.
   it("a repeated notice gets a fresh timeout", () => {
-    useUi.getState().notify("info", "again");
+    useUi.getState().showToast("info", "again");
     vi.advanceTimersByTime(5_000);
-    useUi.getState().notify("info", "again");
+    useUi.getState().showToast("info", "again");
     vi.advanceTimersByTime(5_000);
     expect(texts()).toEqual(["again"]);
   });
 });
 
-describe("notice actions (T03)", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    useUi.setState({ notices: [] });
-  });
-  afterEach(() => vi.useRealTimers());
-  const only = () => useUi.getState().notices[0]!;
+describe("notices are informational only (T05)", () => {
+  beforeEach(() => resetUi());
 
-  // Fails when an action notice with a game is turned into a "Deploy now" one, or loses its game scope.
-  it("keeps the action and game, and offers no Deploy now", () => {
-    const onAction = vi.fn();
-    useUi.getState().notify("success", "Uninstalled SkyUI", "g", { label: "Undo", onAction });
-    expect(only()).toMatchObject({ game: "g", action: { label: "Undo" } });
-    expect(only().deploy).toBeUndefined();
+  // Fails when a notice carries a control again (an action, a Deploy now flag or a game scope for one).
+  it("hold only tone and text", () => {
+    useUi.getState().showToast("success", "Uninstalled SkyUI");
+    const n = [useUi.getState().toast].flatMap((x) => (x ? [x] : []))[0]!;
+    expect(n).toEqual({ id: n.id, tone: "success", text: "Uninstalled SkyUI" });
+    const api = useUi.getState() as unknown as Record<string, unknown>;
+    expect(api.runNoticeAction).toBeUndefined();
+    expect(api.holdNotice).toBeUndefined();
   });
-
-  // Fails when the existing deploy notice shape changes (no action, deploy flag set).
-  it("leaves deploy notices as they were", () => {
-    useUi.getState().notify("warn", "Changes are not in the game yet.", "g");
-    expect(only()).toEqual({ id: only().id, tone: "warn", text: "Changes are not in the game yet.", deploy: true, game: "g" });
-  });
-
-  // Fails when using the action does not dismiss first, runs twice, or does not call the handler.
-  it("runNoticeAction dismisses the notice, then calls the action once", () => {
-    const seen: number[] = [];
-    const onAction = vi.fn(() => seen.push(useUi.getState().notices.length));
-    useUi.getState().notify("info", "Removed", undefined, { label: "Undo", onAction });
-    const id = only().id;
-    useUi.getState().runNoticeAction(id);
-    useUi.getState().runNoticeAction(id);
-    expect(onAction).toHaveBeenCalledTimes(1);
-    expect(seen).toEqual([0]);
-    expect(texts()).toEqual([]);
-  });
-
-  // Fails when an Undo toast closes at the 6 s info TTL, before a pad user can reach it.
-  it("stays up for ACTION_NOTICE_TTL, then closes without calling the action", () => {
-    const onAction = vi.fn();
-    useUi.getState().notify("info", "Removed", undefined, { label: "Undo", onAction });
-    vi.advanceTimersByTime(ACTION_NOTICE_TTL - 1);
-    expect(texts()).toEqual(["Removed"]);
-    vi.advanceTimersByTime(1);
-    expect(texts()).toEqual([]);
-    expect(onAction).not.toHaveBeenCalled();
-  });
-
-  // Fails when the timer dismisses a notice that has focus (focus would drop out from under the user).
-  it("waits while held and restarts the full TTL on release", () => {
-    useUi.getState().notify("info", "Removed", undefined, { label: "Undo", onAction: () => {} });
-    const id = only().id;
-    vi.advanceTimersByTime(ACTION_NOTICE_TTL - 1000);
-    useUi.getState().holdNotice(id, true);
-    vi.advanceTimersByTime(ACTION_NOTICE_TTL * 3);
-    expect(texts()).toEqual(["Removed"]);
-    useUi.getState().holdNotice(id, false);
-    vi.advanceTimersByTime(ACTION_NOTICE_TTL - 1);
-    expect(texts()).toEqual(["Removed"]);
-    vi.advanceTimersByTime(1);
-    expect(texts()).toEqual([]);
-  });
-
 });
 
 describe("CT2 per-game deploy-due state (D02/D04)", () => {
@@ -124,16 +99,13 @@ describe("CT2 per-game deploy-due state (D02/D04)", () => {
     expect(useUi.getState().deployDue.b).toBeUndefined();
   });
 
-  // D04: fails when a deploy of game B clears game A's pending state or its Deploy-now notice.
-  it("a deploy clears only its own game and notices", () => {
+  // D04: fails when a deploy of game B clears game A's pending state.
+  it("a deploy clears only its own game", () => {
     const ui = useUi.getState();
     ui.markDeployDue("a");
     ui.markDeployDue("b");
-    ui.notify("warn", "Changes are not in the game yet.", "a");
-    ui.notify("warn", "Changes are not in the game yet.", "b");
     useUi.getState().clearDeployDue("b");
     expect(Object.keys(useUi.getState().deployDue)).toEqual(["a"]);
-    expect(useUi.getState().notices.map((n) => n.game)).toEqual(["a"]);
   });
 
   // D04: fails when a deploy that started before a change clears the change's pending state.
@@ -174,6 +146,10 @@ describe("CT2 jobs and prompts (D08/D15)", () => {
     ui.onJob({ id: 70, kind: "install", state: "failed", error: "network went away" });
     expect(useUi.getState().prompts.map((p) => p.id)).toEqual([8]);
     await Promise.resolve();
-    expect(texts()).toEqual(["A question from job #70 closed: the job ended."]);
+    // The job's own outcome shows first (arrival order); the closed-question notice follows after its dwell.
+    expect(texts()).toEqual(["Install failed"]);
+    await new Promise((r) => setTimeout(r, TOAST_MIN_DWELL_MS + 20));
+    expect(texts()).toEqual(["Question closed"]);
+    expect(useUi.getState().toast?.detail).toBe("Job #70 ended, so its question was closed");
   });
 });

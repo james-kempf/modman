@@ -59,3 +59,8 @@ export function ago(ts: number | null | undefined, now = Date.now()): string {
   if (h < 48) return `${h} h ago`;
   return `${Math.round(h / 24)} days ago`;
 }
+
+/** "1 mod", "3 mods": a count with its noun in the matching number (regular plurals unless `many` is given). */
+export function count(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
+}

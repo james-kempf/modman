@@ -178,7 +178,7 @@ Failures and notes:
 
 Line heights: the size tokens carry no line height, so text inherits Tailwind's 1.5. Overrides: `leading-none` (display), `leading-tight` (headings), `leading-snug` (muted notes), `leading-relaxed` (1.625: helper, intros, subtitles). Mono logs use 1.7 (see Drift).
 
-Tabular numbers: there is no `tabular-nums` usage yet **(gap)**. Use `tabular-nums` on numbers that change in place or line up in columns: pager counts, sizes, progress, the job island counter.
+Tabular numbers: there is no `tabular-nums` usage yet **(gap)**. Use `tabular-nums` on numbers that change in place or line up in columns: pager counts, sizes, progress, the toast's deploy n/total.
 
 ---
 
@@ -205,14 +205,14 @@ Controls are fully round; containers are rounded rectangles on a 4px grid. A pil
 
 | Token | Value | Use |
 |---|---|---|
-| `rounded-pill` | 9999px | **every control**: buttons of all sizes (a circle on the square `icon` size), inputs and select triggers, select options, tabs, segmented track and segments, toggle hit box and track, badges, `PILL` chips, kbd glyphs, the account avatar (a circle), dots, counters, progress, job island |
+| `rounded-pill` | 9999px | **every control**: buttons of all sizes (a circle on the square `icon` size), inputs and select triggers, select options, tabs, segmented track and segments, toggle hit box and track, badges, `PILL` chips, kbd glyphs, the account avatar (a circle), dots, counters, progress, the toast (`TOAST_SHELL`) |
 | `rounded-inset` | 4px | a picture or skeleton bone inset in a padded tile; checkboxes (square, so they stay distinct from round radios) |
 | `rounded-inner` | 8px | blocks inside a card or dialog: list rows (`LIST_ROW`), `Thumb`, notes, dialog pictures, game posters, collection art |
 | `rounded-card` | 12px | cards (`CARD_SHELL`), wells (`TILE`), dialogs, notices/toasts, error notes, option cards, code blocks |
 | `rounded-card-lg` | 16px | activatable media tiles (`CARD_TILE`) |
 | `rounded-menu` | 26px (`control-sm / 2 + 4px`) | the select list: concentric with its 44px pill options at `p-1` (off the 4px grid by design) |
 
-Assumption (pill restyle, 2026-11): controls move to fully round; containers keep rounded-rectangle radii snapped to 4/8/12/16. A short, control-like container is judged case by case: the job island is a pill (one line, fixed `min-h-14`, status only); notices stay `rounded-card` because their text wraps to several lines.
+Assumption (pill restyle, 2026-11): controls move to fully round; containers keep rounded-rectangle radii snapped to 4/8/12/16. A short, control-like container is judged case by case: every toast is the job-island pill (`TOAST_SHELL`, `h-control`, the Quit button's height), notices included (one truncated line). The old `rounded-card` notice is retired (2026-11).
 
 Nest radii: inner radius = outer radius − padding; when that is off the scale, the inner element takes the next step down. Segmented is a `rounded-pill` track (`p-1`) around `rounded-pill` segments: a pill minus the padding is still a pill, so the corners are exactly concentric; the toggle's pill hit box (48px, `px-2.5`) holds its 28px pill track the same way. The select list is the reverse case: a rectangle holding pills, so its radius is the option's half height plus the list padding (`rounded-menu`). A picture inside an activatable card (`CARD_TILE`, 16px with `p-3`) is `rounded-inset`: 16 − 12 = 4, exactly concentric. A game poster (`CARD_TILE` with `p-2`) is `rounded-inner`: 16 − 8 = 8. A picture in a dialog body (Browse details) is `rounded-inner`, one step below the dialog's `rounded-card`. Pills inside a container that do not sit at its inset edge (buttons in a card or dialog footer) need no concentric radius. Components use no raw `rounded-sm..3xl/full` and no `rounded-control*` (retired).
 
@@ -233,7 +233,7 @@ Depth comes from surface steps plus a hairline border. Shadows are used only for
 | 0 sunken/page | `bg-ink` | `border-hairline` (wells) | page, `TILE`, `.input`, `PILL` |
 | 1 surface | `bg-ink-2` | `border-hairline` | `CARD_SHELL`, pager toolbar |
 | 2 raised | `bg-ink-3` | n/a | focused input |
-| 3 overlay | `.glass` = `bg-surface-overlay` + `backdrop-blur-xl` + `border-line-strong` + `--shadow-overlay` (`0 20px 50px -20px rgb(0 0 0 / .7)`) | `border-line-strong` | Dialog, Select list, Notice, JobIsland |
+| 3 overlay | `.glass` = `bg-surface-overlay` + `backdrop-blur-xl` + `border-line-strong` + `--shadow-overlay` (`0 20px 50px -20px rgb(0 0 0 / .7)`) | `border-line-strong` | Dialog, Select list, Notice (the toast) |
 
 ### z-index scale
 
@@ -241,7 +241,6 @@ Depth comes from surface steps plus a hairline border. Shadows are used only for
 |---|---|---|
 | 10 | sticky in-flow toolbars | Browse pager (`views/Browse.tsx`) |
 | 30 | dropdown/listbox | `Select` list |
-| 40 | bottom stack: toasts and job island | `App.tsx` notices layer |
 | 50 | modal + scrim | `Dialog` (portal on `<body>`) |
 | 60 | film grain (non-interactive) | `body::after` |
 
@@ -282,7 +281,21 @@ Hit area: icon buttons are `size-control` (48px). Any icon control is at least `
 | 400 | `--transition-duration-large` **(gap)** | 400ms | unused |
 | 500 | `--transition-duration-xl` **(gap)** | 500ms | unused |
 
-- Animations: `animate-rise` (view and list entrance, 4px), `animate-fade` (scrim), `animate-pop` (dialog, 16px + scale .97), `animate-island` (toasts and job island, 24px, 240ms), `animate-breathe` (live status dot, 2.8s loop), `animate-bar` (job bars, 0.9s loop).
+- Animations: `animate-rise` (view and list entrance, 4px), `animate-fade` (scrim; the toast disc on a tone change), `animate-pop` (dialog, 16px + scale .97), `animate-breathe` (live status dot, 2.8s loop), `animate-bar` (job bars, 0.9s loop).
+- Toast motion tokens (T11; `index.css` `@theme`, on the duration scale above):
+
+| Token | Value | Use |
+|---|---|---|
+| `--animate-toast-open` | `toast-open` `slow` (300ms) `--ease-spring`, fill `backwards` | the slot goes from empty to a toast: the disc fades in as a 48px circle at the pill's left edge (first 30%), then a `clip-path: inset(... round)` reveal widens it left→right to the full pill. Clip only, so text never squishes; no fill after the end, so the glass shadow is not clipped. |
+| `--animate-toast-close` | `toast-close` `fast` (150ms) `ease-in`, fill `forwards` | the toast closes: the reverse collapse right→left back to the disc circle while it fades out (exit ~half the entrance). `TOAST_CLOSE_MS` = 150 keeps the closing copy (aria-hidden) mounted for exactly this long. |
+| `--animate-toast-in` | `toast-in` `fast` (150ms) `ease-out` | a write while a toast is open: the new text and detail rise in from below (translateY 100% → 0, opacity 0 → 1) inside the clipped text column. |
+| `--animate-toast-out` | `toast-out` `fast` (150ms) `ease-in`, fill `forwards` | the outgoing copy (aria-hidden) moves up and out (0 → −100%, opacity 1 → 0) at the same time. |
+
+  - `toast-min-dwell` = 300ms (`TOAST_MIN_DWELL_MS`, `app/store.ts`; T12, raised to 300 in T13): every message stays on screen at least this long before the next one replaces it. Timing, not motion, so reduced motion keeps it. Counted from when the message is shown (for the first message: from mount, while the open reveal runs; the reveal is also 300ms, so it is fully open when the dwell ends and the text is readable through most of it).
+  - 150ms is under the 300ms dwell, so a cycle ends before the next message can show. Live (persistent) toasts (T16) never cycle on a progress update: under the same key the text changes in place with no motion; they cycle once when they take the slot back.
+  - The disc fades in (`animate-fade`, 120ms) when its tone or busy state changes. The tint itself snaps: the project's transition policy (`html[data-input] *`) allows only transform and opacity to transition.
+  - The pill is `w-full max-w-xl` of the slot, so its width does not change between messages and there is nothing to tween.
+  - Reduced motion: the global rule makes every toast animation instant (no clip reveal, no slide) and `TOAST_CLOSE_MS` drops to 0, so the toast swaps and closes at once.
 - Stagger: `.stagger` children delay by `--stagger-step` (15ms), capped at 7 steps. Browse's results grid uses it.
 - Loading delay: a load replaces what is on screen with skeletons only after 300ms (the `slow` step, `SKELETON_DELAY_MS` in `views/Browse.tsx`). Until then the previous content stays up at `opacity-stale`, `inert`.
 - Press: `active:translate-y-px active:scale-98` on buttons, `active:scale-98` on tabs. Activatable cards (`CARD_TILE`) use `translate-y-px scale-99`: at 98 a ~300px card's edges would move ~3px. Transform only, so nothing reflows; under reduced motion the press applies without the transition, like buttons.
@@ -308,7 +321,7 @@ Controls are sized for gamepad and touch as well as the mouse.
 | `--spacing-dot` | 10px | status dot |
 | Card section / `Row` | 16px padding | settings rows |
 | `LIST_ROW` | `px-3 py-2.5` | free-standing rows |
-| Toast / island | `min-h-14` (56px) | Notice, JobIsland |
+| Toast | `h-control` (48px), the app bar's Quit height; results and running jobs alike | Notice (`TOAST_SHELL`) |
 
 ---
 
@@ -381,7 +394,6 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 - Full width, equal width: the tablist fills the bar (`flex-1 min-w-0` beside the LB/RB glyphs in a `w-full` row with no `gap-*`) as a `grid grid-flow-col auto-cols-[1fr]`, one equal column per tab. Not `auto-cols-fr`: Tailwind's is `minmax(0,1fr)` and lets a long label spill out of its cell; `1fr` keeps each column at least its label's min-content. When the equal share is narrower than the longest label (the 8 view tabs at a 1024 window: a 944px list less 7 × 8px gaps leaves 111px a share, against Overview's 109px, Collections' 120px and Requirements' 137px), Collections and Requirements keep their min-content width and the other six share the rest (Overview 109px, the other five 104.4px), so the row still fits. All eight become equal once the list reaches 8 × 137 + 7 × 8 = 1152px (a 1232px window); at 1280 they are equal (143px). Under gamepad input the LB/RB glyphs (32px each, plus 8px to the list) take 80px: the min-content row (885px) then needs a 1045px window, so at 1024 the view list (864px) scrolls 21px sideways (focus scrolls the tab into view); at the 1280 Deck size it fits (1120px list, 132.4px tabs, Requirements 137px).
 - Adornment spacing: the 8px between a glyph and the list belongs to the adornment, not the row: the start wrapper carries `pad:me-2`, the end wrapper `pad:ms-2`. The glyphs are `hidden pad:inline-flex`, so outside gamepad mode the wrappers are 0px with no margin and the list starts at the bar edge; never put `gap-*` on the bar row.
 - Placement: the bar has no side padding; it takes its container's inset, the same one as the header above it. The view bar sits inside the app `<header>` under row 1, and the header carries the side padding (`px-6 lg:px-10`) for both rows, so the tabs line up with the brand and Quit. Dialog tabs sit in the dialog body, inside the panel's `p-5 sm:p-7`, the same inset as the title.
-- Count badge in a tab (the Activity counter): `min-w-4 px-1 leading-4 text-center text-micro`, a 16px circle for one digit and a pill for more, with about 4px of space around the glyph on every side.
 - No track: the tablist has no fill or padding, only `gap-2` (8px) between pills. The selected pill and its focus ring (`inset-0`, `ring-inset`) share the tab's `rounded-pill` box, so they span the whole equal-width tab and the ring stays inside the pill.
 - Selected: `text-accent-200` on a `bg-accent-400/15` pill (scale .95 to 1 plus opacity, 250ms spring).
 - Selected + highlighted: accent-700 text and a `ring-2 ring-accent-600` inset ring.
@@ -430,22 +442,27 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 
 ### Notice / toast (`feedback/Notice.tsx`)
 
-- `.glass rounded-card min-h-14 px-4 py-2 animate-island` in the bottom stack (`z-40`).
-- Tones and borders: info `white/10`, success `accent-400/25`, warn `amber-400/30`, error `rose-400/40`. Duotone icon 18.
-- Timed close, so there is no dismiss button. `role=alert` for errors, `status` otherwise. One optional action.
-- API: `notify(tone, text, game?, action?)` in `app/store.ts`. `game` alone gives the "Deploy now" notice for that game (unchanged). `action: { label, onAction }` gives one `Button size="sm"` (default tone) in place of "Deploy now"; with a `game` the notice is still shown only for that game. TTLs: info and success 6s, warn and error 10s, action notices `ACTION_NOTICE_TTL` = 15s (at least).
-- The action never takes focus when the notice appears (it is announced through the live region); it is a normal Tab and D-pad stop in the bottom stack. Using it dismisses the notice first, then runs `onAction` once (`runNoticeAction`). While focus is inside an action notice its timer waits (`holdNotice`), and it restarts in full when focus leaves, so the button never vanishes under the user. If it closes anyway, focus recovery puts focus on the nearest control.
+- Copy (T15, `app/toastText.ts`): every toast is a short generic title + a specific detail. Title: 1-2 words, no game name, no counts, no item names, no colon. Its vocabulary: a past-tense verb when done ("Deployed", "Uninstalled", "Saved", "Copied", "Rolled back"), an -ing verb while running ("Deploying", "Installing"; per job kind in `JOB_TITLES`, fallback "Working"/"Finished"), "<Label> failed" / "<Label> cancelled" for a one-word command label, else "Failed" / "Cancelled" with the label leading the detail (`failedMsg`, `cancelledMsg`), and a short state otherwise ("Already current", "No changes", "Nothing deployed", "Paste blocked", "Key active"). Detail: the names, counts (`count(n, noun)`, joined with " · "), reasons, backend errors as-is and next steps ("· see Activity", "· Deploy to apply"). The active game's name is never repeated (the app bar shows it); another game's name leads the detail. Enforced across the whole test suite (`test/setup.ts`) and over every builder, job kind, command label and literal title (`app/toastText.test.ts`). Audit: `docs/plan/20261114-remove-page-titles/toast-audit.md`.
 
-#### Undo toast
+- Informational only: a toast says what the app did or is doing and closes on its own. No controls (no action, no Undo, no Deploy now, no close button) and no focus stop; nothing to reach with Tab or the D-pad.
+- Shape: the job-island pill fitted to the bar, `TOAST_SHELL` = `glass pointer-events-auto relative flex h-control w-full max-w-xl items-center gap-3 overflow-hidden rounded-pill py-1 pr-5 pl-1.5 @max-3xs:pr-1.5` plus exactly one motion class, `TOAST_OPEN` or `TOAST_CLOSE` (guarded in `Notice.test.tsx`). Changed from the 56px island (T05) only to fit the bar: `min-h-14` → `h-control` (exactly Quit's height, so the bar never grows), `py-2` → `py-1` (title + detail lines fit 40px), `pl-2.5` → `pl-1.5` (the 36px disc stays concentric: (48 − 36) / 2 = 6px), plus `@max-3xs:pr-1.5` (disc-only circle). Glass, radius, gap, disc and text are the island's; the motion is the toast's own (§8 toast motion tokens).
+- Parts: `TOAST_DISC` (`size-9` pill) with a tone tint and a size-17 bold glyph; `TOAST_TEXT` column (`@max-3xs:sr-only`) with the `TOAST_TITLE` line (`text-[13.5px] font-medium text-zinc-100 truncate`). No count: there is only ever one toast.
+- Height and alignment: the pill and Quit share `h-control` (`--spacing-control`, 48px), both direct grid items of row 1 (`items-center`), so their top and bottom edges match. The bar is the same height with no toast, a notice or the job pill.
+- Placement: the app bar's toast slot (`ToastSlot` in `App.tsx`), row 1 between the game name and the account, centred in the free space. Row 1 is a grid `auto auto minmax(0,max-content) minmax(var(--spacing-control),1fr) auto auto`: brand, divider, game (name `max-w-64`, truncates), slot (never under one control width, kept even when empty), account (`col-start-5`), Quit (`col-start-6`). Nothing overlaps: every column is bounded and the pill is `w-full max-w-xl` of the slot.
+- Narrow widths: the toast never leaves row 1. The slot is an `@container`; the pill shrinks with it and truncates, and below `@3xs` (16rem) it closes to its disc (text and count `sr-only`, still announced; the full text in the pill's `title`).
+- One source: results, errors and running jobs all write the same toast (app/toast.ts); there is no separate job pill and no priority. Running work shows as the busy disc (accent tint, 3 `animate-bar` rails) with the job's label and a `detail` line (latest output, `deploying n/total`). The toast is the only live indicator of running work: the Activity tab has no counter (T09) and there is no progress bar beside the game name (T17); deploy progress shows as the live toast's "n / total files".
+- There is no bottom stack: `<main>` keeps `pb-10` (= side padding) at all times.
+- One toast, arrival order, minimum dwell (T12): the store holds a single shown `toast` (`{ id, tone, text, detail?, busy? } | null`). A `showToast` replaces it at once if it has been up for `TOAST_MIN_DWELL_MS` (300ms) and nothing is waiting; otherwise the write waits in a FIFO and shows when the current one's 300ms is up, each waiting message then getting its own 300ms. Nothing is skipped, except that a job's progress lines merge (below). The auto-close timer (tone TTL) starts when a message is shown, not when it was written; `closeToast(id)` ignores any id that is not the one showing, so a stale timer or a late close never drops a waiting message.
+- Live toasts (T16; `showProgress(key, tone, title, opts)` / `endProgress(key, outcome?)` in `app/toast.ts`): for ongoing processes. Every running job is one (key `job:<id>`): its start, output lines, deploy `n / total files` and download bytes (`<file> · <done> / <total>` from the `vessel:download` started/progress events) update it in place at once: no cycle, no dwell, no TTL, no throttle (the 250 ms throttle is gone: an in-place text swap is readable, and the store write is one small set per event). It stays until its process completes, fails or is cancelled; then `endProgress` puts the outcome in its place as a normal transient toast (dwell, TTL, cycle). A deploy's success writes no generic outcome (T14): the frozen live pill closes on a normal TTL unless the command's "Deployed" result replaces it.
+- Transients vs live: a transient (any `showToast`) takes the slot from a live toast (normal cycle and dwell) and keeps it for its TTL, queued transients after it (FIFO, dwell). The live toast returns when the last transient closes, showing its latest state (updates while hidden are applied to its one slot, never queued), with one cycle. A running live toast cannot be closed by `closeToast`.
+- Concurrent live toasts: the most recently started one shows, its detail ending in "· +n running" for the others; when it ends, the next most recent returns (after its outcome's TTL). There is no FIFO backlog cap any more: the cap only ever dropped progress updates, and progress no longer enters the FIFO.
+- In place: the toast renders without a React key, so each write swaps the content of the same pill (text, detail, disc, `status`/`alert` role, `aria-busy`) and the `aria-live="polite"` region announces it. `animate-toast-open` plays only when the slot goes from empty to a toast; later writes cycle the text inside (`animate-toast-in` / `animate-toast-out`, the outgoing copy `aria-hidden` so it is never announced twice), and closing plays `animate-toast-close` (§8).
+- Live region: the slot is `<aside aria-label="Notices" aria-live="polite">`, always mounted; `role=alert` for errors, `status` otherwise.
+- Tones (disc tint + glyph, never colour alone; the edge stays the glass border): info `bg-white/8` Info, success `bg-accent-400/15` Check, warn `bg-amber-400/15` Warning, error `bg-rose-400/15` WarningCircle.
+- API (`app/toast.ts`): `showToast(tone, text, opts?: { detail?, busy? }): number` (plain function: components, hooks, store actions, IPC/event handlers), `useToast()` to read it, `closeToast(id)`. Example: `showToast("success", "Uninstalled SkyUI")`. TTLs (`TOAST_TTL`): info and success 6s, warn and error 10s, counted from the latest write.
+- Job writer (store `onJob` / `onActivity` / `onDeployProgress` / `onDownload`; titles per T15): start shows the job's live toast, "<-ing>" (e.g. "Installing") + "<Label>" (busy); each output line, deploy progress or download progress updates it in place ("<-ing>" + the line, "n / total files" or "<file> · <done> / <total>"); the outcome ends it: success "<past>" (e.g. "Purged") + "<Label>" (not for `deploy`: its command already reports "Deployed" · "N files · M mods…", T14), info "<Label> cancelled" / "Cancelled", error "<Label> failed" / "Failed" + "[<Label> · ]<error> · see Activity". Transients show in arrival order: a command's own result that arrives before the outcome shows first, then the outcome (e.g. "Uninstalled" · "SkyUI" then "Uninstalled" · "Uninstall mods").
+- No Undo: results of destructive actions (uninstall, bulk uninstall, profile load) are reported as plain text ("Uninstalled SkyUI", "Loaded profile Survival"). Uninstall keeps the backend's danger confirm (with "Delete archive too"); profile load has no confirm and no snapshot.
 
-- After a destructive action that can be reversed (uninstall, profile load), show a success notice that says what happened, with `action: { label: "Undo", onAction }`: "Uninstalled SkyUI" + Undo, "Loaded profile Survival" + Undo.
-- Offer Undo only when it can really undo. For uninstall that is the backend's `restorable` flag on each `UninstallResult.restore[]` entry; the frontend never re-derives it from archives. Undo calls `modRestore(tokens)` with the opaque tokens of the restorable entries. A ticked "Delete archive too" makes the entry not restorable, so that uninstall gets a plain notice with no Undo.
-- The result of Undo is its own notice: one success notice ("Restored SkyUI" / "Restored 3 mods"), and for failures an error notice naming the mod and the reason (archive missing, conflict, expired, install failed). The list refetches either way.
-- One failed mod keeps its own sentence ("Couldn't restore SkyUI: its archive is no longer in the downloads folder."). Several failures (a bulk Undo) share ONE error notice that lists each mod with a short reason: "Couldn't restore 3 mods: A (archive missing), B (conflict), C (expired)." The stack holds only `MAX_NOTICES` = 3, so one notice per mod would push out the rest of the outcome.
-
-### JobIsland (`feedback/JobIsland.tsx`)
-
-- `.glass rounded-pill min-h-14 max-w-xl`. A `size-9` status disc (running: accent tint with 3 `animate-bar` rails; failed: rose; cancelled: `white/8`). Title and detail line, `+n` queued. Status only, not focusable.
 
 ### ErrorNote (`feedback/ErrorNote.tsx`)
 
@@ -459,12 +476,12 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 - For an irreversible or costly action the backend sends a confirm prompt with `title`, `yes_label`, `no_label`, `danger: true` and optionally `option` (a checkbox label). The answer carries `{ yes, option_checked }`. All new fields are optional; a plain confirm renders as before ("Confirm", No / Yes).
 - Title is the question as a heading: "Uninstall SkyUI?" (one mod), "Uninstall 3 mods?" (several). The buttons name the outcome: yes "Uninstall SkyUI" / "Uninstall 3 mods", no "Keep mod" / "Keep mods". Never "Yes"/"OK" on a danger confirm.
 - Yes uses the `danger` Button tone; No is `default`. Focus starts on No ("Keep mod"), whatever `default_yes` says (that stays the CLI and Headless default), so a stray A or Enter keeps the mod.
-- Option: "Delete archive too", a pad-focusable checkbox, unchecked by default (opt-in). Unticked keeps the downloaded archive, which is what makes Undo possible; ticked deletes it and the result has no Undo.
+- Option: "Delete archive too", a pad-focusable checkbox, unchecked by default (opt-in). Unticked keeps the downloaded archive (the mod can be reinstalled from Downloads); ticked deletes it.
 - While the answer is sent every button is `busy` (`aria-busy` + `aria-disabled`, focus stays on the pressed one), never native `disabled`.
 
 ### Bulk selection bar (Mods load order, `views/mods/BulkBar.tsx`, `useSelection.ts`)
 
-- Each row has a checkbox-style select control as its own focus stop, left of the enable Toggle, named "Select <mod>". No range or Shift selection. `useSelection(ids)` holds the set: ids that leave the list are dropped on that render and stay dropped if they come back (an Undo does not reselect), and `list` gives the selection in list order for the bulk call.
+- Each row has a checkbox-style select control as its own focus stop, left of the enable Toggle, named "Select <mod>". No range or Shift selection. `useSelection(ids)` holds the set: ids that leave the list are dropped on that render and stay dropped if they come back (a mod that reappears is not reselected), and `list` gives the selection in list order for the bulk call.
 - When one or more rows are selected, a `role=region` bar labelled "Selected mods" sticks to the bottom of the list card (`sticky bottom-[calc(var(--main-pb,0px)*-1)] z-10`, `bg-ink-2 border-t border-hairline px-section py-3`, like the pagination toolbar; edge-to-edge margins come from the caller): the count ("3 selected", `text-label text-zinc-300 tabular-nums`, `mr-auto`), then `Button size="sm"` Enable, Disable, Uninstall (`danger` tone, goes through the danger confirm) and Clear (`ghost`), `gap-2`, wrapping when narrow. It renders nothing when the selection is empty.
 - B / Escape does not clear the selection (B is Back); Clear does. When the bar hides, focus returns to the row it came from (the select control of the row last toggled; after a bulk uninstall, the first remaining row after the removed ones, else before them), never to `<body>`. A polite announcement in the list's `role=status` line says "N selected" / "Selection cleared". While an action runs it is `busy` (spinner) and the other three are `inactive`; all stay focusable.
 
@@ -541,7 +558,7 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 
 | Found | Count | Where | Snap to |
 |---|---|---|---|
-| `text-[13.5px]` | 12 | App.tsx, Notice, JobIsland, Overview, Mods, Collections | `text-body` (14) |
+| `text-[13.5px]` | 12 | App.tsx, Notice, Overview, Mods, Collections | `text-body` (14) |
 | `text-[12.5px]` | 10 | Activity, GameRepair, Settings, Overview, Mods | `text-label` (13) |
 | `text-[11.5px]` | 8 | Activity, Mods, Settings (Tile fixed) | `text-caption` (12) |
 | `text-[14.5px]` | 5 | Activity, Mods, Collections | `text-body` (14) |
@@ -551,7 +568,7 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 | `duration-[250ms]` | 1 | Tabs highlight pill | `duration-base` (200) or `duration-slow` (300) |
 | `ease-[cubic-bezier(0.16,1,0.3,1)]` | 1 | Tabs | `ease-spring` (same curve, tokenized) |
 | `duration-150` (raw) | 2 | various (`CARD_TILE`'s `duration-200` fixed) | `duration-fast` |
-| `animate-island` 240ms, `animate-rise` 140ms, `animate-fade` 120ms | n/a | `@theme` | 200 / 100 / 100 on the motion scale |
+| `animate-rise` 140ms, `animate-fade` 120ms | n/a | `@theme` | 100 / 100 on the motion scale |
 | Icon `size={13}` | 1 | Requirements (BrowseDetails mod tile stats fixed) | 12 |
 | Icon `size={15}` | 16 | Select check, Games, dialogs (Browse pager fixed) | 16 |
 | Icon `size={17}` / `{19}` | 5 / 2 | various | 16 / 20 |
@@ -559,6 +576,6 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 | Half-step spacing `*-0.5/1.5/2.5/3.5` | 20 / 21 / 14 / 10 | throughout (e.g. `px-3.5`, `p-2.5`, `mt-1.5`; Games tile `pb-3.5` (its `p-2.5` snapped to `p-2` in the pill pass), Browse tiles moved to `p-3 pb-4` and their text inset to `px-1`) | nearest 4px step; `px-3.5` on `sm` buttons is kept for the 1024px filter row (`.input` snapped to `px-4`) |
 | `--radius-menu` 26px | 1 | Select list | keep: off the 4px grid by design (44px pill option / 2 + `p-1`), so the list stays concentric with its options |
 | `--spacing-rail: 3px` | n/a | job bars | 4 (or keep as a hairline exception) |
-| `border-white/5`, `/6`, `/8`, `/10`, `/15`, `bg-white/8` | 5, 1, 1, 1, 1, 1 | App header, GameRepair, Settings, Notice, JobIsland | `border-hairline` (5%), `border-line` (8%), `border-line-strong` (10%), `bg-fill-3` |
+| `border-white/5`, `/6`, `/8`, `/10`, `/15`, `bg-white/8` | 5, 1, 1, 1, 1, 1 | App header, GameRepair, Settings, Notice | `border-hairline` (5%), `border-line` (8%), `border-line-strong` (10%), `bg-fill-3` |
 | `text-emerald-300`, `text-sky-300` | 4, 5 | `rich/bbcode.tsx` colour map | `text-accent-300`; sky has no token (BBCode content colour, acceptable) |
 | Primitive neutrals in components (`text-zinc-400`, `text-zinc-300`, `text-zinc-100`) | n/a | throughout (Browse tiles moved to `text-fg` / `text-fg-2`) | `text-fg` (zinc-100), `text-fg-2` (zinc-400); zinc-300 has no alias yet |

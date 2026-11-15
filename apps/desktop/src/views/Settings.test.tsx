@@ -112,7 +112,7 @@ describe("API key entry", () => {
     act(() => useUi.getState().setView("settings"));
     const field = await screen.findByLabelText("Nexus API key");
     await user.click(screen.getByRole("button", { name: "Paste" }));
-    await screen.findByText(/Clipboard not readable/);
+    await screen.findByText(/Can't read the clipboard here/);
     expect(document.activeElement).toBe(field);
   });
 });

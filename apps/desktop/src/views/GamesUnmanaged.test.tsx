@@ -33,13 +33,14 @@ async function setupArt() {
 }
 
 /** A backend whose game_add manages the detected game, as the real one does. */
-async function view(detected: Detected[], games: GameView[] = [game()]) {
+async function view(detected: Detected[], games: GameView[] = [game()], hold?: Promise<void>) {
   let current = games;
   const env = await setup(
     {
       games_list: () => current,
       games_detect: () => detected.map((d) => ({ ...d, configured: d.configured || current.some((g) => g.id === d.domain) })),
-      game_add: (a) => {
+      game_add: async (a) => {
+        await hold;
         const { domain } = a as { domain: string };
         const d = detected.find((x) => x.domain === domain)!;
         const g = experimentalGame({ id: domain, name: d.name, active: false });
@@ -94,8 +95,13 @@ describe("unmanaged games grid", () => {
 
   // Fails when a double activation adds twice.
   it("a double click adds once", async () => {
-    const { t, user } = await view([found()]);
+    // The add is still in flight on the second click, as with the real backend (the instant mock would
+    // otherwise finish between the two clicks and only render timing would decide the outcome).
+    let release!: () => void;
+    const hold = new Promise<void>((r) => (release = r));
+    const { t, user } = await view([found()], [game()], hold);
     await user.dblClick(within(await unmanaged()).getByRole("button", { name: "Add Fallout 4" }));
+    act(() => release());
     await waitFor(() => expect(libraryNames()).toContain("Fallout 4"));
     expect(t.callsOf("game_add")).toHaveLength(1);
   });

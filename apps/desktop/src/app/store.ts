@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // UI state (Zustand): current view, live job/activity/prompt state fed by
-// backend events, notices and the on-screen keyboard target. Server data
+// backend events, the one toast and the on-screen keyboard target. Server data
 // lives in TanStack Query, not here.
 
 import { create } from "zustand";
+import { jobLabel, jobOutcome } from "./jobs";
+import { cancelledMsg, failedMsg, jobDoneTitle, jobRunningTitle } from "./toastText";
+import { bytes } from "../components/ui/format";
 import type {
   ActivityEvent,
   DeployProgressEvent,
@@ -49,21 +52,28 @@ export interface DownloadEntry {
   total: number | null;
 }
 
-export type NoticeTone = "info" | "success" | "warn" | "error";
-export interface Notice {
+export type ToastTone = "info" | "success" | "warn" | "error";
+/**
+ * The one toast: informational only (no controls), closes on its own after its tone's TOAST_TTL. Every writer
+ * (components, hooks, store actions, IPC/event handlers, job progress) replaces it through `showToast`.
+ */
+export interface Toast {
   id: number;
-  tone: NoticeTone;
+  tone: ToastTone;
   text: string;
-  /** Offer a "Deploy now" button. */
-  deploy?: boolean;
-  /** The game (id) a "Deploy now" notice is about: shown and acted on only for it. */
-  game?: string;
-  /** A one-off action button (e.g. Undo) in place of "Deploy now". */
-  action?: NoticeAction;
+  /** A second, quieter line (a job's latest output, "deploying 3/10", an error). */
+  detail?: string;
+  /** Work in progress (a running job): the disc shows the animated rails instead of a tone glyph. */
+  busy?: boolean;
+  /**
+   * A live (persistent) toast's key: it updates in place (no cycle, no dwell, no TTL) until its process ends
+   * (`endProgress`). Absent on ordinary (transient) toasts.
+   */
+  persist?: string;
 }
-export interface NoticeAction {
-  label: string;
-  onAction(): void;
+export interface ToastOpts {
+  detail?: string;
+  busy?: boolean;
 }
 
 /**
@@ -133,25 +143,33 @@ export interface ModsUi {
   tab: ModsTab;
   /** The load order's search and filters, per game (collection slugs belong to one game). */
   filters: Record<string, ModFilter>;
-  /**
-   * Per game: the "before-<name>" profiles the profile-load flow saved itself. Only these
-   * are replaced by a later snapshot; any other profile of that name is the user's.
-   */
-  snapshots: Record<string, string[]>;
 }
-const modsUiDefaults = (): ModsUi => ({ tab: "list", filters: {}, snapshots: {} });
+const modsUiDefaults = (): ModsUi => ({ tab: "list", filters: {} });
 
 const MAX_ACTIVITY = 500;
 /** Jobs kept for Activity; past this the oldest finished ones are dropped. */
 export const MAX_JOBS = 200;
-const MAX_NOTICES = 3;
-/** Auto-dismiss after (ms); every notice closes on its own, "Deploy now" ones included. */
-const NOTICE_TTL: Record<NoticeTone, number> = { info: 6000, success: 6000, warn: 10000, error: 10000 };
-/** A notice with an action (Undo) stays at least this long: time to reach it with D-pad or Tab. */
-export const ACTION_NOTICE_TTL = 15000;
-/** Pending auto-dismiss timers, and the notices focus is in (their timer waits until focus leaves). */
-const noticeTimers = new Map<number, ReturnType<typeof setTimeout>>();
-const heldNotices = new Set<number>();
+/** Auto-close after (ms), counted from the latest write. */
+export const TOAST_TTL: Record<ToastTone, number> = { info: 6000, success: 6000, warn: 10000, error: 10000 };
+/** The one auto-close timer: it belongs to the current toast and is replaced with it. */
+let toastTimer: ReturnType<typeof setTimeout> | undefined;
+/** DESIGN.md `toast-min-dwell`: a shown message stays at least this long before the next replaces it. */
+export const TOAST_MIN_DWELL_MS = 300;
+/** Transient writes waiting for the shown message's dwell (FIFO, arrival order). Live toasts never enter it. */
+const pending: Toast[] = [];
+/** When the shown toast went up, and the timer that shows the next waiting one after its dwell. */
+let shownAt = 0;
+let dwellTimer: ReturnType<typeof setTimeout> | undefined;
+/**
+ * Live (persistent) toasts by key, in start order: the most recently started one is shown (when no transient
+ * holds the slot); the others wait, counted as "+n running" in its detail. One slot per key: an update replaces
+ * the entry's content, so updates received while hidden are applied, never queued.
+ */
+interface Live {
+  order: number;
+  toast: Toast;
+}
+const live = new Map<string, Live>();
 
 export interface UiState {
   view: ViewId;
@@ -171,11 +189,8 @@ export interface UiState {
   downloads: Record<string, DownloadEntry>;
   onDownload(job: number | null, name: string, ev: DownloadProgress): void;
 
-  deployProgress: DeployProgressEvent | null;
+  /** Deploy progress goes to the deploy job's live toast (the only progress indicator). */
   onDeployProgress(e: DeployProgressEvent): void;
-  /** The game a deploy started from the UI runs for (null: none, or started elsewhere). */
-  deployGame: string | null;
-  setDeployGame(game: string | null): void;
 
   nxm: NxmEvent[];
   onNxm(e: NxmEvent): void;
@@ -184,17 +199,16 @@ export interface UiState {
   startupCheck: StartupCheck | null | undefined;
   setStartupCheck(c: StartupCheck | null): void;
 
-  notices: Notice[];
-  /**
-   * `game`: the notice belongs to that game (id) and, without `action`, offers "Deploy now".
-   * `action`: one button (e.g. Undo); using it dismisses the notice, then calls `onAction`.
-   */
-  notify(tone: NoticeTone, text: string, game?: string, action?: NoticeAction): void;
-  dismiss(id: number): void;
-  /** Use a notice's action: dismiss it, then run the action. */
-  runNoticeAction(id: number): void;
-  /** Focus entered (true) or left (false) a notice: its auto-dismiss waits, then restarts in full. */
-  holdNotice(id: number, held: boolean): void;
+  /** The one toast (no queue, no second source). Read it with `useToast()`, write it with `showToast()` (app/toast.ts). */
+  toast: Toast | null;
+  /** Replace the toast at once and restart its auto-close timer with the tone's TOAST_TTL. Returns the new id. */
+  showToast(tone: ToastTone, text: string, opts?: ToastOpts): number;
+  /** Close toast `id` if it is still the current one (its timeout calls this; a replaced id is a no-op). */
+  closeToast(id: number): void;
+  /** Start or update the live toast `key` (in place while shown; applied silently while hidden). */
+  showProgress(key: string, tone: ToastTone, text: string, opts?: ToastOpts): void;
+  /** End the live toast `key`; `outcome` (a normal transient toast) takes its place. */
+  endProgress(key: string, outcome?: { tone: ToastTone; text: string; opts?: ToastOpts }): void;
 
   /**
    * Per game (id): a mod-set change left it out of sync with staging,
@@ -240,11 +254,6 @@ export interface UiState {
   modsUi: ModsUi;
   setModsTab(tab: ModsTab): void;
   setModsFilter(game: string, filter: ModFilter): void;
-  /**
-   * owned: the load flow saved this snapshot profile. Not owned: the user saved or deleted a
-   * profile of that name, so it is theirs and is never replaced.
-   */
-  markProfileSnapshot(game: string, name: string, owned: boolean): void;
 }
 
 /** A game found in Steam with no preset: its name and install folder. */
@@ -261,11 +270,9 @@ const initial = {
   activity: [],
   prompts: [],
   downloads: {},
-  deployProgress: null,
-  deployGame: null,
   nxm: [],
   startupCheck: undefined,
-  notices: [],
+  toast: null,
   deployDue: {},
   busy: {},
   loaderConsents: [],
@@ -288,7 +295,7 @@ export const useUi = create<UiState>()((set, get) => ({
     return view;
   },
 
-  onJob: (e) =>
+  onJob: (e) => {
     set((s) => {
       const prev = s.jobs[e.id];
       const now = Date.now();
@@ -302,30 +309,37 @@ export const useUi = create<UiState>()((set, get) => ({
       };
       const patch: Partial<UiState> = { jobs: capJobs({ ...s.jobs, [e.id]: entry }) };
       if (e.state !== "started") {
-        if (s.deployProgress?.job === e.id) patch.deployProgress = null;
         // A question from a job that ended can no longer be answered: withdraw it.
         const orphans = s.prompts.filter((p) => p.job === e.id);
         if (orphans.length) {
           patch.prompts = s.prompts.filter((p) => p.job !== e.id);
           queueMicrotask(() =>
-            get().notify("info", `${orphans.length === 1 ? "A question" : "Questions"} from job #${e.id} closed: the job ended.`),
+            get().showToast("info", "Question closed", {
+              detail: `Job #${e.id} ended, so ${orphans.length === 1 ? "its question was" : "its questions were"} closed`,
+            }),
           );
         }
       }
       return patch;
-    }),
+    });
+    // The job's own toast (start or outcome), from the job entry just stored.
+    jobToast(e.id, get);
+  },
 
-  onActivity: (e) =>
+  onActivity: (e) => {
     set((s) => {
       const next = [...s.activity, { ...e, seq: ++seq, at: Date.now() }];
       return { activity: next.length > MAX_ACTIVITY ? next.slice(-MAX_ACTIVITY) : next };
-    }),
+    });
+    const line = e.text.trim();
+    if (e.job !== null && line) jobProgress(e.job, line, get);
+  },
 
   onPrompt: (e) =>
     set((s) => (s.prompts.some((p) => p.id === e.id) ? s : { prompts: [...s.prompts, e] })),
   dropPrompt: (id) => set((s) => ({ prompts: s.prompts.filter((p) => p.id !== id) })),
 
-  onDownload: (job, name, ev) =>
+  onDownload: (job, name, ev) => {
     set((s) => {
       const prev = s.downloads[name];
       let done = prev?.done ?? 0;
@@ -341,74 +355,71 @@ export const useUi = create<UiState>()((set, get) => ({
         total = ev.size;
       }
       return { downloads: { ...s.downloads, [name]: { name, job, last: ev, done, total } } };
-    }),
+    });
+    // The download's job shows it live: name and bytes so far (of the total when known).
+    const d = get().downloads[name];
+    if (job !== null && d && (ev.type === "started" || ev.type === "progress"))
+      jobProgress(job, `${name} · ${bytes(d.done)}${d.total ? ` / ${bytes(d.total)}` : ""}`, get);
+  },
 
-  onDeployProgress: (e) => set({ deployProgress: e }),
-  setDeployGame: (deployGame) => set({ deployGame }),
+  onDeployProgress: (e) => {
+    if (e.job !== null) jobProgress(e.job, `${e.done} / ${e.total} files`, get);
+  },
 
   onNxm: (e) => set((s) => ({ nxm: [e, ...s.nxm].slice(0, 50) })),
 
   setStartupCheck: (c) => set({ startupCheck: c }),
 
-  notify: (tone, text, game, action) => {
-    const id = ++seq;
-    const deploy = game !== undefined && !action;
-    const notice: Notice = deploy ? { id, tone, text, deploy, game } : { id, tone, text };
-    if (action) {
-      notice.action = action;
-      if (game !== undefined) notice.game = game;
-    }
-    set((s) => ({
-      // The same notice again replaces the old one (moved to the end, fresh timeout) instead of stacking.
-      notices: [...s.notices.filter((n) => !(n.tone === tone && n.text === text && n.game === game)), notice].slice(
-        -MAX_NOTICES,
-      ),
-    }));
-    // Drop the timers of notices that were replaced or pushed out.
-    const live = new Set(get().notices.map((n) => n.id));
-    for (const [old, t] of noticeTimers) {
-      if (live.has(old)) continue;
-      clearTimeout(t);
-      noticeTimers.delete(old);
-      heldNotices.delete(old);
-    }
-    armNotice(id, action ? Math.max(ACTION_NOTICE_TTL, NOTICE_TTL[tone]) : NOTICE_TTL[tone], get);
+  showToast: (tone, text, opts = {}) => writeToast(makeToast(tone, text, opts)),
+  closeToast: (id) => {
+    const shown = get().toast;
+    // Only the shown toast: a stale id (replaced, or still waiting) never closes or drops anything; a running
+    // live toast closes only through endProgress.
+    if (shown?.id !== id || (shown.persist && live.has(shown.persist))) return;
+    clearTimeout(toastTimer);
+    toastTimer = undefined;
+    // Next: a waiting transient (its predecessor is gone), else the live toast returns, else nothing.
+    if (pending.length) {
+      clearTimeout(dwellTimer);
+      dwellTimer = undefined;
+      displayToast(pending.shift()!);
+      scheduleNext();
+    } else if (live.size) displayLive();
+    else set({ toast: null });
   },
-  dismiss: (id) => {
-    clearTimeout(noticeTimers.get(id));
-    noticeTimers.delete(id);
-    heldNotices.delete(id);
-    set((s) => ({ notices: s.notices.filter((n) => n.id !== id) }));
+  showProgress: (key, tone, text, opts = {}) => {
+    const prev = live.get(key);
+    const toast = makeToast(tone, text, opts, prev?.toast.id);
+    toast.persist = key;
+    live.set(key, { order: prev?.order ?? ++seq, toast });
+    refreshLive();
   },
-  runNoticeAction: (id) => {
-    const action = get().notices.find((n) => n.id === id)?.action;
-    if (!action) return;
-    get().dismiss(id);
-    action.onAction();
-  },
-  holdNotice: (id, held) => {
-    const notice = get().notices.find((n) => n.id === id);
-    if (!notice) return;
-    if (held) {
-      heldNotices.add(id);
-      clearTimeout(noticeTimers.get(id));
-      noticeTimers.delete(id);
-    } else if (heldNotices.delete(id)) {
-      const ttl = NOTICE_TTL[notice.tone];
-      armNotice(id, notice.action ? Math.max(ACTION_NOTICE_TTL, ttl) : ttl, get);
+  endProgress: (key, outcome) => {
+    const was = live.delete(key);
+    const shown = get().toast;
+    // The outcome is written even if the process was never live (e.g. its start event was missed).
+    if (outcome) writeToast(makeToast(outcome.tone, outcome.text, outcome.opts));
+    if (!was) return;
+    if (shown?.persist !== key || get().toast !== shown) {
+      // Hidden, or already replaced by its outcome: just refresh the shown live toast's "+n running".
+      refreshLive();
+      return;
     }
+    // Still showing the ended process (its outcome waits for the dwell, or there is none): the next live toast
+    // takes over if nothing waits; else the frozen pill closes on a normal TTL unless the outcome replaces it.
+    if (!pending.length && live.size) displayLive();
+    else if (!pending.length) toastTimer = setTimeout(() => get().closeToast(shown.id), TOAST_TTL[shown.tone]);
   },
 
   markDeployDue: (game) => set((s) => ({ deployDue: { ...s.deployDue, [game]: ++seq } })),
   clearDeployDue: (game, since) =>
     set((s) => {
       const at = s.deployDue[game];
-      // Changed again while the deploy ran: still due, keep its notice.
+      // Changed again while the deploy ran: still due.
       if (at !== undefined && since !== undefined && at > since) return s;
       const deployDue = { ...s.deployDue };
       delete deployDue[game];
-      // A "Deploy now" notice for this game would offer a deploy that is no longer due.
-      return { deployDue, notices: s.notices.filter((n) => !(n.deploy && n.game === game)) };
+      return { deployDue };
     }),
   stamp: () => ++seq,
 
@@ -446,25 +457,9 @@ export const useUi = create<UiState>()((set, get) => ({
   setModsTab: (tab) => set((s) => ({ modsUi: { ...s.modsUi, tab } })),
   setModsFilter: (game, filter) =>
     set((s) => ({ modsUi: { ...s.modsUi, filters: { ...s.modsUi.filters, [game]: filter } } })),
-  markProfileSnapshot: (game, name, owned) =>
-    set((s) => {
-      const have = s.modsUi.snapshots[game] ?? [];
-      if (have.includes(name) === owned) return s;
-      const next = owned ? [...have, name] : have.filter((n) => n !== name);
-      return { modsUi: { ...s.modsUi, snapshots: { ...s.modsUi.snapshots, [game]: next } } };
-    }),
 }));
 
 /** Drop the oldest finished jobs past MAX_JOBS (running ones always stay). */
-/** (Re)start a notice's auto-dismiss timer. */
-function armNotice(id: number, ms: number, get: () => UiState): void {
-  clearTimeout(noticeTimers.get(id));
-  noticeTimers.set(
-    id,
-    setTimeout(() => get().dismiss(id), ms),
-  );
-}
-
 function capJobs(jobs: Record<number, JobEntry>): Record<number, JobEntry> {
   const ids = Object.keys(jobs).map(Number);
   if (ids.length <= MAX_JOBS) return jobs;
@@ -479,5 +474,128 @@ function capJobs(jobs: Record<number, JobEntry>): Record<number, JobEntry> {
 
 /** Test helper: back to the initial state. */
 export function resetUi(): void {
+  clearTimeout(toastTimer);
+  clearTimeout(dwellTimer);
+  dwellTimer = undefined;
+  pending.length = 0;
+  live.clear();
+  shownAt = 0;
   useUi.setState({ ...initial, modsUi: modsUiDefaults() });
+}
+
+/** A job's live toast key. */
+const jobKey = (job: number) => `job:${job}`;
+
+/** A job's toast: live while it runs (start, then progress in place), then its outcome as a normal toast. */
+function jobToast(job: number, get: () => UiState): void {
+  const j = get().jobs[job];
+  if (!j) return;
+  const label = jobLabel(j.kind);
+  if (j.state === "started") {
+    get().showProgress(jobKey(job), "info", jobRunningTitle(j.kind), { detail: label, busy: true });
+    return;
+  }
+  // Messages show in arrival order: the outcome takes the job's live toast's place like any other write.
+  const outcome = jobOutcome(j);
+  if (outcome === "finished") {
+    // A deploy's success is reported once, by its command (useDeploy: "Deployed" · "N files · M mods…"), which
+    // says more than the generic "Deployed" · "Deploy". Its failure and cancellation still come from here.
+    get().endProgress(
+      jobKey(job),
+      j.kind === "deploy" ? undefined : { tone: "success", text: jobDoneTitle(j.kind), opts: { detail: label } },
+    );
+  } else if (outcome === "cancelled") {
+    const m = cancelledMsg(label);
+    get().endProgress(jobKey(job), { tone: "info", text: m.title, opts: m.detail ? { detail: m.detail } : {} });
+  } else {
+    const m = failedMsg(label, `${j.error ? `${j.error} · ` : ""}see Activity`);
+    get().endProgress(jobKey(job), { tone: "error", text: m.title, opts: { detail: m.detail } });
+  }
+}
+
+/** A running job's progress (output line, deploy n/total, download bytes): its live toast, updated in place. */
+function jobProgress(job: number, detail: string, get: () => UiState): void {
+  const j = get().jobs[job];
+  if (!j || j.state !== "started") return;
+  get().showProgress(jobKey(job), "info", jobRunningTitle(j.kind), { detail, busy: true });
+}
+
+function makeToast(tone: ToastTone, text: string, opts: ToastOpts = {}, id = ++seq): Toast {
+  const toast: Toast = { id, tone, text };
+  if (opts.detail) toast.detail = opts.detail;
+  if (opts.busy) toast.busy = true;
+  return toast;
+}
+
+/**
+ * A transient write: show it now if the shown toast has had its TOAST_MIN_DWELL_MS and nothing is waiting,
+ * else queue it (FIFO, arrival order). It takes the slot from a live toast too (which returns later).
+ */
+function writeToast(toast: Toast): number {
+  const ui = useUi.getState();
+  const dwelt = !ui.toast || Date.now() - shownAt >= TOAST_MIN_DWELL_MS;
+  if (dwelt && !pending.length) {
+    displayToast(toast);
+    return toast.id;
+  }
+  pending.push(toast);
+  scheduleNext();
+  return toast.id;
+}
+
+/** Show a transient `toast` now: it replaces the shown one, and its auto-close (tone TTL) counts from now. */
+function displayToast(toast: Toast): void {
+  clearTimeout(toastTimer);
+  shownAt = Date.now();
+  useUi.setState({ toast });
+  toastTimer = setTimeout(() => useUi.getState().closeToast(toast.id), TOAST_TTL[toast.tone]);
+}
+
+/** The live toast to show: the most recently started, with "+n running" for the others. */
+function liveView(): Toast | null {
+  let top: Live | undefined;
+  for (const l of live.values()) if (!top || l.order > top.order) top = l;
+  if (!top) return null;
+  const n = live.size - 1;
+  if (!n) return top.toast;
+  const more = `+${n} running`;
+  return { ...top.toast, detail: top.toast.detail ? `${top.toast.detail} · ${more}` : more };
+}
+
+/** Show the live toast now (no TTL: it stays until its process ends). */
+function displayLive(): void {
+  const t = liveView();
+  if (!t) return;
+  clearTimeout(toastTimer);
+  toastTimer = undefined;
+  shownAt = Date.now();
+  useUi.setState({ toast: t });
+}
+
+/** A live toast changed: update it in place if it is the shown one, show it if the slot is free. */
+function refreshLive(): void {
+  const shown = useUi.getState().toast;
+  const t = liveView();
+  if (!t) return;
+  if (!shown) {
+    if (!pending.length) displayLive();
+  } else if (shown.persist && live.has(shown.persist)) {
+    // In place: same key, no new dwell (shownAt unchanged); a newer process takes over the slot.
+    if (shown.persist === t.persist) useUi.setState({ toast: t });
+    else displayLive();
+  }
+  // A transient holds the slot: the live toast returns, with its latest content, when the transients are done.
+}
+
+/** Show the next waiting toast when the shown one's dwell is up (one timer at a time). */
+function scheduleNext(): void {
+  if (dwellTimer || !pending.length) return;
+  const wait = Math.max(0, shownAt + TOAST_MIN_DWELL_MS - Date.now());
+  dwellTimer = setTimeout(() => {
+    dwellTimer = undefined;
+    const next = pending.shift();
+    if (!next) return;
+    displayToast(next);
+    scheduleNext();
+  }, wait);
 }

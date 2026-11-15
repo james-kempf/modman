@@ -271,16 +271,23 @@ describe("Settings controls per kind", () => {
 });
 
 describe("bottom padding", () => {
-  // Fails when the view's bottom padding differs from its side padding, or notices may cover controls again.
-  it("equals the side padding, and grows with the notice stack", async () => {
+  // Fails when the view's bottom padding differs from its side padding, or notices / the job island (now in the
+  // app bar) still reserve bottom room.
+  it("equals the side padding, with or without notices and the job island", async () => {
     await open("settings");
     const m = main();
     const inner = m.firstElementChild as HTMLElement;
     expect(inner.className).toMatch(/\bpx-10\b/);
     expect(m.className).toMatch(/\bpb-10\b/);
-    act(() => useUi.getState().notify("info", "hello"));
-    await waitFor(() => expect(m.className).toMatch(/\bpb-28\b/));
-    expect(m.className).toMatch(/\bscroll-pb-60\b/);
+    act(() => useUi.getState().showToast("info", "hello"));
+    expect(m.className).toMatch(/\bpb-10\b/);
+    act(() => {
+      useUi.getState().closeToast([useUi.getState().toast].flatMap((x) => (x ? [x] : []))[0].id);
+      useUi.getState().onJob({ id: 1, kind: "enable", state: "started", error: null });
+    });
+    expect(await screen.findByRole("status", { name: /^Updating/ })).toBeInTheDocument();
+    expect(m.className).toMatch(/\bpb-10\b/);
+    expect(m.className).toMatch(/\bscroll-pb-32\b/);
   });
 });
 

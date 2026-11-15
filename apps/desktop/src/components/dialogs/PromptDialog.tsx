@@ -4,6 +4,7 @@
 // `vessel:prompt-closed` withdraws one. The fomod_group dialog is the
 // FOMOD installer wizard (one group per step, re-asked with an error).
 
+import { failedMsg, showMsg } from "../../app/toast";
 import { useState, type ReactNode } from "react";
 import { errMsg } from "../../app/bridge";
 import { useUi } from "../../app/store";
@@ -30,7 +31,6 @@ export function PromptHost() {
 
 function PromptDialog({ event }: { event: PromptEvent }) {
   const drop = useUi((s) => s.dropPrompt);
-  const notify = useUi((s) => s.notify);
   const [sending, setSending] = useState(false);
 
   const answer = async (a: Answer) => {
@@ -40,7 +40,7 @@ function PromptDialog({ event }: { event: PromptEvent }) {
       await promptAnswer(event.id, a);
       document.dispatchEvent(new CustomEvent<PromptAnsweredDetail>(PROMPT_ANSWERED, { detail: { job: event.job, answer: a } }));
     } catch (e) {
-      notify("error", `Answer not delivered: ${errMsg(e)}`);
+      showMsg("error", failedMsg("Answer", `Couldn't send your answer: ${errMsg(e)}`));
     } finally {
       // Gone either way: answered, or the backend no longer waits for it.
       drop(event.id);

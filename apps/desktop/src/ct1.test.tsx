@@ -247,8 +247,9 @@ describe("CT1 D06 per-game results", () => {
     };
   };
 
-  // Fails when Verify, Collections lookup or Browse results survive a game switch.
-  it("Verify, lookup and browse results reset when the active game changes", async () => {
+  // Fails when Verify writes its result inline again (it goes to the toast), or Collections lookup or Browse
+  // results survive a game switch.
+  it("Verify reports in the toast; lookup and browse results reset when the active game changes", async () => {
     const g = two();
     const { user, qc } = await open("overview", {
       games_list: g.list,
@@ -273,10 +274,10 @@ describe("CT1 D06 per-game results", () => {
       await act(() => qc.invalidateQueries());
     };
     await user.click(await screen.findByRole("button", { name: "Verify" }));
-    expect(await screen.findByText(/20 files intact/)).toBeInTheDocument();
+    await waitFor(() => expect(useUi.getState().toast).toMatchObject({ tone: "success", text: "Verified", detail: "20 files · all intact" }));
+    expect(within(main()).queryByText(/files intact|all intact/)).toBeNull();
     await flip("cyberpunk2077");
     await within(main()).findByRole("heading", { level: 2, name: "Cyberpunk 2077" });
-    expect(screen.queryByText(/20 files intact/)).toBeNull();
 
     act(() => useUi.getState().setView("browse"));
     expect(await screen.findByText("Hit cyberpunk2077")).toBeInTheDocument();
@@ -295,20 +296,18 @@ describe("CT1 D06 per-game results", () => {
   });
 });
 
-describe("CT1 D07 deploy-due notice", () => {
-  // Fails when a "Deploy now" notice stays after a deploy made elsewhere.
-  it("is dismissed when a deploy succeeds", async () => {
+describe("CT1 D07 deploy-due state", () => {
+  // Fails when the deploy-due state outlives a successful deploy, or the deploy result toast is lost.
+  it("is cleared when a deploy succeeds", async () => {
     const { user } = await open("overview", {
       deploy: () => ({ dry_run: false, method: "auto", mods: 1, skipped: [], conflicts: [], placed: 3, backed_up: 0, new_dirs: 0, by_method: {}, purged: null, recovered: null, plugins: null }),
     });
     act(() => {
       useUi.getState().markDeployDue("skyrimspecialedition");
-      useUi.getState().notify("warn", "Changes are not in the game yet.", "skyrimspecialedition");
     });
-    expect(useUi.getState().notices.some((n) => n.deploy)).toBe(true);
     await user.click(await within(main()).findByRole("button", { name: "Deploy" }));
-    await waitFor(() => expect(useUi.getState().notices.some((n) => n.deploy)).toBe(false));
-    expect(useUi.getState().notices.map((n) => n.text)).toContain("Skyrim Special Edition: Deployed 3 files from 1 mods");
+    await waitFor(() => expect(useUi.getState().deployDue.skyrimspecialedition).toBeUndefined());
+    expect(useUi.getState().toast).toMatchObject({ text: "Deployed", detail: "3 files · 1 mod" });
   });
 });
 
@@ -439,7 +438,7 @@ describe("CT1 D13 profile save failure", () => {
     const field = screen.getByLabelText("Save the current mod set as");
     await user.type(field, "evening");
     await user.click(screen.getByRole("button", { name: "Save profile" }));
-    expect(await screen.findByText(/Save profile: disk full/)).toBeInTheDocument();
+    expect(await screen.findByText(/Save profile · disk full/)).toBeInTheDocument();
     expect(field).toHaveValue("evening");
   });
 });
@@ -472,13 +471,14 @@ describe("CT1 D16/D17 job labels and cancellation", () => {
     act(() => {
       t.emit("vessel:job", { id: 7, kind: "game_add", state: "started", error: null });
     });
-    expect(await screen.findByRole("status", { name: "Current job" })).toHaveTextContent("Add game");
+    const toast = await screen.findByRole("status", { name: /^Adding game/ });
     act(() => t.emit("vessel:job", { id: 7, kind: "game_add", state: "failed", error: "FOMOD installer cancelled" }));
-    const island = screen.getByRole("status", { name: "Current job" });
-    expect(island).toHaveTextContent("Cancelled");
-    expect(island).not.toHaveTextContent("Failed");
+    // The same pill, now the neutral outcome (role status, not alert).
+    await waitFor(() => expect(toast).toHaveTextContent("CancelledAdd game"));
+    expect(toast).toHaveAttribute("role", "status");
+    expect(toast).not.toHaveTextContent(/failed/i);
     await user.click(await within(main()).findByRole("button", { name: "Install" }));
-    await waitFor(() => expect(useUi.getState().notices.map((n) => [n.tone, n.text])).toContainEqual(["info", "Install cancelled."]));
+    await waitFor(() => expect([useUi.getState().toast].flatMap((x) => (x ? [x] : [])).map((n) => [n.tone, n.text])).toContainEqual(["info", "Install cancelled"]));
     expect(screen.queryByRole("alert")).toBeNull();
     act(() => useUi.getState().setView("activity"));
     const jobs = await screen.findByRole("list", { name: "Jobs" });
@@ -495,7 +495,7 @@ describe("CT1 D19 purge result", () => {
     });
     await user.click(await screen.findByRole("button", { name: "Purge" }));
     await waitFor(() =>
-      expect(useUi.getState().notices.map((n) => n.text)).toContain("Purged: removed 20 files, restored 2 originals"),
+      expect([useUi.getState().toast].flatMap((x) => (x ? [x] : [])).map((n) => `${n.text} · ${n.detail}`)).toContain("Purged · 20 files · 2 originals restored"),
     );
   });
 
@@ -503,6 +503,6 @@ describe("CT1 D19 purge result", () => {
     const { user, t } = await open("overview", { purge: () => null });
     await user.click(await screen.findByRole("button", { name: "Purge" }));
     await waitFor(() => expect(t.callsOf("purge")).toHaveLength(1));
-    expect(useUi.getState().notices).toHaveLength(0);
+    expect([useUi.getState().toast].flatMap((x) => (x ? [x] : []))).toHaveLength(0);
   });
 });

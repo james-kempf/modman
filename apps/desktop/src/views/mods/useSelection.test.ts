@@ -31,7 +31,7 @@ describe("useSelection", () => {
     expect(result.current.has(1)).toBe(false);
   });
 
-  // Fails when a pruned id silently comes back selected after it reappears (e.g. Undo restores it).
+  // Fails when a pruned id silently comes back selected after it reappears (e.g. reinstalled).
   it("does not resurrect a pruned id when it reappears", () => {
     const { result, rerender } = mount([1, 2]);
     act(() => result.current.toggle(1));

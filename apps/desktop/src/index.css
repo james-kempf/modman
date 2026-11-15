@@ -221,7 +221,11 @@
   --animate-rise: rise 0.14s var(--ease-spring) both;
   --animate-fade: fade 0.12s ease-out both;
   --animate-pop: pop 0.2s var(--ease-spring) both;
-  --animate-island: island 0.24s var(--ease-spring) both;
+  /* The toast (DESIGN.md §8 toast motion): open = clip reveal left→right, close = reverse, in/out = text cycle. */
+  --animate-toast-open: toast-open var(--transition-duration-slow) var(--ease-spring) backwards;
+  --animate-toast-close: toast-close var(--transition-duration-fast) ease-in forwards;
+  --animate-toast-in: toast-in var(--transition-duration-fast) ease-out both;
+  --animate-toast-out: toast-out var(--transition-duration-fast) ease-in forwards;
 
   @keyframes breathe {
     0%, 100% { transform: scale(1); opacity: 0.55; }
@@ -243,9 +247,23 @@
     from { opacity: 0; transform: translateY(16px) scale(0.97); }
     to { opacity: 1; transform: none; }
   }
-  @keyframes island {
-    from { opacity: 0; transform: translateY(24px); }
+  /* The disc circle: the pill clipped to its first control-width (48px) from the left. */
+  @keyframes toast-open {
+    0% { opacity: 0; clip-path: inset(0 calc(100% - var(--spacing-control)) 0 0 round 9999px); }
+    30% { opacity: 1; clip-path: inset(0 calc(100% - var(--spacing-control)) 0 0 round 9999px); }
+    100% { opacity: 1; clip-path: inset(0 0 0 0 round 9999px); }
+  }
+  @keyframes toast-close {
+    from { opacity: 1; clip-path: inset(0 0 0 0 round 9999px); }
+    to { opacity: 0; clip-path: inset(0 calc(100% - var(--spacing-control)) 0 0 round 9999px); }
+  }
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateY(100%); }
     to { opacity: 1; transform: none; }
+  }
+  @keyframes toast-out {
+    from { opacity: 1; transform: none; }
+    to { opacity: 0; transform: translateY(-100%); }
   }
 }
 

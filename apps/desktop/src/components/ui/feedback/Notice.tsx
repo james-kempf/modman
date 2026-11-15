@@ -1,64 +1,123 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { CheckCircleIcon, InfoIcon, WarningIcon, XCircleIcon } from "@phosphor-icons/react";
-import type { ReactNode } from "react";
-import { Button } from "../controls/Button";
-import { cx } from "../styles";
+import { CheckIcon, InfoIcon, WarningCircleIcon, WarningIcon } from "@phosphor-icons/react";
+import { useState, type ReactNode } from "react";
+import { TOAST_CLOSE, TOAST_DISC, TOAST_IN, TOAST_OPEN, TOAST_OUT, TOAST_SHELL, TOAST_TEXT, TOAST_TITLE, cx } from "../styles";
 
+/** Same union as the store's ToastTone (the UI kit does not import app state). */
 export type NoticeTone = "info" | "success" | "warn" | "error";
 
-const TONE: Record<NoticeTone, { border: string; icon: ReactNode }> = {
-  info: { border: "border-white/10", icon: <InfoIcon aria-hidden size={18} weight="duotone" className="text-zinc-300" /> },
-  success: {
-    border: "border-accent-400/25",
-    icon: <CheckCircleIcon aria-hidden size={18} weight="duotone" className="text-accent-300" />,
-  },
-  warn: { border: "border-amber-400/30", icon: <WarningIcon aria-hidden size={18} weight="duotone" className="text-amber-300" /> },
-  error: { border: "border-rose-400/40", icon: <XCircleIcon aria-hidden size={18} weight="duotone" className="text-rose-300" /> },
+// Tone shows in the leading disc, glyph + tint (never colour alone).
+const TONE: Record<NoticeTone, { tint: string; icon: ReactNode }> = {
+  info: { tint: "bg-white/8 text-zinc-300", icon: <InfoIcon size={17} weight="bold" /> },
+  success: { tint: "bg-accent-400/15 text-accent-300", icon: <CheckIcon size={17} weight="bold" /> },
+  warn: { tint: "bg-amber-400/15 text-amber-300", icon: <WarningIcon size={17} weight="bold" /> },
+  error: { tint: "bg-rose-400/15 text-rose-300", icon: <WarningCircleIcon size={17} weight="bold" /> },
 };
+/** Running work (the former job island's disc): accent tint, three animated rails. */
+const BUSY_TINT = "bg-accent-400/15 text-accent-300";
+
+/** One rendered message: its text lines. */
+interface Line {
+  text: ReactNode;
+  detail?: string;
+}
 
 /**
- * Toast card in the bottom stack. Closes on a timer, so no dismiss button. Errors are announced as alerts.
- * One optional action: `act` (label + handler, e.g. Undo) renders a small button; `action` takes a ready node
- * (e.g. "Deploy now"). Neither takes focus when the notice appears; it is a normal Tab / D-pad stop.
- * `onHold(true/false)` reports focus entering and leaving the card, so the caller can pause its timer.
+ * Presentational only: the previous message while a new one cycles in. `cycleKey` changes on every write
+ * (the toast id); the line shown before it becomes the outgoing copy, anything older is dropped (latest wins).
+ */
+function useCycle(cycleKey: string | number | undefined, line: Line): (Line & { key: string | number }) | null {
+  const [s, set] = useState<{ key: string | number | undefined; last: Line; prev: (Line & { key: string | number }) | null }>({
+    key: cycleKey,
+    last: line,
+    prev: null,
+  });
+  // Derived state, set during render (React's documented pattern): no extra commit, no effect lag.
+  if (s.key !== cycleKey) {
+    const prev = s.key === undefined || cycleKey === undefined ? null : { ...s.last, key: s.key };
+    set({ key: cycleKey, last: line, prev });
+    return prev;
+  }
+  return s.prev;
+}
+
+function Lines({ text, detail }: Line) {
+  return (
+    <>
+      <span className={TOAST_TITLE}>{text}</span>
+      {detail && <span className="block truncate font-mono text-micro text-dim">{detail}</span>}
+    </>
+  );
+}
+
+/**
+ * The toast pill: informational only, no controls (it closes on its own; app/toast.ts). TOAST_SHELL with a tone
+ * disc (or the running-work rails when `busy`), the text line and an optional quieter `detail` line, both
+ * truncated; the full text stays in the DOM (read by screen readers, also when a narrow slot shows the disc only)
+ * and in the pill's tooltip. Errors are announced as alerts. There is only ever one: each write swaps this one's
+ * content in place, cycling the text (TOAST_IN / TOAST_OUT); the shell opens with TOAST_OPEN and closes with
+ * TOAST_CLOSE (DESIGN.md §8 toast motion).
  */
 export function Notice({
   tone,
   children,
-  action,
-  act,
-  onHold,
+  detail,
+  busy = false,
+  cycleKey,
+  closing = false,
 }: {
   tone: NoticeTone;
   children: ReactNode;
-  action?: ReactNode;
-  act?: { label: string; onAction: () => void };
-  onHold?: (held: boolean) => void;
+  detail?: string;
+  busy?: boolean;
+  /**
+   * Changes on every new message (the toast id; a live toast's key): the text cycles (old line out, new line
+   * in). Updates under the same key (a live toast's progress) change the text in place, with no motion.
+   */
+  cycleKey?: string | number;
+  /** The toast is closing: the collapse motion, and hidden from assistive tech (its text was already read). */
+  closing?: boolean;
 }) {
+  const text = typeof children === "string" ? children : undefined;
+  const prev = useCycle(cycleKey, { text: children, detail });
+  const disc = busy ? "busy" : tone;
   return (
+    // title on the pill: the full text as a tooltip, also when only the disc shows (narrow slot).
     <div
       role={tone === "error" ? "alert" : "status"}
-      onFocus={onHold && (() => onHold(true))}
-      onBlur={
-        onHold &&
-        ((e) => {
-          // Moving between controls inside the card is not leaving it.
-          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onHold(false);
-        })
-      }
-      className={cx(
-        "glass pointer-events-auto flex min-h-14 animate-island items-center gap-3 rounded-card px-4 py-2",
-        TONE[tone].border,
-      )}
+      aria-busy={busy || undefined}
+      aria-hidden={closing || undefined}
+      title={text && (detail ? `${text}: ${detail}` : text)}
+      className={cx(TOAST_SHELL, closing ? TOAST_CLOSE : TOAST_OPEN)}
     >
-      {TONE[tone].icon}
-      <p className="min-w-0 flex-1 text-[13.5px] wrap-break-word text-zinc-100">{children}</p>
-      {act && (
-        <Button size="sm" onClick={act.onAction}>
-          {act.label}
-        </Button>
-      )}
-      {action}
+      {/* key: a tone change re-mounts the disc, which fades in (the tint itself snaps; see DESIGN.md §8). */}
+      <span
+        key={disc}
+        aria-hidden
+        data-tone={disc}
+        className={cx(TOAST_DISC, busy ? BUSY_TINT : TONE[tone].tint, prev && "animate-fade")}
+      >
+        {busy ? (
+          <span className="flex gap-rail">
+            <span className="h-3.5 w-rail animate-bar rounded-pill bg-current" />
+            <span className="h-3.5 w-rail animate-bar rounded-pill bg-current [animation-delay:150ms]" />
+            <span className="h-3.5 w-rail animate-bar rounded-pill bg-current [animation-delay:300ms]" />
+          </span>
+        ) : (
+          TONE[tone].icon
+        )}
+      </span>
+      <span className={TOAST_TEXT}>
+        {/* key = the write: each write restarts the incoming motion, never queues one. */}
+        <span key={cycleKey} className={prev ? TOAST_IN : "block"}>
+          <Lines text={children} detail={detail} />
+        </span>
+        {prev && (
+          <span key={`out-${prev.key}`} aria-hidden data-toast-out className={TOAST_OUT}>
+            <Lines text={prev.text} detail={prev.detail} />
+          </span>
+        )}
+      </span>
     </div>
   );
 }

@@ -971,8 +971,10 @@ describe("Browse pager toolbar: pinned while scrolled up, page margin at the end
       expect(main.className).toContain(`[--main-pb:calc(var(--spacing)*${pb})]`);
     };
     pbMatches();
-    act(() => useUi.getState().notify("info", "hello"));
-    await waitFor(() => expect(main.className).toMatch(/\bpb-28\b/));
+    // A running job (its pill is in the app bar now) does not change the padding.
+    act(() => useUi.getState().onJob({ id: 1, kind: "enable", state: "started", error: null }));
+    expect(await screen.findByRole("status", { name: /^Updating/ })).toBeInTheDocument();
+    expect(main.className).toMatch(/\bpb-10\b/);
     pbMatches();
     const pager = screen.getByRole("navigation", { name: "Mods pages" });
     const section = pager.parentElement!;
@@ -984,7 +986,7 @@ describe("Browse pager toolbar: pinned while scrolled up, page margin at the end
     expect(section.closest("[data-view-frame] > *")!.nextElementSibling).toBeNull();
     act(() => useUi.getState().setView("activity"));
     await screen.findByRole("main", { name: "Activity" });
-    expect(main.className).toMatch(/\bpb-28\b/);
+    expect(main.className).toMatch(/\bpb-10\b/);
   });
 });
 

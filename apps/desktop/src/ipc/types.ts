@@ -292,14 +292,14 @@ export interface UninstallResult {
   after: AfterChange;
   /**
    * One entry per uninstalled mod (GUI uninstalls only). Absent when no
-   * snapshot was captured (legacy shape, CLI). Offer Undo only for
-   * entries with `restorable: true`.
+   * snapshot was captured (legacy shape, CLI). The backend's restore data
+   * (`mod_restore`); the UI does not use it (no Undo since T05).
    */
   restore?: UninstallRestore[] | null;
 }
 /** Why an uninstalled mod cannot be restored. */
 export type RestoreReason = "folder_install" | "archive_deleted" | "outside_downloads";
-/** An uninstalled mod and its opaque Undo token (pass it to `modRestore`). */
+/** An uninstalled mod and its opaque restore token (backend `mod_restore`; unused by the UI). */
 export interface UninstallRestore {
   token: string;
   uid: string;

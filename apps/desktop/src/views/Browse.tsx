@@ -3,6 +3,7 @@
 // recent window, newest, or matching words) with one-click installs. The
 // download queue is on Activity.
 
+import { showMsg } from "../app/toast";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent } from "react";
 import { errMsg } from "../app/bridge";
@@ -47,7 +48,7 @@ import * as ipc from "../ipc/commands";
 import { PAGE_EVENT, type PageEventDetail } from "../nav/actions";
 import { focusables } from "../nav/spatial";
 import type { BrowseKind, BrowsePeriod, BrowseSort, BrowseView, CollectionHit } from "../ipc/types";
-import { collectionText, collectionTone } from "./Collections";
+import { collectionMsg, collectionTone } from "./Collections";
 import { NoGame } from "../components/shell/NoGame";
 import {
   FOCUS_ATTR,
@@ -490,7 +491,6 @@ const COLLECTION_PICTURE = cx(
 function CollectionTile({ game, c }: { game: string; c: CollectionHit }) {
   const run = useRun();
   const qc = useQueryClient();
-  const notify = useUi((s) => s.notify);
   const installing = useUi((s) => s.busy);
   const details = useDetails();
   // The same key as the Collections view's actions on this collection.
@@ -507,7 +507,7 @@ function CollectionTile({ game, c }: { game: string; c: CollectionHit }) {
       { key },
     );
     if (!r) return;
-    notify(collectionTone(r), collectionText(r));
+    showMsg(collectionTone(r), collectionMsg(r));
     void qc.invalidateQueries({ queryKey: ["browse", game] });
     void qc.invalidateQueries({ queryKey: ["collections", game] });
   };

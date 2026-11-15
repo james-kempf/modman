@@ -38,6 +38,6 @@ describe("pending loaders", () => {
         loader_recovered: [{ run_id: 1, install_id: 2, action: { kind: "rollback_offered", killed: false } }],
       }),
     });
-    expect(useUi.getState().notices.filter((n) => /loader install was interrupted/.test(n.text))).toHaveLength(1);
+    expect([useUi.getState().toast].flatMap((x) => (x ? [x] : [])).filter((n) => n.text === "Install interrupted" && /loader install was interrupted/.test(n.detail ?? ""))).toHaveLength(1);
   });
 });

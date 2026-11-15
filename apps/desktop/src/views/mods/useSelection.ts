@@ -16,7 +16,7 @@ export interface Selection<Id> {
 /**
  * A multi-selection over `ids` (the rows currently listed). Ids that leave the
  * list are pruned on that same render and forgotten, so one that comes back
- * later (e.g. restored by Undo) is not silently reselected.
+ * later (e.g. reinstalled) is not silently reselected.
  */
 export function useSelection<Id>(ids: readonly Id[]): Selection<Id> {
   const [raw, setRaw] = useState<ReadonlySet<Id>>(() => new Set());

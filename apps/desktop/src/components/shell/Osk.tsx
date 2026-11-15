@@ -2,6 +2,7 @@
 // On-screen keyboard fallback for gamepad text entry when Steam's keyboard
 // does not appear. Types into the target input on "Done".
 
+import { showToast } from "../../app/toast";
 import { useState } from "react";
 import { flushSync } from "react-dom";
 import { useUi } from "../../app/store";
@@ -17,6 +18,9 @@ export function setNativeValue(input: HTMLInputElement, value: string): void {
   setter?.call(input, value);
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
+
+/** The notice when the webview refuses the clipboard (Paste buttons here and in Settings). */
+export const CLIPBOARD_BLOCKED = "Can't read the clipboard here. Paste with Ctrl+V instead.";
 
 /** Read the clipboard; null when the webview refuses. */
 export async function readClipboard(): Promise<string | null> {
@@ -37,7 +41,6 @@ export function OskHost() {
 function Osk() {
   const target = useUi((s) => s.osk)!;
   const close = useUi((s) => s.closeOsk);
-  const notify = useUi((s) => s.notify);
   const secret = target.input.type === "password";
   const [value, setValue] = useState(target.input.value);
   const [shift, setShift] = useState(false);
@@ -55,7 +58,7 @@ function Osk() {
   };
   const paste = async () => {
     const t = await readClipboard();
-    if (t === null) notify("warn", "Clipboard not readable here; paste into the field with Ctrl+V.");
+    if (t === null) showToast("warn", "Paste blocked", { detail: CLIPBOARD_BLOCKED });
     else setValue((v) => v + t.trim());
   };
 

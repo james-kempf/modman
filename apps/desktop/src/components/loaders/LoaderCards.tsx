@@ -7,6 +7,7 @@
 // account picker), the offered rollback after an interrupted run, run logs
 // and the cleanup of loader archives that were installed as mods.
 
+import { cancelledMsg, showMsg, showToast } from "../../app/toast";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import {
@@ -54,7 +55,7 @@ function useAct() {
     try {
       return await fn();
     } catch (e) {
-      if (isCancelError(errMsg(e))) useUi.getState().notify("info", `${key} cancelled.`);
+      if (isCancelError(errMsg(e))) showMsg("info", cancelledMsg(key));
       else setError(e);
       return undefined;
     } finally {
@@ -74,7 +75,6 @@ const STATE_BADGE: Record<LoaderCard["status"]["state"], { text: string; tone: "
 };
 
 function LoaderCardView({ l, game }: { l: LoaderCard; game: string }) {
-  const notify = useUi((s) => s.notify);
   const openConsent = useUi((s) => s.openLoaderConsent);
   const { act, error, busy, retry } = useAct();
   const [pickRuntime, setPickRuntime] = useState(false);
@@ -89,7 +89,7 @@ function LoaderCardView({ l, game }: { l: LoaderCard; game: string }) {
     act(label, async () => {
       const r = await ipc.install({ target: String(l.nexus_mod_id), game });
       openPendingLoaders(r, game);
-      if (!r.loader) notify("info", `${label}: nothing to review.`);
+      if (!r.loader) showToast("info", "No changes", { detail: `${label}: nothing to review` });
     });
   const previewOp = (op: LoaderOp, label: string) =>
     act(label, async () => openConsent({ game, preview: await ipc.loaderPreview({ op, loaderKey: l.key }, game) }));
@@ -103,7 +103,9 @@ function LoaderCardView({ l, game }: { l: LoaderCard; game: string }) {
         setAccounts({ list: r.accounts, chosen: String(d) });
       } else {
         setAccounts(null);
-        notify("success", `Launch options set in Steam: ${r.value || "(cleared)"}`);
+        showToast("success", r.value ? "Options set" : "Options cleared", {
+          detail: r.value ? `Steam launch options: ${r.value}` : "Steam launch options",
+        });
       }
     });
 
@@ -204,7 +206,9 @@ function LoaderCardView({ l, game }: { l: LoaderCard; game: string }) {
                 onClick={() =>
                   void act("Roll back", async () => {
                     const lost = await ipc.loaderRollback(s.install_id);
-                    notify(lost.length ? "warn" : "success", lost.length ? `Rolled back; could not restore: ${lost.join(", ")}` : "Rolled back.");
+                    showToast(lost.length ? "warn" : "success", "Rolled back", {
+                      detail: lost.length ? `Couldn't restore ${lost.join(", ")}` : "The interrupted install",
+                    });
                   })
                 }
               >
@@ -278,7 +282,7 @@ function LoaderCardView({ l, game }: { l: LoaderCard; game: string }) {
                   onClick={() =>
                     void act("Copy", async () => {
                       await navigator.clipboard.writeText(launch.desired!);
-                      notify("success", "Launch options copied.");
+                      showToast("success", "Copied", { detail: "Launch options" });
                     })
                   }
                 >
@@ -340,7 +344,6 @@ function LoaderCardView({ l, game }: { l: LoaderCard; game: string }) {
 }
 
 function JunkPrompt({ game, junk }: { game: string; junk: { mod_id: number; name: string }[] }) {
-  const notify = useUi((s) => s.notify);
   const { act, error, busy } = useAct();
   return (
     <Card
@@ -368,7 +371,7 @@ function JunkPrompt({ game, junk }: { game: string; junk: { mod_id: number; name
                   junk.map((j) => j.mod_id),
                   game,
                 );
-                notify("success", `Removed ${n} leftover loader archive${n === 1 ? "" : "s"}.`);
+                showToast("success", "Removed", { detail: `${n} leftover loader archive${n === 1 ? "" : "s"}` });
               })
             }
           >

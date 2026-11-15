@@ -33,7 +33,7 @@ describe("Overview", () => {
     const { t, user } = await open("overview", { game_launch: () => ({ appid: 489830, deployed: false }) });
     await user.click(await screen.findByRole("button", { name: "Play" }));
     await waitFor(() => expect(t.callsOf("game_launch")).toEqual([{ game: null }]));
-    expect(await screen.findByText(/Starting Skyrim Special Edition/)).toBeInTheDocument();
+    expect(await screen.findByText("Starting the game through Steam")).toBeInTheDocument();
   });
 
   it("Play is disabled without a Steam app id", async () => {
@@ -449,5 +449,37 @@ describe("view frame", () => {
     const search = await within(screen.getByRole("main")).findByRole("search");
     expect(search.parentElement!.className).toMatch(/\bjustify-self-center\b/);
     expect(search.closest("header")).not.toBeNull();
+  });
+});
+
+describe("Verify result goes to the toast (T10)", () => {
+  // Fails when Verify's summary or issue list renders inline on Overview again, the toast loses the summary
+  // or the first issue, or the full issue list is dropped instead of logged to Activity.
+  it("issues: warn toast with the first issue; every issue in Activity; nothing inline", async () => {
+    const issues = [
+      { target: "game_dir", rel_path: "Data/a.esp", method: "symlink", kind: "missing" },
+      { target: "game_dir", rel_path: "Data/b.esp", method: "symlink", kind: "modified" },
+    ];
+    const { user } = await open("overview", { verify: () => ({ intact: 18, issues, interrupted: false }) });
+    await user.click(await within(screen.getByRole("main")).findByRole("button", { name: "Verify" }));
+    await waitFor(() =>
+      expect(useUi.getState().toast).toMatchObject({
+        tone: "warn",
+        text: "Issues found",
+        detail: "2 issues · 18 intact · missing: Data/a.esp +1 more · see Activity",
+      }),
+    );
+    const main = screen.getByRole("main");
+    expect(within(main).queryByText(/Data\/a\.esp|files intact/)).toBeNull();
+    expect(within(main).queryByRole("status")).toBeNull();
+    const logged = useUi.getState().activity.map((a) => a.text);
+    expect(logged).toEqual(expect.arrayContaining(["Verify: missing: Data/a.esp", "Verify: modified: Data/b.esp"]));
+  });
+
+  it("clean: success toast, nothing logged", async () => {
+    const { user } = await open("overview", { verify: () => ({ intact: 5, issues: [], interrupted: false }) });
+    await user.click(await within(screen.getByRole("main")).findByRole("button", { name: "Verify" }));
+    await waitFor(() => expect(useUi.getState().toast).toMatchObject({ tone: "success", text: "Verified", detail: "5 files · all intact" }));
+    expect(useUi.getState().activity.some((a) => a.text.startsWith("Verify:"))).toBe(false);
   });
 });

@@ -45,16 +45,15 @@ describe("bridge", () => {
     expect(useUi.getState().prompts).toHaveLength(0);
   });
 
-  it("tracks jobs and deploy progress from events", async () => {
+  it("tracks jobs and sends deploy progress to the job's live toast", async () => {
     const t = createFakeTransport({ app_ready: () => ({ startup_check: null, queued: 0 }) });
     setTransport(t);
     await startBridge(makeQueryClient());
     t.emit("vessel:job", { id: 1, kind: "deploy", state: "started", error: null });
     t.emit("vessel:deploy-progress", { job: 1, done: 5, total: 10 });
-    expect(useUi.getState().deployProgress?.done).toBe(5);
+    expect(useUi.getState().toast).toMatchObject({ persist: "job:1", detail: "5 / 10 files" });
     t.emit("vessel:job", { id: 1, kind: "deploy", state: "failed", error: "boom" });
     expect(useUi.getState().jobs[1]).toMatchObject({ state: "failed", error: "boom" });
-    expect(useUi.getState().deployProgress).toBeNull();
   });
 });
 

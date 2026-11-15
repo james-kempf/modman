@@ -79,7 +79,7 @@ describe("game library", () => {
       },
     });
     await user.click(tile("Cyberpunk 2077"));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Switch game: database is locked");
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Failed.*Switch game · database is locked/);
     expect(useUi.getState().view).toBe("games");
   });
 

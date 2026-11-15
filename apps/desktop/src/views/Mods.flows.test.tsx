@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Mods view flows (UX audit T06): uninstall wiring (#1, no Undo yet), profile load with
-// snapshot and Undo (#2), optimistic enable switch (#21), tab and filters kept in the store (#23).
+// Mods view flows (UX audit T06): uninstall wiring (#1), profile load (#2), optimistic enable switch (#21), tab and filters kept in the store (#23).
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
@@ -8,7 +7,6 @@ import { useUi } from "../app/store";
 import type { Args, Handler } from "../mock/fake";
 import { afterChange, mod } from "../mock/fixtures";
 import { setup } from "../test/harness";
-import { snapshotName } from "./Mods";
 
 async function open(handlers: Record<string, Handler> = {}) {
   const env = await setup(handlers);
@@ -17,7 +15,7 @@ async function open(handlers: Record<string, Handler> = {}) {
   return { ...env, user: userEvent.setup() };
 }
 
-const notices = () => useUi.getState().notices.map((n) => n.text);
+const notices = () => [useUi.getState().toast].flatMap((x) => (x ? [x] : [])).map((n) => (n.detail ? `${n.text} · ${n.detail}` : n.text));
 const tab = (user: ReturnType<typeof userEvent.setup>, name: string) =>
   screen.findByRole("tab", { name }).then((b) => user.click(b));
 const quiet = afterChange({ needs_deploy: false });
@@ -51,7 +49,7 @@ describe("#1 uninstall wiring", () => {
     const { t, user } = await open(l.handlers);
     const b = l.mods()[1];
     await uninstall(user, "Bravo");
-    await waitFor(() => expect(notices()).toContain("Uninstalled Bravo"));
+    await waitFor(() => expect(notices()).toContain("Uninstalled · Bravo"));
     expect(t.callsOf("mods_uninstall")).toEqual([{ game: null, refs: [b.uid], delete_archive: false }]);
     // Fails when focus falls to <body> with the removed row.
     await waitFor(() => expect(screen.queryByTitle("Bravo")).toBeNull());
@@ -64,7 +62,7 @@ describe("#1 uninstall wiring", () => {
     const l = modList(["Alpha", "Bravo"], ["/downloads/b.7z"]);
     const { user } = await open(l.handlers);
     await uninstall(user, "Bravo");
-    await waitFor(() => expect(notices()).toContain("Uninstalled Bravo and deleted its archive"));
+    await waitFor(() => expect(notices()).toContain("Uninstalled · Bravo · archive deleted"));
     const a = within(screen.getByTitle("Alpha").closest("li")!).getByRole("button", { name: "Details" });
     await waitFor(() => expect(document.activeElement).toBe(a));
   });
@@ -111,65 +109,17 @@ function profiles(initial: string[], save?: (name: string) => number | null) {
 const loadButton = async (name: string) =>
   within((await screen.findByText(name, { selector: "span" })).closest("li")!).getByRole("button", { name: "Load" });
 
-describe("#2 profile load snapshot and Undo", () => {
-  // Fails when the load runs before the current set is saved, or Undo goes through the auto-saving load.
-  it("saves before-<name> first, then loads; Undo loads the snapshot without saving again", async () => {
+describe("#2 profile load", () => {
+  // Fails when loading saves a snapshot profile first again (the Undo snapshot is gone), or the toast is lost.
+  it("loads the profile directly and says so; focus stays on Load", async () => {
     const p = profiles(["evening"]);
     const { user } = await open(p.handlers);
     await tab(user, "Profiles");
     const load = await loadButton("evening");
     await user.click(load);
-    await waitFor(() => expect(notices()).toContain("Loaded profile evening"));
-    expect(p.order).toEqual(["save before-evening", "load evening"]);
-    // Fails when focus leaves the Load button (e.g. the list re-mounts on refetch).
-    await screen.findByText("before-evening", { selector: "span" });
+    await waitFor(() => expect(notices()).toContain("Loaded · Profile evening"));
+    expect(p.order).toEqual(["load evening"]);
     expect(document.activeElement).toBe(load);
-    await user.click(screen.getByRole("button", { name: "Undo" }));
-    await waitFor(() => expect(notices()).toContain("Restored the mod set from before loading evening"));
-    expect(p.order).toEqual(["save before-evening", "load evening", "load before-evening"]);
-    // Focus stays in the profiles list (the Undo notice is gone), never <body>.
-    expect(document.activeElement).toBe(await loadButton("before-evening"));
-  });
-
-  // Fails when a user's own before-<name> profile is overwritten.
-  it("never overwrites a user profile: picks before-<name>.2", async () => {
-    const p = profiles(["evening", "before-evening"]);
-    const { user } = await open(p.handlers);
-    await tab(user, "Profiles");
-    await user.click(await loadButton("evening"));
-    await waitFor(() => expect(notices()).toContain("Loaded profile evening"));
-    expect(p.order).toEqual(["save before-evening.2", "load evening"]);
-  });
-
-  // Fails when a second load piles up before-<name>.2, .3 ... or hits the overwrite prompt.
-  it("replaces its own snapshot with delete + save", async () => {
-    const p = profiles(["evening"]);
-    const { user } = await open(p.handlers);
-    await tab(user, "Profiles");
-    await user.click(await loadButton("evening"));
-    await waitFor(() => expect(notices()).toContain("Loaded profile evening"));
-    await user.click(await loadButton("evening"));
-    await waitFor(() => expect(p.order).toHaveLength(5));
-    expect(p.order.slice(2)).toEqual(["delete before-evening", "save before-evening", "load evening"]);
-    expect(p.names).toEqual(["evening", "before-evening"]);
-  });
-
-  // Fails when the load goes ahead without a snapshot to undo to.
-  it("aborts the load with an error notice when the snapshot is not saved", async () => {
-    const p = profiles(["evening"], () => null);
-    const { t, user } = await open(p.handlers);
-    await tab(user, "Profiles");
-    await user.click(await loadButton("evening"));
-    await waitFor(() => expect(notices().some((n) => /^Load profile: couldn't save .*before-evening/.test(n))).toBe(true));
-    expect(t.callsOf("profile_load")).toHaveLength(0);
-    expect(useUi.getState().notices.find((n) => n.tone === "error")).toBeDefined();
-  });
-
-  it("snapshotName: free name, own snapshot replaced, user profile skipped", () => {
-    expect(snapshotName("x", [], [])).toEqual({ name: "before-x", replace: false });
-    expect(snapshotName("x", ["before-x"], ["before-x"])).toEqual({ name: "before-x", replace: true });
-    expect(snapshotName("x", ["before-x", "before-x.2"], [])).toEqual({ name: "before-x.3", replace: false });
-    expect(snapshotName("x", ["before-x", "before-x.2"], ["before-x.2"])).toEqual({ name: "before-x.2", replace: true });
   });
 });
 
@@ -193,7 +143,7 @@ describe("#21 optimistic enable switch", () => {
     act(() => release());
     await waitFor(() => expect(sw).not.toHaveAttribute("aria-busy"));
     expect(sw).toHaveAttribute("aria-checked", "true");
-    expect(notices()).toContain("Enable/disable: database is locked");
+    expect(notices()).toContain("Enable/disable failed · database is locked");
   });
 
   // Fails when a successful change flickers back to the old state before the list refetches.

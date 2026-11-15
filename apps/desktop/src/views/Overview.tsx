@@ -5,6 +5,7 @@
 // auto-update check, over the game's Steam hero art.
 // Games are picked and added in the Games view.
 
+import { showMsg, showToast, type ToastMsg } from "../app/toast";
 import {
   ArrowRightIcon,
   ArrowsClockwiseIcon,
@@ -16,7 +17,7 @@ import {
   TrashIcon,
 } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { errMsg } from "../app/bridge";
 import { useActiveGame, useMods } from "../app/queries";
 import { useBusy, useDeploy, useDeployDue, useRun } from "../app/run";
@@ -30,6 +31,7 @@ import {
   StatusDot,
   SupportBadge,
   ago,
+  count,
   cx,
   when,
   ViewFrame,
@@ -122,7 +124,7 @@ function PlayCard({ game, outOfSync }: { game: GameView; outOfSync: boolean }) {
     if (!r) return;
     const ui = useUi.getState();
     if (r.deployed) ui.clearDeployDue(game.id);
-    ui.notify("success", `Starting ${game.name} through Steam.`);
+    showToast("info", "Launching", { detail: "Starting the game through Steam" });
   };
   return (
     <Card>
@@ -249,7 +251,6 @@ function DeploymentCard({
   const deploying = useBusy("Deploy");
   const purging = useBusy("Purge");
   const verifying = useBusy("Verify");
-  const [verified, setVerified] = useState<VerifyReport | null>(null);
   const d = game.deploy;
   return (
     // inset: the title sits inside the box, so its top lines up with the untitled Play card beside it.
@@ -288,13 +289,10 @@ function DeploymentCard({
             <Button
               busy={verifying}
               icon={<ShieldCheckIcon aria-hidden size={16} />}
-              onClick={async () =>
-                setVerified(
-                  (await run("Verify", () => ipc.verify(), {
-                    key: "Verify",
-                  })) ?? null,
-                )
-              }
+              onClick={async () => {
+                const r = await run("Verify", () => ipc.verify(), { key: "Verify" });
+                if (r) reportVerify(r);
+              }}
             >
               Verify
             </Button>
@@ -308,19 +306,12 @@ function DeploymentCard({
                   key: "Purge",
                 });
                 // null: declined at the confirmation.
-                if (r)
-                  useUi
-                    .getState()
-                    .notify(
-                      r.nothing_deployed ? "info" : "success",
-                      purgedText(r),
-                    );
+                if (r) showMsg(r.nothing_deployed ? "info" : "success", purgedMsg(r));
               }}
             >
               Purge
             </Button>
           </div>
-          {verified && <VerifyResult r={verified} />}
         </div>
       </CardSection>
     </Card>
@@ -374,44 +365,37 @@ function DeployTracker({
   );
 }
 
-export function purgedText(r: PurgeReport): string {
-  if (r.nothing_deployed) return "Nothing was deployed; nothing to purge.";
-  const parts = [
-    `Purged: removed ${r.removed} files`,
-    `restored ${r.restored} originals`,
-  ];
+export function purgedMsg(r: PurgeReport): ToastMsg {
+  if (r.nothing_deployed) return { title: "Nothing deployed", detail: "Nothing to purge: no mods are deployed" };
+  const parts = [count(r.removed, "file"), `${r.restored} originals restored`];
   if (r.missing) parts.push(`${r.missing} already missing`);
   if (r.changed) parts.push(`${r.changed} changed in the game folder`);
   if (r.kept) parts.push(`${r.kept} kept`);
   if (r.plugins?.state === "failed")
-    parts.push(`plugins.txt failed: ${r.plugins.detail}`);
-  return parts.join(", ");
+    parts.push(`couldn't write plugins.txt: ${r.plugins.detail}`);
+  return { title: "Purged", detail: parts.join(" · ") };
 }
 
-function VerifyResult({ r }: { r: VerifyReport }) {
-  const bad = r.issues.length > 0;
-  return (
-    <div role="status" className="grid gap-2 pt-1">
-      <p
-        className={cx(
-          "flex items-center gap-2 text-body",
-          bad ? "text-amber-300" : "text-accent-300",
-        )}
-      >
-        <ShieldCheckIcon aria-hidden size={17} weight="duotone" />
-        {r.intact} files intact, {r.issues.length} issues
-      </p>
-      {bad && (
-        <ul className="grid max-h-48 gap-1 overflow-y-auto font-mono text-caption break-all text-zinc-400">
-          {r.issues.slice(0, 50).map((i) => (
-            <li key={i.target + i.rel_path}>
-              {i.kind}: {i.rel_path}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
+/**
+ * Verify's result, in the toast (no inline text): clean is a success; issues are a warning with the first
+ * one as the detail. Verify is a query, not a job, so its issues are in no job log: each one is logged to
+ * Activity's Messages ("Verify: <kind>: <path>"), where the full list stays readable.
+ */
+export function reportVerify(r: VerifyReport): void {
+  const n = r.issues.length;
+  if (!n) {
+    showToast("success", "Verified", { detail: `${count(r.intact, "file")} · all intact` });
+    return;
+  }
+  const ui = useUi.getState();
+  for (const i of r.issues) {
+    const text = `Verify: ${i.kind}: ${i.rel_path}`;
+    ui.onActivity({ job: null, msg: { level: "warn", spans: [{ text, style: "plain" }] }, text });
+  }
+  const first = `${r.issues[0].kind}: ${r.issues[0].rel_path}`;
+  showToast("warn", "Issues found", {
+    detail: `${count(n, "issue")} · ${r.intact} intact · ${first}${n > 1 ? ` +${n - 1} more` : ""} · see Activity`,
+  });
 }
 
 function Stat({

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // A tab strip (role=tablist) with an optional panel for the selected tab.
 // One look everywhere (the app's view bar and the dialogs): full-width, equal-width tabs on one line
-// (horizontal scroll when narrow), icons, badges. Tabs are pills; the selected one sits on an accent-tinted pill
+// (horizontal scroll when narrow), icons. Tabs are pills; the selected one sits on an accent-tinted pill
 // that animates scale + opacity only, driven by aria-selected classes (no inline styles: CSP).
 // Tabs are not focus stops by default (tabindex -1); `focusable` makes them a roving-tabindex group
 // following the APG manual-activation pattern. Start/end adornments (e.g. LB/RB glyphs) are siblings
@@ -17,8 +17,6 @@ export interface TabItem<T extends string> {
   label: string;
   /** Leading glyph (decorative; give it aria-hidden). */
   icon?: ReactNode;
-  /** Trailing badge, e.g. a count. */
-  badge?: ReactNode;
 }
 
 // One line over the full width of the bar, every tab the same width: one grid column per tab, each `1fr`.
@@ -175,7 +173,6 @@ export function Tabs<T extends string>({
               <span className={CONTENT}>
                 {t.icon}
                 <span>{t.label}</span>
-                {t.badge}
               </span>
             </button>
           );

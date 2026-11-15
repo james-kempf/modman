@@ -12,7 +12,6 @@ export { Empty } from "./feedback/Empty";
 export { ErrorNote } from "./feedback/ErrorNote";
 export { Fact } from "./display/Fact";
 export { IconButton } from "./controls/IconButton";
-export { JobIsland, type IslandOutcome } from "./feedback/JobIsland";
 export { ListToggle } from "./controls/ListToggle";
 export { MsgLine } from "./display/MsgLine";
 export { Notice, type NoticeTone } from "./feedback/Notice";
@@ -31,7 +30,7 @@ export { Thumb } from "./display/Thumb";
 export { Toggle } from "./controls/Toggle";
 export { ViewFrame } from "./layout/ViewFrame";
 export { ViewHeader } from "./layout/ViewHeader";
-export { ago, bytes, monogram, when } from "./format";
+export { ago, bytes, count, monogram, when } from "./format";
 export {
   CARD_SHELL,
   CARD_TILE,
@@ -45,6 +44,15 @@ export {
   SETTING_CONTROL,
   SKELETON_DELAY_MS,
   TILE,
+  TOAST_DISC,
+  TOAST_CLOSE,
+  TOAST_CLOSE_MS,
+  TOAST_IN,
+  TOAST_OPEN,
+  TOAST_OUT,
+  TOAST_SHELL,
+  TOAST_TEXT,
+  TOAST_TITLE,
   VIEW_FRAME,
   cx,
 } from "./styles";

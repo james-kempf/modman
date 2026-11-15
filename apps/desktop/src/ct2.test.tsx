@@ -25,7 +25,9 @@ async function open(view: ViewId, handlers: Record<string, Handler> = {}, games:
 }
 
 const main = () => screen.getByRole("main");
-const noticeTexts = () => useUi.getState().notices.map((n) => n.text);
+/** The shown toast as "title · detail" (T15: a short title, the specifics in the detail). */
+const line = (n: { text: string; detail?: string }) => (n.detail ? `${n.text} · ${n.detail}` : n.text);
+const noticeTexts = () => [useUi.getState().toast].flatMap((x) => (x ? [x] : [])).map(line);
 
 const collResult = (o: Partial<CollectionResult> = {}): CollectionResult => ({
   game: "skyrimspecialedition",
@@ -114,8 +116,9 @@ describe("CT2 D02/D04 deploy-due per game", () => {
     expect(screen.queryByRole("button", { name: "Deploy changes" })).toBeNull();
   });
 
-  // D04: fails when a deploy clears the pending state although mods changed while it ran, or the notice omits the game.
-  it("a change during the deploy stays pending; the notice names the game", async () => {
+  // D04: fails when a deploy clears the pending state although mods changed while it ran, or the result toast is
+  // lost. T15: the active game's name is not repeated (the app bar names it).
+  it("a change during the deploy stays pending; the result toast shows the counts", async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
     const { user, t } = await open("overview", { deploy: async () => (await gate, deployReport({ placed: 5, mods: 1 })) });
@@ -124,22 +127,28 @@ describe("CT2 D02/D04 deploy-due per game", () => {
     await waitFor(() => expect(t.callsOf("deploy")).toEqual([{ game: "skyrimspecialedition", dry_run: false, method: null }]));
     act(() => useUi.getState().markDeployDue("skyrimspecialedition"));
     act(() => release());
-    await waitFor(() => expect(noticeTexts()).toContain("Skyrim Special Edition: Deployed 5 files from 1 mods"));
+    await waitFor(() => expect(noticeTexts()).toContain("Deployed · 5 files · 1 mod"));
     expect(useUi.getState().deployDue.skyrimspecialedition).toBeDefined();
   });
 });
 
-describe("CT2 D04 deploy progress", () => {
-  // Fails when the progress of another game's deploy shows under the active game's header.
-  it("is shown only for the game being deployed", async () => {
+describe("CT2 D04 deploy progress (T17)", () => {
+  // Fails when a progress bar or "deploying n/total" text comes back beside the game name: the toast pill's
+  // live detail is the only progress indicator.
+  it("shows only in the toast pill, no progress bar elsewhere in the app bar", async () => {
     await open("overview");
     act(() => {
-      useUi.getState().setDeployGame("cyberpunk2077");
+      useUi.getState().onJob({ id: 1, kind: "deploy", state: "started", error: null });
       useUi.getState().onDeployProgress({ job: 1, done: 2, total: 20 });
     });
-    expect(screen.queryByText(/deploying 2\/20/)).toBeNull();
-    act(() => useUi.getState().setDeployGame("skyrimspecialedition"));
-    expect(await screen.findByText(/deploying 2\/20/)).toBeInTheDocument();
+    const bar = screen.getByRole("banner", { name: "App" });
+    const pill = within(within(bar).getByRole("complementary", { name: "Notices" })).getByRole("status");
+    expect(pill).toHaveTextContent("2 / 20 files");
+    // The pill's own busy disc stays; nothing progress-like outside it.
+    expect(pill.querySelectorAll(".animate-bar")).toHaveLength(3);
+    expect(bar.querySelectorAll("progress, [role=progressbar]")).toHaveLength(0);
+    const outside = [...bar.querySelectorAll("*")].filter((el) => !pill.contains(el) && !el.contains(pill));
+    expect(outside.some((el) => /\d+\s*\/\s*\d+|deploying/i.test(el.textContent ?? ""))).toBe(false);
   });
 });
 
@@ -170,10 +179,14 @@ describe("CT2 D03/D07 collection install", () => {
       collection_install: () => ((installed = { revision: 3 }), collResult({ deployed: deployReport({ placed: 7, mods: 2 }) })),
     });
     act(() => useUi.getState().markDeployDue("skyrimspecialedition"));
+    // Every toast shown, in order: there is one toast, so the collection's own result replaces the deploy one.
+    const shown: string[] = [];
+    const stop = useUi.subscribe((s, prev) => s.toast && s.toast !== prev.toast && shown.push(line(s.toast)));
     await user.type(await screen.findByLabelText(/Collection URL/), "abc");
     await user.click(screen.getByRole("button", { name: "Look up" }));
     await user.click(await screen.findByRole("button", { name: "Install collection" }));
-    await waitFor(() => expect(noticeTexts()).toContain("Deployed 7 files from 2 mods"));
+    await waitFor(() => expect(shown).toContain("Deployed · 7 files · 2 mods"));
+    stop();
     expect(useUi.getState().deployDue).toEqual({});
     expect(await screen.findByRole("button", { name: "Install this revision" })).toBeInTheDocument();
     expect(screen.getByText(/Installed at revision 3/)).toBeInTheDocument();
@@ -188,7 +201,7 @@ describe("CT2 D03/D07 collection install", () => {
     await user.type(await screen.findByLabelText(/Collection URL/), "abc");
     await user.click(screen.getByRole("button", { name: "Look up" }));
     await user.click(await screen.findByRole("button", { name: "Install collection" }));
-    await waitFor(() => expect(useUi.getState().notices).toEqual([expect.objectContaining({ tone: "info", text: "abc: cancelled" })]));
+    await waitFor(() => expect([useUi.getState().toast].flatMap((x) => (x ? [x] : []))).toEqual([expect.objectContaining({ tone: "info", text: "Cancelled", detail: "Collection abc" })]));
   });
 });
 
@@ -286,11 +299,11 @@ describe("CT2 D10/D11 result notices", () => {
     const field = await screen.findByLabelText("Save the current mod set as");
     await user.type(field, "evening");
     await user.click(screen.getByRole("button", { name: "Save profile" }));
-    await waitFor(() => expect(noticeTexts()).toContain("Profile evening was not overwritten."));
+    await waitFor(() => expect(noticeTexts()).toContain("Kept · Profile evening was not overwritten"));
     expect(field).toHaveValue("evening");
     result = 3;
     await user.click(screen.getByRole("button", { name: "Save profile" }));
-    await waitFor(() => expect(noticeTexts()).toContain("Saved profile evening (3 mods)"));
+    await waitFor(() => expect(noticeTexts()).toContain("Saved · Profile evening · 3 mods"));
     expect(field).toHaveValue("");
   });
 
@@ -308,14 +321,14 @@ describe("CT2 D10/D11 result notices", () => {
     });
     await user.click(await screen.findByRole("button", { name: "Details" }));
     await user.click(await screen.findByRole("button", { name: "Uninstall" }));
-    await waitFor(() => expect(noticeTexts()).toContain("Uninstalled SkyUI"));
+    await waitFor(() => expect(noticeTexts()).toContain("Uninstalled · SkyUI"));
     await user.click(screen.getByRole("tab", { name: "Updates" }));
     await user.click(await screen.findByRole("button", { name: "Check for updates" }));
     await user.click(await screen.findByRole("button", { name: "Install updates" }));
-    await waitFor(() => expect(noticeTexts()).toContain("Installed 1 update"));
+    await waitFor(() => expect(noticeTexts()).toContain("Updated · 1 update installed"));
     act(() => useUi.getState().setView("collections"));
     await user.click(await screen.findByRole("button", { name: "Remove" }));
-    await waitFor(() => expect(noticeTexts()).toContain("Removed collection abc and 2 mods"));
+    await waitFor(() => expect(noticeTexts()).toContain("Removed · Collection abc · 2 mods"));
   });
 });
 
@@ -367,6 +380,6 @@ describe("CT2 D14/D15 focus and orphaned prompts", () => {
     await screen.findByRole("dialog", { name: "Confirm" });
     act(() => useUi.getState().onJob({ id: 70, kind: "install", state: "failed", error: "network went away" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    await waitFor(() => expect(noticeTexts()).toContain("A question from job #70 closed: the job ended."));
+    await waitFor(() => expect(noticeTexts()).toContain("Question closed · Job #70 ended, so its question was closed"));
   });
 });

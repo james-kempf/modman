@@ -30,6 +30,29 @@ export const PILL = "rounded-pill border border-hairline bg-ink px-3 py-1.5 text
 export const LIST_ROW = "rounded-inner px-3 py-2.5 transition-colors duration-base";
 /** Width of a settings row's control (input + Save group, dropdown): grows to fill the row, wraps below 14rem. */
 export const SETTING_CONTROL = "min-w-0 flex-[1_1_14rem]";
+/**
+ * The one toast shape, used unchanged by every toast (results and running jobs alike, in the app bar's toast slot):
+ * the job-island pill, fitted to the bar. It is exactly as tall as the bar's tallest control (h-control, the
+ * same class as Quit), so a toast never grows the bar; py-1 leaves the two text lines 40px, and pl-1.5 keeps the
+ * 36px disc concentric in the 48px pill ((48 - 36) / 2). Inside a slot narrower than @3xs (16rem) the text goes
+ * sr-only and the pill closes to a disc-only circle (pr-1.5); the slot is an @container.
+ */
+export const TOAST_SHELL =
+  "glass pointer-events-auto relative flex h-control w-full max-w-xl items-center gap-3 overflow-hidden rounded-pill py-1 pr-5 pl-1.5 @max-3xs:pr-1.5";
+/** The toast's open (clip reveal left→right) and close (reverse) motion; one of them goes on the shell. */
+export const TOAST_OPEN = "animate-toast-open";
+export const TOAST_CLOSE = "animate-toast-close";
+/** Keep in step with --animate-toast-close (duration-fast): the closing copy unmounts after this. */
+export const TOAST_CLOSE_MS = 150;
+/** A toast's leading status disc (add its tint); holds a size 17 bold glyph. */
+export const TOAST_DISC = "relative grid size-9 shrink-0 place-items-center rounded-pill";
+/** A toast's text column (title, detail): visually hidden, still read, when the slot is too narrow. */
+export const TOAST_TEXT = "relative min-w-0 flex-1 overflow-hidden @max-3xs:sr-only";
+/** The text cycle: the incoming line rises in, the outgoing copy (aria-hidden, absolute) moves up and out. */
+export const TOAST_IN = "block animate-toast-in";
+export const TOAST_OUT = "pointer-events-none absolute inset-0 animate-toast-out";
+/** A toast's main line. */
+export const TOAST_TITLE = "block truncate text-[13.5px] font-medium text-zinc-100";
 /** A view's outer frame (ViewFrame): one column that never widens past <main>, blocks 1.5rem apart. */
 export const VIEW_FRAME = "grid grid-cols-[minmax(0,1fr)] gap-6";
 /** Card title (non-inset header). */

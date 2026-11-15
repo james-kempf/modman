@@ -11,7 +11,7 @@ import { focusables } from "../../../nav/spatial";
 type V = "a" | "b" | "c";
 const TABS: readonly TabItem<V>[] = [
   { value: "a", label: "Alpha", icon: <svg data-testid="icon-a" aria-hidden /> },
-  { value: "b", label: "Beta", badge: <span data-testid="badge-b">3</span> },
+  { value: "b", label: "Beta" },
   { value: "c", label: "Gamma" },
 ];
 
@@ -70,13 +70,13 @@ describe("Tabs", () => {
     for (const k of Array.from(scope.querySelectorAll("kbd"))) expect(cls(k)).toEqual(expect.arrayContaining(["hidden", "pad:inline-flex"]));
   });
 
-  // Fails when icon/badge slots or the data-tab hook for the shell are dropped.
-  it("renders icon and badge slots and a data-tab per tab", () => {
+  // Fails when the icon slot or the data-tab hook for the shell are dropped.
+  it("renders the icon slot and a data-tab per tab", () => {
     render(<Harness />);
     const [a, b] = screen.getAllByRole("tab");
     expect(a).toHaveAttribute("data-tab", "a");
     expect(within(a).getByTestId("icon-a")).toBeInTheDocument();
-    expect(within(b).getByTestId("badge-b")).toHaveTextContent("3");
+    expect(b).toHaveTextContent("Beta");
     expect(screen.queryByRole("tabpanel")).toBeNull();
   });
 

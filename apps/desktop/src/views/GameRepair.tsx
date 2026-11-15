@@ -7,6 +7,7 @@
 // the backend with confirmed=true. Restage refuses while confirmed poisoned
 // backups exist; its message is shown here.
 
+import { failedMsg, showMsg, showToast } from "../app/toast";
 import { ArrowCounterClockwiseIcon, ArrowsClockwiseIcon, ShieldWarningIcon } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
@@ -15,7 +16,7 @@ import { useActiveGame } from "../app/queries";
 import { useBusy, useRun } from "../app/run";
 import { useUi } from "../app/store";
 import { Dialog } from "../components/dialogs/Dialog";
-import { Badge, Button, Card, CardSection, ErrorNote, ListToggle, Row, Toggle, when } from "../components/ui";
+import { Badge, Button, Card, CardSection, ErrorNote, ListToggle, Row, Toggle, count, when } from "../components/ui";
 import * as ipc from "../ipc/commands";
 import type { PoisonedBackup, QuarantineManifest } from "../ipc/types";
 
@@ -34,7 +35,6 @@ function GameRepair({ game, name }: { game: string; name: string }) {
   const poisoned = useQuery({ queryKey: ["poisoned", game], queryFn: () => ipc.backupsPoisoned(game) });
   const quarantines = useQuery({ queryKey: ["quarantines", game], queryFn: () => ipc.quarantinesList(game) });
   const run = useRun();
-  const notify = useUi((s) => s.notify);
   const markDeployDue = useUi((s) => s.markDeployDue);
   const cleaning = useBusy(CLEAN);
   const restaging = useBusy(RESTAGE);
@@ -56,14 +56,14 @@ function GameRepair({ game, name }: { game: string; name: string }) {
     if (!r) return;
     if (r.id) {
       setBlocked(null);
-      notify("success", `Quarantined ${r.backups} backup(s) and ${r.game_files} game file(s) as ${r.id}.`);
-    } else notify("info", "Nothing to quarantine.");
+      showToast("success", "Quarantined", { detail: `${count(r.backups, "backup")} · ${count(r.game_files, "game file")} · ${r.id}` });
+    } else showToast("info", "Nothing found", { detail: "No poisoned backups to quarantine" });
   };
 
   const restore = async (q: QuarantineManifest) => {
     setAsking(null);
     const r = await run(RESTORE, () => ipc.quarantineRestore(q.id, true, game), { key: RESTORE });
-    if (r) notify("success", `Restored quarantine ${r.id}: ${r.backups} backup(s), ${r.game_files} game file(s).`);
+    if (r) showToast("success", "Restored", { detail: `Quarantine ${r.id} · ${count(r.backups, "backup")} · ${count(r.game_files, "game file")}` });
   };
 
   const restage = async () => {
@@ -84,10 +84,10 @@ function GameRepair({ game, name }: { game: string; name: string }) {
     // Restage only rewrites the staged copies; the game folder changes on the next deploy.
     if (r.restaged.length) {
       markDeployDue(game);
-      notify("success", `Restaged ${r.restaged.length} mod(s) of ${name}. Deploy to apply.`);
-    } else notify("info", "Nothing to restage: no mod is staged in an outdated layout.");
-    if (r.no_archive.length) notify("warn", `No archive kept for ${r.no_archive.join(", ")}; reinstall these mods.`);
-    if (r.failed.length) notify("error", `Restage failed for ${r.failed.map((f) => `${f.uid} (${f.error})`).join(", ")}`);
+      showToast("success", "Restaged", { detail: `${count(r.restaged.length, "mod")} · Deploy to apply` });
+    } else showToast("info", "No changes", { detail: "No mod is staged in an outdated layout" });
+    if (r.no_archive.length) showToast("warn", "Reinstall needed", { detail: `No archive kept for ${r.no_archive.join(", ")}` });
+    if (r.failed.length) showMsg("error", failedMsg("Restage", r.failed.map((f) => `${f.uid} (${f.error})`).join(", ")));
   };
 
   const history = [...(quarantines.data ?? [])].reverse();

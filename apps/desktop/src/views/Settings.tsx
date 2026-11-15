@@ -4,13 +4,14 @@
 // the Steam shortcut, the active game's backup cleanup and restage, config
 // keys. Compact rows in a single column.
 
+import { showToast } from "../app/toast";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState, type ReactNode } from "react";
 import { errMsg } from "../app/bridge";
 import { useAccount } from "../app/queries";
 import { useBusy, useRun } from "../app/run";
 import { useUi } from "../app/store";
-import { readClipboard } from "../components/shell/Osk";
+import { CLIPBOARD_BLOCKED, readClipboard } from "../components/shell/Osk";
 import { ClipboardTextIcon, FloppyDiskIcon, KeyIcon, KeyboardIcon, SignOutIcon } from "@phosphor-icons/react";
 import {
   Badge,
@@ -52,7 +53,6 @@ export function Settings() {
 function AccountCard() {
   const q = useAccount();
   const run = useRun();
-  const notify = useUi((s) => s.notify);
   const [changing, setChanging] = useState(false);
   const a = q.data;
   const signedIn = !!a?.key_source;
@@ -85,7 +85,7 @@ function AccountCard() {
             icon={<SignOutIcon aria-hidden size={15} />}
             onClick={async () => {
               const envStill = await run("Sign out", () => ipc.logout(), { key: "Sign out" });
-              if (envStill) notify("warn", "NEXUS_API_KEY is still set in the environment.");
+              if (envStill) showToast("warn", "Key active", { detail: "NEXUS_API_KEY is still set, so Vessel still uses it. Unset it to sign out." });
             }}
           >
             Sign out
@@ -112,7 +112,6 @@ export function ApiKeyEntry({ onDone }: { onDone?: () => void }) {
   const [key, setKey] = useState("");
   const input = useRef<HTMLInputElement>(null);
   const run = useRun();
-  const notify = useUi((s) => s.notify);
   const openOsk = useUi((s) => s.openOsk);
   const busy = useBusy("Sign in");
 
@@ -122,8 +121,10 @@ export function ApiKeyEntry({ onDone }: { onDone?: () => void }) {
     setKey("");
     const r = await run("Sign in", () => ipc.login(k), { key: "Sign in" });
     if (!r) return;
-    notify("success", `Signed in as ${r.user}${r.premium ? " (Premium)" : ""}; key stored in ${r.backend === "keyring" ? "the keyring" : r.file}`);
-    if (r.keyring_unavailable) notify("warn", `Keyring unavailable: ${r.keyring_unavailable}`);
+    showToast("success", "Signed in", {
+      detail: `${r.user}${r.premium ? " (Premium)" : ""} · key stored in ${r.backend === "keyring" ? "the keyring" : r.file}`,
+    });
+    if (r.keyring_unavailable) showToast("warn", "Keyring unavailable", { detail: r.keyring_unavailable });
     onDone?.();
   };
 
@@ -157,7 +158,7 @@ export function ApiKeyEntry({ onDone }: { onDone?: () => void }) {
           onClick={async () => {
             const t = await readClipboard();
             if (t === null) {
-              notify("warn", "Clipboard not readable here; paste into the field with Ctrl+V.");
+              showToast("warn", "Paste blocked", { detail: CLIPBOARD_BLOCKED });
               input.current?.focus();
             } else setKey(t.trim());
           }}
@@ -215,7 +216,6 @@ function SteamShortcut() {
   const q = useQuery({ queryKey: ["steam-shortcut"], queryFn: ipc.steamShortcutStatus });
   const qc = useQueryClient();
   const run = useRun();
-  const notify = useUi((s) => s.notify);
   const busy = useBusy("Steam shortcut");
   const s = q.data;
   const on = !!s && s.accounts > 0 && s.added === s.accounts;
@@ -240,7 +240,9 @@ function SteamShortcut() {
             const r = await run("Steam shortcut", () => ipc.steamShortcutSet(v), { key: "Steam shortcut" });
             if (r) {
               qc.setQueryData(["steam-shortcut"], r);
-              notify("success", `${v ? "Added Vessel to Steam" : "Removed Vessel from Steam"}. Restart Steam to apply it.`);
+              showToast("success", v ? "Added" : "Removed", {
+                detail: `${v ? "Vessel added to Steam" : "Vessel removed from Steam"} · Restart Steam to apply it`,
+              });
             }
           }}
         />
@@ -391,14 +393,13 @@ const ROW = cx("flex flex-wrap items-center justify-between gap-x-3 gap-y-1", SE
 /** One setting: a dropdown (enum), a switch (bool), else a validated text field with Save. */
 function ConfigRow({ entry }: { entry: ConfigEntry }) {
   const run = useRun();
-  const notify = useUi((s) => s.notify);
   const busyKey = `Save ${entry.key}`;
   const busy = useBusy(busyKey);
   const save = async (value: string) => {
     const r = await run("Save setting", () => ipc.configSet(entry.key, value), { key: busyKey });
     if (r) {
-      notify("success", `${r.key} = ${r.value}`);
-      if (r.old_data_left) notify("warn", `Old data is still in ${r.old_data_left}`);
+      showToast("success", "Setting saved", { detail: `${r.key} = ${r.value}` });
+      if (r.old_data_left) showToast("warn", "Old data", { detail: `Still in ${r.old_data_left}` });
     }
   };
   const title = (

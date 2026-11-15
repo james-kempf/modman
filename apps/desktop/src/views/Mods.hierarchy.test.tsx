@@ -162,7 +162,7 @@ describe("#18 changed-since-deploy banner", () => {
     expect(banner.className).toMatch(/\btext-amber-300\b/);
     await user.click(within(banner).getByRole("button", { name: "Deploy now" }));
     await waitFor(() => expect(t.callsOf("deploy")).toHaveLength(1));
-    await waitFor(() => expect(useUi.getState().notices.map((n) => n.text).join()).toMatch(/Deployed 7 files/));
+    await waitFor(() => expect([useUi.getState().toast].flatMap((x) => (x ? [x] : [])).map((n) => `${n.text} · ${n.detail}`).join()).toMatch(/Deployed · 7 files/));
   });
 });
 
