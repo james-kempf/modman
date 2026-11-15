@@ -1,5 +1,35 @@
 # scripts
 
+## run-game-support.sh: complete one game's definition
+
+`scripts/run-game-support.sh` picks the next pending game
+(`pick_game_support_target.py`), has the `claude` CLI research it in an
+isolated worktree, checks the result (`check_game_support_note.py`, cargo
+fmt/clippy/test), then commits, pushes `vessel/game-support-<domain>` and
+opens a PR against `develop`. `--help` lists all options; `--pick-only`
+and `--dry-run` change nothing on the remote.
+
+`--rerun` (only with `--game <domain>`) redoes a game an earlier run
+completed: one with `support = "tested"`, the
+`# vessel-game-support: complete` marker, and/or an existing remote
+branch `vessel/game-support-<domain>`. It is refused while an open PR
+exists from `vessel/game-support-<domain>` or
+`vessel/game-support-<domain>-*`. If the old branch still exists, the run
+uses `vessel/game-support-<domain>-rerun-<UTC yyyymmddHHMM>`, so it never
+reuses or force-pushes an old branch. The agent gets `RERUN=1` and
+re-researches from scratch (see `.github/prompts/add-game-support.md`); the
+PR title ends in " (re-run)". Example:
+
+```sh
+scripts/run-game-support.sh --pick-only --game schedule1 --rerun
+scripts/run-game-support.sh --game schedule1 --rerun
+```
+
+The interactive equivalent is `/add-game-support <domain> --rerun`.
+
+Tests: `python3 -m unittest scripts/test_pick_game_support_target.py
+scripts/test_check_game_support_note.py`.
+
 ## rebrand.py: rename the app
 
 `scripts/rebrand.py` repeats the modman -> Vessel rename for any later

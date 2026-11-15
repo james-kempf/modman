@@ -1,6 +1,6 @@
 ---
 description: Research one pending Nexus game and complete its Vessel definition (interactive version of scripts/run-game-support.sh)
-argument-hint: "[nexus-domain]"
+argument-hint: "[nexus-domain] [--rerun]"
 allowed-tools: Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, Bash(python3 scripts/pick_game_support_target.py:*), Bash(python3 scripts/check_game_support_note.py:*), Bash(cargo fmt:*), Bash(cargo clippy:*), Bash(cargo test:*), Bash(git status:*), Bash(git diff:*), Bash(git switch:*), Bash(git ls-remote:*), Bash(gh pr list:*)
 ---
 
@@ -9,11 +9,19 @@ and checks, but it works in the current checkout and never commits, pushes
 or opens a PR. For the unattended flow (isolated worktree, commit, push,
 PR), run `scripts/run-game-support.sh` instead.
 
-1. Pick the game. Run:
-   `python3 scripts/pick_game_support_target.py --game "$ARGUMENTS"`
-   (add `--no-gh` if `gh` is not logged in). If `domain` is null, report
-   that no game is pending and stop. If it exits non-zero, show the error
-   and stop.
+1. Pick the game. `$ARGUMENTS` is an optional domain, optionally followed
+   by `--rerun`. Run:
+   `python3 scripts/pick_game_support_target.py --game <domain>`,
+   adding `--rerun` when it was given (add `--no-gh` if `gh` is not logged
+   in). `--rerun` without a domain is an error: say so and stop. With
+   `--rerun`, the picker accepts a game an earlier run completed (support
+   `tested`, the completion marker, or an existing remote branch), refuses
+   it while an open PR exists for `vessel/game-support-<domain>*` (it
+   prints the PR URL), and returns
+   `vessel/game-support-<domain>-rerun-<UTC yyyymmddHHMM>` as the branch
+   when `vessel/game-support-<domain>` already exists on the remote. If
+   `domain` is null, report that no game is pending and stop. If it exits
+   non-zero, show the error and stop.
 2. Check `git status --porcelain`. If any of the allowed files from the
    prompt (the definition, `crates/vessel-core/src/games/definitions.rs`,
    `docs/game-support/<domain>.md`) already has uncommitted changes, stop
@@ -22,7 +30,8 @@ PR), run `scripts/run-game-support.sh` instead.
    (`git switch -c <branch>`), or to work on the current branch.
 4. Read `.github/prompts/add-game-support.md` and follow it exactly, with
    DOMAIN, NAME, DEFINITION and BRANCH from step 1 and
-   CHECKER=`scripts/check_game_support_note.py`. Do the "Loader routes"
+   CHECKER=`scripts/check_game_support_note.py`, plus `RERUN=1` when
+   `--rerun` was given (follow the prompt's "Re-run" section). Do the "Loader routes"
    research in its section 2 for every loader: sample the requirements of
    several top mods, and list every route (Nexus page, off-site sources)
    and how mods declare it. Make every file change
@@ -48,3 +57,6 @@ PR), run `scripts/run-game-support.sh` instead.
    `git add <files> && git commit -m "games: <domain>: <full support | partial (Rust changes needed)>"`,
    `git push -u origin <branch>`,
    `gh pr create --base develop --head <branch> --title "games: <Name> (<domain>): <outcome>" --body-file <body>`.
+   For a re-run, the runner appends " (re-run)" to the commit message and
+   PR title and starts the PR body with "Re-run of a previously completed
+   game."

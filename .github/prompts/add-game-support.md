@@ -4,7 +4,9 @@ You are completing Vessel's configuration for exactly one game. Vessel is a
 Linux mod manager (Rust core in `crates/vessel-core`). The game to work on,
 its definition file and the branch are given to you by the caller as
 `DOMAIN`, `NAME`, `DEFINITION`, `BRANCH` and `CHECKER` (the path of
-`check_game_support_note.py`). Work on that game only.
+`check_game_support_note.py`), plus `RERUN=1` when this is a re-run of a
+game an earlier run already completed (see "Re-run" below). Work on that
+game only.
 
 The caller (`scripts/run-game-support.sh` or the `/add-game-support`
 command) owns git.
@@ -19,6 +21,31 @@ Make every file change with the Edit or Write tool, never with
 `python`, `sed`, heredocs or other scripts. Any other shell command is
 denied. A denied command does not mean Bash is unavailable: the allowed
 commands above still work, and you must still run the checks in section 4.
+
+## Re-run (`RERUN=1`)
+
+When the inputs include `RERUN=1`, an earlier run already completed this
+game, possibly under older rules. Then:
+
+- Treat the existing `DEFINITION` and `docs/game-support/<DOMAIN>.md` as
+  unverified prior work, not as sources. Do sections 1 to 5 in full and
+  research from scratch under the current rules, including every loader's
+  "Loader routes". Re-check each prior value against a source before you
+  keep it.
+- Rewrite the note completely to the current template in section 5. Do not
+  keep sections or wording from the old note that the template lacks.
+- Set `support` from the new Gaps result, as in section 3. This may demote
+  a `"tested"` game to `"experimental"`; if so, remove the domain from the
+  tested-domains list in the `every_other_preset_is_experimental` test in
+  `crates/vessel-core/src/games/definitions.rs` and fix any other test that
+  pins its support level.
+- Keep the `# vessel-game-support: complete` marker and the
+  `# Sources:` line.
+- Start the note's `## Summary` with "Re-run of a previously completed
+  game." and end it with a bullet list of what changed versus the prior
+  definition and note (fields added, removed or changed, support level,
+  new or removed Gaps and loader routes), or "No changes to the
+  definition." The note is the pull request body.
 
 ## 1. Learn the existing pattern first
 
@@ -135,7 +162,8 @@ Allowed changes (the runner rejects anything else):
   `palworld_declares_ue4ss_and_mods_txt_only_palworld_does`, and update
   existing tests that the new config legitimately changes (for example that
   test's "only palworld has `[ue4ss]`" loop). Do not touch non-test code.
-- `docs/game-support/<DOMAIN>.md` (new): the research note, see section 5.
+- `docs/game-support/<DOMAIN>.md` (new, or rewritten on a re-run): the
+  research note, see section 5.
 
 Rules for the definition:
 
