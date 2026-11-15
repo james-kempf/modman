@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Ported from the legacy bash tool game_preset (L269-300).
+domain = "eldenring"
+name = "Elden Ring"
+steam_appid = 1245620
+subdir = "."
+target = "game_dir"
+profile = "generic"
+support = "experimental"

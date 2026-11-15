@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Vessel
+GenericName=Mod Manager
+Comment=Nexus Mods manager for Steam and Proton games
+Exec=vessel-desktop
+Icon=org.vessel.app
+Terminal=false
+Categories=Game;
+Keywords=nexus;mods;skyrim;fallout;steam;deck;
+StartupWMClass=vessel-desktop
+X-Flatpak-RenamedFrom=org.modman.app.desktop;

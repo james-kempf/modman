@@ -1,0 +1,384 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Regression tests for the continuous-testing round 2 defects (CT2 D01-D16).
+// Layout defects are guarded by the classes / DOM placement that fix them
+// (jsdom has no layout); the Playwright re-run covers the rendered result.
+import { QueryClientProvider } from "@tanstack/react-query";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { StrictMode } from "react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { useUi, type ViewId } from "./app/store";
+import { makeQueryClient } from "./app/queries";
+import { domainProblem } from "./components/dialogs/AddGameDialog";
+import { ViewBoundary } from "./components/shell/ErrorBoundary";
+import { monogram } from "./components/ui";
+import type { CollectionResult, GameView } from "./ipc/types";
+import type { Handler } from "./mock/fake";
+import { afterChange, deployReport, experimentalGame, game, mod } from "./mock/fixtures";
+import { setup } from "./test/harness";
+
+async function open(view: ViewId, handlers: Record<string, Handler> = {}, games: GameView[] = [game()]) {
+  const env = await setup(handlers, games);
+  env.renderApp();
+  act(() => useUi.getState().setView(view));
+  return { ...env, user: userEvent.setup() };
+}
+
+const main = () => screen.getByRole("main");
+/** The shown toast as "title · detail" (T15: a short title, the specifics in the detail). */
+const line = (n: { text: string; detail?: string }) => (n.detail ? `${n.text} · ${n.detail}` : n.text);
+const noticeTexts = () => [useUi.getState().toast].flatMap((x) => (x ? [x] : [])).map(line);
+
+const collResult = (o: Partial<CollectionResult> = {}): CollectionResult => ({
+  game: "skyrimspecialedition",
+  slug: "abc",
+  revision: 3,
+  cancelled: false,
+  download_only: false,
+  installed: 2,
+  present: 0,
+  failed: [],
+  removed: 0,
+  up_to_date: false,
+  deployed: null,
+  ...o,
+});
+
+const collInfo = (installed: { revision: number } | null) => ({
+  game: "skyrimspecialedition",
+  slug: "abc",
+  revision: {
+    name: "Coll ABC", author: "c", game_name: "Skyrim", number: 3, status: "published", latest: 3,
+    mod_count: 2, optional_count: 0, total_size: 1, summary: null, url: "u",
+  },
+  installed,
+  update_available: null,
+});
+
+afterEach(() => vi.restoreAllMocks());
+
+describe("CT2 D01 dialogs", () => {
+  // Fails when the dialog renders inside the view (a transformed ancestor traps its fixed backdrop) and the header stays live.
+  it("render in a portal on <body>, fixed, and make the app inert", async () => {
+    const m = mod({ name: "SkyUI" });
+    const { user } = await open("mods", { mods_list: () => ({ mods: [m], changed_since_deploy: false }) });
+    await user.click(await screen.findByRole("button", { name: "Details" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(main().contains(dialog)).toBe(false);
+    const backdrop = dialog.parentElement!;
+    expect(backdrop.parentElement).toBe(document.body);
+    expect(backdrop.className).toMatch(/\bfixed inset-0\b/);
+    // Fits short windows: height bound to the viewport, the tab's pane scrolls inside.
+    expect(dialog.className).toMatch(/h-\[calc\(100vh-2rem\)\]/);
+    expect(dialog.querySelector("[data-scroll-pane]")!.className).toMatch(/overflow-y-auto/);
+    const tab = document.querySelector("[data-tab=settings]")!;
+    expect(tab.closest("[inert]")).not.toBeNull();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(tab.closest("[inert]")).toBeNull();
+  });
+
+  // Fails when a dialog opened over another leaves the lower one interactive.
+  it("a prompt over a dialog makes the lower dialog inert, and restores it", async () => {
+    const { user } = await open("games");
+    await user.click(await within(main()).findByRole("button", { name: "Add game" }));
+    const add = await screen.findByRole("dialog", { name: "Add a game" });
+    act(() => useUi.getState().onPrompt({ id: 1, job: null, prompt: { type: "confirm", question: "Sure?", default_yes: true } }));
+    await screen.findByRole("dialog", { name: "Confirm" });
+    expect(add.closest("[inert]")).not.toBeNull();
+    act(() => useUi.getState().dropPrompt(1));
+    await waitFor(() => expect(add.closest("[inert]")).toBeNull());
+    expect(document.querySelector("[data-tab=overview]")!.closest("[inert]")).not.toBeNull();
+  });
+});
+
+describe("CT2 D02/D04 deploy-due per game", () => {
+  const two = [game(), experimentalGame({ active: false })];
+
+  // D02: fails when the deploy-due state of one game shows after switching to another.
+  it("is not shown for another game", async () => {
+    let games = two;
+    const { qc } = await open("overview", { games_list: () => games }, two);
+    act(() => useUi.getState().markDeployDue("skyrimspecialedition"));
+    expect(await within(main()).findByText("Changes waiting to be deployed")).toBeInTheDocument();
+    games = [game({ active: false }), experimentalGame({ active: true })];
+    await act(() => qc.refetchQueries({ queryKey: ["games"] }));
+    await within(main()).findByText("Cyberpunk 2077");
+    expect(within(main()).queryByText("Changes waiting to be deployed")).toBeNull();
+    expect(within(main()).getByText("Deployed and in sync")).toBeInTheDocument();
+  });
+
+  // D02: fails when the backend's per-game changed_since_deploy is not used for the deploy state.
+  // U02: deploying is offered on the Overview only (no header "Deploy changes").
+  it("follows the game's changed_since_deploy", async () => {
+    await open("overview", { mods_list: () => ({ mods: [], changed_since_deploy: true }) });
+    expect(await within(main()).findByText("Changes waiting to be deployed")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Deploy changes" })).toBeNull();
+  });
+
+  // D04: fails when a deploy clears the pending state although mods changed while it ran, or the result toast is
+  // lost. T15: the active game's name is not repeated (the app bar names it).
+  it("a change during the deploy stays pending; the result toast shows the counts", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const { user, t } = await open("overview", { deploy: async () => (await gate, deployReport({ placed: 5, mods: 1 })) });
+    act(() => useUi.getState().markDeployDue("skyrimspecialedition"));
+    await user.click(await within(main()).findByRole("button", { name: "Deploy" }));
+    await waitFor(() => expect(t.callsOf("deploy")).toEqual([{ game: "skyrimspecialedition", dry_run: false, method: null }]));
+    act(() => useUi.getState().markDeployDue("skyrimspecialedition"));
+    act(() => release());
+    await waitFor(() => expect(noticeTexts()).toContain("Deployed · 5 files · 1 mod"));
+    expect(useUi.getState().deployDue.skyrimspecialedition).toBeDefined();
+  });
+});
+
+describe("CT2 D04 deploy progress (T17)", () => {
+  // Fails when a progress bar or "deploying n/total" text comes back beside the game name: the toast pill's
+  // live detail is the only progress indicator.
+  it("shows only in the toast pill, no progress bar elsewhere in the app bar", async () => {
+    await open("overview");
+    act(() => {
+      useUi.getState().onJob({ id: 1, kind: "deploy", state: "started", error: null });
+      useUi.getState().onDeployProgress({ job: 1, done: 2, total: 20 });
+    });
+    const bar = screen.getByRole("banner", { name: "App" });
+    const pill = within(within(bar).getByRole("complementary", { name: "Notices" })).getByRole("status");
+    expect(pill).toHaveTextContent("2 / 20 files");
+    // The pill's own busy disc stays; nothing progress-like outside it.
+    expect(pill.querySelectorAll(".animate-bar")).toHaveLength(3);
+    expect(bar.querySelectorAll("progress, [role=progressbar]")).toHaveLength(0);
+    const outside = [...bar.querySelectorAll("*")].filter((el) => !pill.contains(el) && !el.contains(pill));
+    expect(outside.some((el) => /\d+\s*\/\s*\d+|deploying/i.test(el.textContent ?? ""))).toBe(false);
+  });
+});
+
+describe("CT2 D03/D07 collection install", () => {
+  // D03: fails when a collection install with deploy off does not offer the deploy (CollectionResult has no needs_deploy).
+  // U02: the deploy now due is recorded (Overview, game tile) without a notice or a header button.
+  it("deploy off: marks the game out of sync, with no notice or header button", async () => {
+    let dirty = false;
+    const { user } = await open("collections", {
+      collection_info: () => collInfo(null),
+      collection_install: () => ((dirty = true), collResult()),
+      mods_list: () => ({ mods: [], changed_since_deploy: dirty }),
+    });
+    await user.type(await screen.findByLabelText(/Collection URL/), "abc");
+    await user.click(screen.getByRole("button", { name: "Look up" }));
+    await user.click(await screen.findByRole("switch", { name: "Deploy when done" }));
+    await user.click(screen.getByRole("button", { name: "Install collection" }));
+    await waitFor(() => expect(useUi.getState().deployDue.skyrimspecialedition).toBeDefined());
+    expect(noticeTexts()).not.toContain("Changes are not in the game yet.");
+    expect(screen.queryByRole("button", { name: "Deploy changes" })).toBeNull();
+  });
+
+  // D03: fails when a collection install that deployed says nothing about the deploy. D07: the panel stays at "Install collection".
+  it("deploy on: 'Deployed N files' notice, and the look-up panel refreshes", async () => {
+    let installed: { revision: number } | null = null;
+    const { user } = await open("collections", {
+      collection_info: () => collInfo(installed),
+      collection_install: () => ((installed = { revision: 3 }), collResult({ deployed: deployReport({ placed: 7, mods: 2 }) })),
+    });
+    act(() => useUi.getState().markDeployDue("skyrimspecialedition"));
+    // Every toast shown, in order: there is one toast, so the collection's own result replaces the deploy one.
+    const shown: string[] = [];
+    const stop = useUi.subscribe((s, prev) => s.toast && s.toast !== prev.toast && shown.push(line(s.toast)));
+    await user.type(await screen.findByLabelText(/Collection URL/), "abc");
+    await user.click(screen.getByRole("button", { name: "Look up" }));
+    await user.click(await screen.findByRole("button", { name: "Install collection" }));
+    await waitFor(() => expect(shown).toContain("Deployed · 7 files · 2 mods"));
+    stop();
+    expect(useUi.getState().deployDue).toEqual({});
+    expect(await screen.findByRole("button", { name: "Install this revision" })).toBeInTheDocument();
+    expect(screen.getByText(/Installed at revision 3/)).toBeInTheDocument();
+  });
+
+  // D07: fails when a cancelled install shows a success tone.
+  it("a cancelled install is a neutral notice", async () => {
+    const { user } = await open("collections", {
+      collection_info: () => collInfo(null),
+      collection_install: () => collResult({ cancelled: true, installed: 0 }),
+    });
+    await user.type(await screen.findByLabelText(/Collection URL/), "abc");
+    await user.click(screen.getByRole("button", { name: "Look up" }));
+    await user.click(await screen.findByRole("button", { name: "Install collection" }));
+    await waitFor(() => expect([useUi.getState().toast].flatMap((x) => (x ? [x] : []))).toEqual([expect.objectContaining({ tone: "info", text: "Cancelled", detail: "Collection abc" })]));
+  });
+});
+
+describe("CT2 D05 error boundary recovery", () => {
+  const bad = () => ({ ...mod({ name: "Broken" }), collections: null as unknown as string[] });
+
+  // Fails when Try again re-renders with the cached bad data (the query is not refetched).
+  it("Try again refetches the view's data", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    let mods = [bad()];
+    const { user } = await open("mods", { mods_list: () => ({ mods, changed_since_deploy: false }) });
+    await screen.findByText(/This view hit an error/);
+    mods = [mod({ name: "Fixed" })];
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Fixed")).toBeInTheDocument();
+  });
+
+  // Fails when coming back to a crashed view serves the cached bad data again.
+  it("recovers after navigating away and back once the data is good", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    let mods = [bad()];
+    await open("mods", { mods_list: () => ({ mods, changed_since_deploy: false }) });
+    await screen.findByText(/This view hit an error/);
+    mods = [mod({ name: "Fixed" })];
+    act(() => useUi.getState().setView("browse"));
+    act(() => useUi.getState().setView("mods"));
+    expect(await screen.findByText("Fixed")).toBeInTheDocument();
+  });
+});
+
+describe("CT2 D05 Activity log", () => {
+  // Fails when one malformed streamed message (kept in the session log, not a query) breaks Activity permanently.
+  it("renders a malformed message span instead of crashing", async () => {
+    await open("activity");
+    act(() =>
+      useUi.getState().onActivity({ job: 1, msg: { level: "info", spans: [{ text: { bad: 1 } as unknown as string, style: "plain" }] }, text: "x" }),
+    );
+    expect(await screen.findByText('{"bad":1}')).toBeInTheDocument();
+    expect(screen.queryByText(/This view hit an error/)).toBeNull();
+  });
+});
+
+describe("CT2 D05 boundary under StrictMode", () => {
+  // Fails when StrictMode's simulated unmount leaves the boundary stuck on "Loading…" after its automatic retry.
+  it("shows the fallback after the automatic retry fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    function Boom(): never {
+      throw new Error("bad data");
+    }
+    render(
+      <StrictMode>
+        <QueryClientProvider client={makeQueryClient()}>
+          <ViewBoundary name="Mods">
+            <Boom />
+          </ViewBoundary>
+        </QueryClientProvider>
+      </StrictMode>,
+    );
+    expect(await screen.findByText(/This view hit an error/)).toBeInTheDocument();
+  });
+});
+
+describe("CT2 D06/D08 layout guards", () => {
+  // D06: fails when the header actions stop wrapping (they would overflow narrow windows) or header text comes back.
+  it("ViewHeader holds only its actions, in a wrapping row", async () => {
+    await open("requirements");
+    const header = (await within(main()).findByRole("button", { name: "Refresh from Nexus" })).closest("header")!;
+    expect(header.className).not.toMatch(/md:flex-row/);
+    expect(header.className).toMatch(/\bflex-wrap\b/);
+    expect(header.textContent).toBe("Refresh from Nexus");
+  });
+
+  // D08: fails when every job row is a tab stop and the list grows the page.
+  it("Activity jobs are one scroll region, not one tab stop per row", async () => {
+    await open("activity");
+    act(() => {
+      for (let i = 1; i <= 5; i++) {
+        useUi.getState().onJob({ id: i, kind: "enable", state: "started", error: null });
+        useUi.getState().onJob({ id: i, kind: "enable", state: "finished", error: null });
+      }
+    });
+    const list = await screen.findByRole("list", { name: "Jobs" });
+    expect(list.getAttribute("tabindex")).toBe("0");
+    expect(list.className).toMatch(/overflow-y-auto/);
+    expect(within(list).getAllByRole("listitem").every((li) => !li.hasAttribute("tabindex"))).toBe(true);
+  });
+});
+
+describe("CT2 D10/D11 result notices", () => {
+  // D11: fails when a declined overwrite (null result) clears the name.
+  it("profile save: declined overwrite keeps the name; a save says so", async () => {
+    let result: number | null = null;
+    const { user } = await open("mods", { profile_save: () => result });
+    await user.click(await screen.findByRole("tab", { name: "Profiles" }));
+    const field = await screen.findByLabelText("Save the current mod set as");
+    await user.type(field, "evening");
+    await user.click(screen.getByRole("button", { name: "Save profile" }));
+    await waitFor(() => expect(noticeTexts()).toContain("Kept · Profile evening was not overwritten"));
+    expect(field).toHaveValue("evening");
+    result = 3;
+    await user.click(screen.getByRole("button", { name: "Save profile" }));
+    await waitFor(() => expect(noticeTexts()).toContain("Saved · Profile evening · 3 mods"));
+    expect(field).toHaveValue("");
+  });
+
+  // D10: fails when uninstall / remove collection / install updates finish silently.
+  it("uninstall, remove collection and install updates report their result", async () => {
+    const m = mod({ name: "SkyUI" });
+    const { user } = await open("mods", {
+      mods_list: () => ({ mods: [m], changed_since_deploy: false }),
+      mods_uninstall: () => ({ done: true, mods: 1, archives: [], after: afterChange({ needs_deploy: false }) }),
+      updates_check: () => ({ checked: 1, fetched: 1, stopped_early: false, installed: 0, updates: [{ mod: m, file: { file_id: 1, name: "f", version: "2" }, pinned: false }] }),
+      updates_install: () => ({ checked: 1, fetched: 1, stopped_early: false, installed: 1, updates: [] }),
+      collections_list: () => [{ record: { id: 1, game: "skyrimspecialedition", slug: "abc", name: "ABC", author: null, revision: 1, dir: null, failed: [], installed_at: 0, mods: [] }, enabled: 0 }],
+      collection_remove: () => ({ removed: true, uninstalled: 2, after: afterChange({ needs_deploy: false }) }),
+    });
+    await user.click(await screen.findByRole("button", { name: "Details" }));
+    await user.click(await screen.findByRole("button", { name: "Remove SkyUI" }));
+    await waitFor(() => expect(noticeTexts()).toContain("Uninstalled · SkyUI"));
+    await user.click(screen.getByRole("tab", { name: "Updates" }));
+    await user.click(await screen.findByRole("button", { name: "Check for updates" }));
+    await user.click(await screen.findByRole("button", { name: "Install updates" }));
+    await waitFor(() => expect(noticeTexts()).toContain("Updated · 1 update installed"));
+    act(() => useUi.getState().setView("collections"));
+    await user.click(await screen.findByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(noticeTexts()).toContain("Removed · Collection abc · 2 mods"));
+  });
+});
+
+describe("CT2 D12/D13 text handling", () => {
+  // D12: fails when an invalid domain is sent to game_add.
+  it("Add game validates the domain inline", async () => {
+    const { user, t } = await open("games", { game_add: () => game() });
+    await user.click(await within(main()).findByRole("button", { name: "Add game" }));
+    const field = await screen.findByLabelText("Nexus game domain");
+    await user.type(field, "Skyrim SE");
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Add game" }));
+    expect(field).toHaveAttribute("aria-invalid", "true");
+    expect(field).toHaveAccessibleDescription(/lowercase letters and digits/);
+    expect(t.callsOf("game_add")).toEqual([]);
+    expect(domainProblem("  fallout4 ")).toBeNull();
+    expect(domainProblem("   ")).not.toBeNull();
+  });
+
+  // D13: fails when initials drop non-Latin letters or split emoji / combining sequences.
+  it("monogram initials are Unicode-aware", () => {
+    expect(monogram("Ünofficial Ëxtended Patch").initials).toBe("ÜË");
+    expect(monogram("スカイリム 日本語化").initials).toBe("ス日");
+    expect(monogram("🧙‍♂️ Wizard Robes").initials).toBe("WR");
+    expect(monogram("🔥🔥🔥").initials).toBe("🔥");
+    expect(monogram("Z̷̢̛a̸l̴g̵o̶").initials).toBe("Z");
+    expect(monogram("").initials).toBe("?");
+  });
+});
+
+describe("CT2 D14/D15 focus and orphaned prompts", () => {
+  // D14: fails when focus leaves the view after the focused collection row is removed.
+  it("after Remove, focus goes to the look-up field", async () => {
+    let list = [{ record: { id: 1, game: "skyrimspecialedition", slug: "abc", name: "ABC", author: null, revision: 1, dir: null, failed: [], installed_at: 0, mods: [] }, enabled: 0 }];
+    const { user } = await open("collections", {
+      collections_list: () => list,
+      collection_remove: () => ((list = []), { removed: true, uninstalled: 0, after: afterChange({ needs_deploy: false }) }),
+    });
+    await user.click(await screen.findByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(screen.getByLabelText(/Collection URL/)).toHaveFocus());
+  });
+
+  // D15: fails when a prompt of a job that ended stays on screen.
+  it("a prompt of a job that ended is withdrawn", async () => {
+    await open("overview");
+    act(() => {
+      useUi.getState().onJob({ id: 70, kind: "install", state: "started", error: null });
+      useUi.getState().onPrompt({ id: 9, job: 70, prompt: { type: "confirm", question: "Overwrite?", default_yes: true } });
+    });
+    await screen.findByRole("dialog", { name: "Confirm" });
+    act(() => useUi.getState().onJob({ id: 70, kind: "install", state: "failed", error: "network went away" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(noticeTexts()).toContain("Question closed · Job #70 ended, so its question was closed"));
+  });
+});

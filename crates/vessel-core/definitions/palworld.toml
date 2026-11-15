@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Ported from the legacy bash tool game_preset (L269-300).
+domain = "palworld"
+name = "Palworld"
+steam_appid = 1623730
+subdir = "."
+target = "game_dir"
+profile = "ue"
+support = "experimental"
+paks_dir = "Pal/Content/Paks/~mods"
+
+# UE4SS Lua/C++ mods are staged into <mods_dir>/<ModFolder>/. Older UE4SS
+# releases (no ue4ss/UE4SS.dll) read mods from legacy_mods_dir instead.
+[ue4ss]
+mods_dir = "Pal/Binaries/Win64/ue4ss/Mods"
+legacy_mods_dir = "Pal/Binaries/Win64/Mods"
+probe = "Pal/Binaries/Win64/ue4ss/UE4SS.dll"
+
+# vessel owns mods.txt in the resolved UE4SS mods folder.
+[[shared_files]]
+name = "mods.txt"
+relative_to = "ue4ss_mods_dir"
+format = "ue4ss_mods_txt"

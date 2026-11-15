@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Test fixture: every group type, flags, dependency types, visibility,
+     conditionalFileInstalls, requiredInstallFiles, priorities and ordering. -->
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
+  <moduleName>Fixture Mod</moduleName>
+  <moduleImage path="fomod\images\main.png"/>
+  <requiredInstallFiles>
+    <file source="core\core.esp" destination="core.esp"/>
+    <file source="core/body_default.nif" destination="meshes\body.nif"/>
+    <folder source="core/textures" destination="textures"/>
+  </requiredInstallFiles>
+  <installSteps order="Explicit">
+    <installStep name="Main">
+      <optionalFileGroups order="Explicit">
+        <group name="Body" type="SelectExactlyOne">
+          <plugins order="Explicit">
+            <plugin name="Slim">
+              <description>Slim body</description>
+              <image path="fomod/images/slim.png"/>
+              <conditionFlags><flag name="body">slim</flag></conditionFlags>
+              <files><file source="body/slim.nif" destination="meshes/body.nif" priority="1"/></files>
+              <typeDescriptor><type name="Optional"/></typeDescriptor>
+            </plugin>
+            <plugin name="Curvy">
+              <description>Curvy &amp; tall</description>
+              <conditionFlags><flag name="body">curvy</flag></conditionFlags>
+              <files><file source="body/curvy.nif" destination="meshes/body.nif" priority="1"/></files>
+              <typeDescriptor><type name="Recommended"/></typeDescriptor>
+            </plugin>
+          </plugins>
+        </group>
+        <group name="Extras" type="SelectAny">
+          <plugins order="Ascending">
+            <plugin name="Zeta">
+              <description>Z</description>
+              <files><file source="extras/zeta.esp" destination=""/></files>
+              <typeDescriptor><type name="Optional"/></typeDescriptor>
+            </plugin>
+            <plugin name="Alpha">
+              <description>A</description>
+              <files><file source="extras/alpha.esp" destination="plugins/"/></files>
+              <typeDescriptor><type name="Recommended"/></typeDescriptor>
+            </plugin>
+          </plugins>
+        </group>
+        <group name="Patch" type="SelectAtMostOne">
+          <plugins order="Descending">
+            <plugin name="None">
+              <description>No patch</description>
+              <typeDescriptor><type name="Optional"/></typeDescriptor>
+            </plugin>
+            <plugin name="Patch A">
+              <description>Only for curvy</description>
+              <files><file source="patches/patch_a.esp"/></files>
+              <typeDescriptor>
+                <dependencyType>
+                  <defaultType name="NotUsable"/>
+                  <patterns>
+                    <pattern>
+                      <dependencies><flagDependency flag="body" value="curvy"/></dependencies>
+                      <type name="Recommended"/>
+                    </pattern>
+                  </patterns>
+                </dependencyType>
+              </typeDescriptor>
+            </plugin>
+          </plugins>
+        </group>
+      </optionalFileGroups>
+    </installStep>
+    <installStep name="Curvy Options">
+      <visible><flagDependency flag="body" value="curvy"/></visible>
+      <optionalFileGroups order="Explicit">
+        <group name="Size" type="SelectAtLeastOne">
+          <plugins>
+            <plugin name="Small">
+              <description>S</description>
+              <files><file source="size/small.esp" destination="small.esp"/></files>
+              <typeDescriptor><type name="Optional"/></typeDescriptor>
+            </plugin>
+            <plugin name="Large">
+              <description>L</description>
+              <files><file source="size/large.esp" destination="large.esp"/></files>
+              <typeDescriptor><type name="Optional"/></typeDescriptor>
+            </plugin>
+          </plugins>
+        </group>
+        <group name="Always" type="SelectAll">
+          <plugins>
+            <plugin name="Shared">
+              <description>Shared</description>
+              <files><file source="shared/shared.txt" destination="shared.txt"/></files>
+              <typeDescriptor><type name="Optional"/></typeDescriptor>
+            </plugin>
+          </plugins>
+        </group>
+        <group name="Empty" type="SelectAny"><plugins/></group>
+      </optionalFileGroups>
+    </installStep>
+    <installStep name="Docs">
+      <optionalFileGroups>
+        <group name="Readme" type="SelectAny">
+          <plugins>
+            <plugin name="Readme">
+              <description>Docs</description>
+              <files><file source="docs/readme.txt" destination="docs/" alwaysInstall="true"/></files>
+              <typeDescriptor><type name="Optional"/></typeDescriptor>
+            </plugin>
+            <plugin name="Broken">
+              <description>Never usable</description>
+              <files><file source="docs/broken.txt" destination="broken.txt" installIfUsable="true"/></files>
+              <typeDescriptor><type name="NotUsable"/></typeDescriptor>
+            </plugin>
+          </plugins>
+        </group>
+      </optionalFileGroups>
+    </installStep>
+  </installSteps>
+  <conditionalFileInstalls>
+    <patterns>
+      <pattern>
+        <dependencies operator="And">
+          <flagDependency flag="body" value="curvy"/>
+          <fileDependency file="SkyUI_SE.esp" state="Active"/>
+        </dependencies>
+        <files><file source="patches/skyui_curvy.esp" destination="skyui_curvy.esp"/></files>
+      </pattern>
+      <pattern>
+        <dependencies operator="Or">
+          <flagDependency flag="body" value="slim"/>
+          <dependencies operator="And">
+            <fileDependency file="Missing.esp" state="Missing"/>
+            <gameDependency version="1.0"/>
+          </dependencies>
+        </dependencies>
+        <files><file source="patches/low_core.esp" destination="core.esp" priority="-1"/></files>
+      </pattern>
+    </patterns>
+  </conditionalFileInstalls>
+</config>

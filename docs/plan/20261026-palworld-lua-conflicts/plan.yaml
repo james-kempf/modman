@@ -1,0 +1,210 @@
+plan_id: 20261026-palworld-lua-conflicts
+status: completed
+tldr: |
+  Stage UE4SS Lua/C++ mods into their own <mods_dir>/<Folder>/ (content-detected, only for
+  definitions with a [ue4ss] block). modman owns <mods_dir>/mods.txt the way it owns
+  plugins.txt. A provenance-based deploy guard stops new poisoned backups. Existing poisoned
+  backups are quarantined (recoverable, dry-run by default, explicit confirmed flag). A
+  data-safe restage runs only after a poisoned-backup check. 5 waves, max 2 parallel
+  implementers, critic review, then 2 commits on a new branch palworld-lua-conflicts.
+created_at: "2026-10-26"
+created_by: gem-planner
+revision: 2
+replan_count: 0
+planner_revision_used: true
+
+decisions:
+  - "T01 owns all GameDefinition schema edits ([ue4ss] block and shared_files rule), so later tasks never touch games/definitions.rs or palworld.toml."
+  - "T02 runs in wave 1 next to T01 because their files are disjoint (deploy/backup.rs, deploy/engine.rs backup step, journal read, new app action, CLI deploy command vs staging.rs, definitions)."
+  - "T03 waits for T02: both edit deploy/engine.rs. They stay separate because T02 is irreversible-risk scope and T03 is shared-state merge scope."
+  - "T04 depends on T02 because restage must call T02's poisoned-backup dry-run check first (finding 4)."
+  - "Backup guard uses provenance (journal/deployment record says modman placed the file), never sha equality: a mod can ship byte-identical vanilla bytes."
+  - "Cleanup quarantines, never deletes: backup blobs and game files move to <modman data>/<game>/quarantine/<timestamp>/ with a manifest. A restore-from-quarantine action reverses it."
+  - "Confirmation contract: the core apply takes `confirmed: bool`. The front end prompts first (CLI via Ui::confirm, GUI via its own dialog). Core refuses apply when confirmed=false. Core never calls Ui::confirm itself, because the Tauri Ui may auto-answer."
+  - "mods.txt purge policy: if the file is unchanged since modman's last write (sha matches the journal), restore the original byte-identically. Otherwise remove only modman-added lines and keep user edits."
+  - "Delivery split (coordinator decision, supersedes the baseline 'one commit' wording): commit 1 = core+CLI (T01-T04), commit 2 = GUI (T05), both on a new branch palworld-lua-conflicts based on 82323c6. rust-rewrite is never moved."
+  - "Root-cause investigation of the lost tracking (Oct 21) is cut. It is not cheap, and the provenance guard plus quarantine cover the symptom."
+  - "No researcher task: the D01 report already pins causes, line numbers, design and fixture."
+  - "Reuse: plugin_stage/journal/content-addressed backups for mods.txt and quarantine; confine.rs for game-dir moves; existing install pipeline for restage. New code only for UE4SS detection, the mods.txt format, quarantine and the provenance lookup."
+
+assumptions:
+  - "The D01 fixture at /tmp/claude-1000/-home-jkempf-Downloads-gem-team-1-138-0/e945d5c1-f77f-49b6-9b41-dd7a00b18ec5/scratchpad/d01/palworld_ue4ss_layout.rs still exists. T01 ports it to crates/modman-core/tests/palworld_ue4ss_layout.rs."
+  - "D01 risks 2-5 cover (2) doc/txt exclusion dropping enabled.txt/config.txt, (3) detection precision (case, spelling, already-layout-shaped dirs, UE defs without ue4ss), (4) hybrid pak routing, (5) new vs legacy layout choice. The orchestrator passes the verbatim risk text to T01 via shared_context.ue4ss_layout. If a risk differs from this list, T01 maps its tests to the verbatim text."
+  - "modman's deploy journal/deployment records identify which files modman placed, per path. Where no record exists, the entry is 'ambiguous'."
+  - "Mod archives are kept in modman's downloads store. Restage reports mods with no archive instead of failing."
+  - "Every core/CLI code path resolves its data/config/game dirs from HOME/XDG_* or a modman data-dir env override, so tests can point them at temp dirs."
+  - "The UE4SS mods.txt format 'Name : 0|1' with the Keybinds entry last is authoritative. mods.json is out of scope (left untouched, classified ambiguous in cleanup)."
+
+global_constraints:
+  - "Never stash, reset, checkout, update-ref, commit, or write any file in the main worktree /home/jkempf/Repositories/modman (except this plan file, already written). Never move rust-rewrite."
+  - "User dirty paths (do not clobber): apps/desktop/src-tauri/capabilities/default.json, apps/desktop/src-tauri/src/{command_names.rs,commands.rs,lib.rs}, apps/desktop/src/app/queries.ts, apps/desktop/src/ipc/{commands.ts,types.ts}, apps/desktop/src/mock/demo.ts, apps/desktop/src/nav/spatial.ts, apps/desktop/src/views/{Games,Install,Mods,Overview}.tsx, apps/desktop/src/views/views.test.tsx, crates/modman-core/src/app/{games.rs,mods.rs}."
+  - "Each agent works in its own detached worktree off 82323c6 under the scratchpad, with CARGO_INCREMENTAL=0 and a scratch CARGO_TARGET_DIR, and stages with explicit git add paths. The agent hands off a patch, not a commit. The worktree and target dir are deleted afterwards."
+  - "Never read or modify the real game install, ~/.steam or the user's modman data. Tests use temp dirs only. Never start Tauri or touch the user's dev server on port 1420. Max 2 parallel agents. No API key in argv or logs."
+
+shared_context:
+  ue4ss_layout:
+    - "Definition schema (T01): GameDefinition.ue4ss {mods_dir='Pal/Binaries/Win64/ue4ss/Mods', legacy_mods_dir='Pal/Binaries/Win64/Mods', probe='Pal/Binaries/Win64/ue4ss/UE4SS.dll'}; shared_files [{name='mods.txt', relative_to='ue4ss_mods_dir', format='ue4ss_mods_txt'}]. The path is derived from the resolved mods_dir, new or legacy."
+    - "Detection: a dir containing Scripts/main.lua (case-insensitive) or dlls/main.dll that is not already under a layout top. The folder keeps its archive spelling. If the archive root itself is the mod (Scripts/ at root), the folder is sanitize_name(mod_name)."
+    - "Staged target: <mods_dir>/<Folder>/..., keeping enabled.txt, config.lua and Scripts/config.txt."
+    - "Code refs: staging.rs strip_wrappers 504-547, DOC_EXTS 273-276, ue tops 175-181, ue() 749-763, place_all root .txt drop 459; plan keys deploy/plan.rs:161-162; conflicts loadorder/conflicts.rs:93-109; plugin_stage deploy/engine.rs:389; purge engine.rs:370; Ui trait app.rs:225."
+    - "D01 risks 2-5 verbatim: (2) Detection by `Scripts/main.lua` could mis-route a non-UE4SS archive that happens to contain Scripts/main.lua. Limit it to definitions with a [ue4ss] block and to dirs not already under a top. (3) The UE4SS version probe must not read the real game dir during tests. Make it injectable. (4) Case: Move Common Reward ships lowercase `scripts/`. UE4SS under Proton is case-insensitive, so keep the archive spelling and do not rename it. (5) Pak + Lua hybrid mods and LogicMods (Pal/Content/Paks/LogicMods) are out of scope, but ue() must still route the paks after the Lua folders are placed. (Doc/txt exclusion dropping enabled.txt is part of the root cause, not a numbered risk; T01 still tests it.)"
+    - "Patch hand-off: each implementer writes its patch to /tmp/claude-1000/-home-jkempf-Downloads-gem-team-1-138-0/e945d5c1-f77f-49b6-9b41-dd7a00b18ec5/scratchpad/plc/<task_id>.patch (git diff 82323c6 of its owned paths, binary-safe) and later tasks apply prior patches with `git apply --3way` in order T01, T02, T03, T04."
+    - "Poisoned-backup API (T02): dry_run(game) -> [Entry{path, class: confirmed|ambiguous, reason, deployed_by_enabled_mod: bool}]; apply(game, include_ambiguous: bool, confirmed: bool); restore_quarantine(game, id, confirmed: bool)."
+
+tasks:
+  - id: T01
+    title: UE4SS per-mod folder staging + definition schema
+    description: "New code (no reusable layout exists). Add ue4ss and shared_files to GameDefinition and palworld.toml, content-based UE4SS mod detection in staging, an injectable layout probe, and regression and fixture tests mapped to D01 risks 2-5."
+    wave: 1
+    depends_on: []
+    agent: gem-implementer
+    status: completed
+    output: "patch plc/T01.patch; also edits mods/install.rs (ue4ss_mods_dir(game), built-in defs only); API Ue4ssDef::resolve_mods_dir(exists closure); 391 tests pass"
+    retries_used: 0
+    context_cluster: ue4ss_layout
+    acceptance_criteria:
+      - "Ported D01 fixture test passes: the 9 reported mods plus Ultra Graphics, Ultra Weather, RecoverPalSpheres and PalInfoCustomHUD stage under Pal/Binaries/Win64/ue4ss/Mods/<ArchiveFolder>/."
+      - "Test: no two of those mods share a target path, and conflict computation yields none of the main.lua/config.lua/Scripts/main.lua groups."
+      - "Regression test: two mods that differ only by mod folder name produce zero conflicts."
+      - "D01 risk 2 (doc exclusion): test shows enabled.txt, config.lua and Scripts/config.txt are kept inside UE4SS mod folders, while root-level readme .txt in non-UE4SS mods is still dropped."
+      - "D01 risk 3 (detection precision): tests cover case-insensitive scripts/MAIN.LUA, dlls/main.dll, archive spelling kept, dirs already under pal/ or engine/ left as-is (control case), inertness for UE definitions without ue4ss, and an archive root that is itself the mod (Scripts/ at root -> folder sanitize_name(mod_name))."
+      - "D01 risk 4 (hybrid): a mod with a UE4SS folder plus a .pak routes the pak through ue() to its normal Paks target and the folder to mods_dir."
+      - "D01 risk 5 (layout choice): the probe is an injected trait or closure. Tests cover probe present -> mods_dir, legacy-only -> legacy_mods_dir, unknown -> mods_dir (default). No test reads a real game dir (grep of tests for .steam/steamapps/.local/share/modman is empty)."
+      - "The T01 return includes a risk->test-name mapping table, built from the verbatim D01 risk text."
+      - "palworld.toml declares ue4ss and the shared_files mods.txt rule. A definition parse test covers both. All other definitions parse unchanged."
+      - "cargo test -p modman-core, clippy -D warnings and fmt --check pass in the worktree."
+    handoff:
+      constraints:
+        - "Owns crates/modman-core/src/staging.rs, src/games/definitions.rs, definitions/palworld.toml and the new tests/palworld_ue4ss_layout.rs. Do not edit deploy/*. Schema only for shared_files; no merge behavior (T03)."
+      high_risk_signals: [data_flow_change, migration]
+
+  - id: T02
+    title: Provenance backup guard + poisoned-backup quarantine (core + CLI)
+    description: "Reuse the backup.rs Blob store, the journal, confine.rs and the CLI Ui prompt. New: a provenance lookup, a quarantine store with manifest, and dry-run/apply/restore actions."
+    wave: 1
+    depends_on: []
+    agent: gem-implementer
+    status: completed
+    output: "patch plc/T02.patch; app::backups::{dry_run,apply,restore_quarantine,list_quarantines}; deploy::{poisoned_backups,quarantine_poisoned,restore_quarantine,PoisonClass}; guard = committed journal place step not undone by later purge/rollback; plan.rs base_prefix pub(super) (1 line)"
+    retries_used: 0
+    acceptance_criteria:
+      - "Guard: the deploy backup step skips storing a pre-existing file as 'original' only when the journal/deployment records show modman placed that file at that path. Otherwise it backs up as normal, even when the sha equals a staged file."
+      - "Guard test: a mod ships bytes identical to the vanilla file with no modman record. Deploy backs the file up, and purge restores or keeps the original bytes."
+      - "Guard test: a file modman placed earlier (record present, tracking lost from the active deployment) is not backed up as original."
+      - "dry_run(game) lists held backups whose sha equals a mod_files sha of a mod providing that same path, with no side effects. Each entry is classified 'confirmed' (a modman deploy record exists for the path) or 'ambiguous' (no deploy record, or a UE4SS-bundled file: Keybinds, BPModLoaderMod, default mods.txt, mods.json, other files shipped by the UE4SS mod itself). Tests cover each class."
+      - "apply(game, include_ambiguous, confirmed): confirmed=false returns an error and changes nothing (test). Only confirmed entries are acted on unless include_ambiguous=true (test)."
+      - "apply moves backup blobs and records plus the game files into <modman data>/<game>/quarantine/<id>/ with a manifest (path, sha, origin). Game-dir moves go only through confine.rs; a path escaping the game root is refused (test)."
+      - "Files of currently deployed enabled mods are not removed from the game dir. Only their poisoned backup is quarantined, so a later purge removes the file instead of restoring it (test)."
+      - "restore_quarantine(game, id, confirmed=true) puts blobs, records and game files back byte-identically (round-trip test)."
+      - "CLI: `modman deploy clean-backups` (dry-run default), `--apply [--include-ambiguous]` prompting via Ui::confirm before passing confirmed=true, and `modman deploy restore-quarantine <id>`. Headless/declined prompt -> no change (CLI test)."
+      - "Hermetic: all tests use temp HOME/XDG/modman data-dir env and temp game dirs."
+      - "cargo test -p modman-core -p modman-cli, clippy -D warnings and fmt --check pass."
+    handoff:
+      constraints:
+        - "Owns deploy/backup.rs, deploy/engine.rs (backup step only), the journal read helper, new app/backups.rs plus its registration in app.rs, crates/modman-cli/src/commands/deploy.rs and crates/modman-cli/src/cli.rs. Do not edit staging.rs or definitions."
+      relevant_context:
+        - "Live evidence: 614/614 held Palworld backups have sha == deployed sha (poisoned Oct 21 by an untracked deploy)."
+        - "Blob API backup.rs:36-117; Ui trait app.rs:225-240."
+      high_risk_signals: [irreversible, shared_state]
+
+  - id: T03
+    title: modman-owned UE4SS mods.txt merging
+    description: "Reuse the plugin_stage/plugins_txt ownership pattern and the journal for shared_files format ue4ss_mods_txt."
+    wave: 2
+    depends_on: [T01, T02]
+    agent: gem-implementer
+    status: completed
+    output: "patch plc/T03.patch (base tree 82323c6+T01+T02); mods.txt state in <game_data>/shared/*.orig|.json (not BlobStore); merge step inside deploy journal; plugins_txt.rs I/O helpers pub(super)"
+    retries_used: 0
+    context_cluster: ue4ss_layout
+    acceptance_criteria:
+      - "The mods.txt path is derived from the resolved mods_dir (new or legacy, via T01's probe). Tests cover both."
+      - "Deploy adds 'Name : 1' for every enabled staged UE4SS mod, and disable removes it. User and other entries are preserved and the Keybinds entry stays last (tests)."
+      - "shared_files paths are excluded from FileConflict (loadorder/conflicts.rs) and from plain file placement (place.rs/plan.rs). Test: two mods shipping mods.txt -> no conflict and no overwrite of the merged file."
+      - "The original mods.txt is backed up before the first modification. Purge policy: if the file's sha equals modman's last-written sha, restore the original byte-identically (test compares bytes incl. CRLF and trailing newline). If the user changed it since, remove only modman-added lines and keep user edits (test)."
+      - "If mods.txt is missing, deploy creates it and purge removes it when modman created it (test)."
+      - "Crash safety: a test simulates a crash after mods.txt is written but before the journal commit. Recovery or the next deploy/purge restores the original bytes (test)."
+      - "Hermetic: temp HOME/XDG/modman data-dir env and temp game dirs only."
+      - "cargo test -p modman-core, clippy -D warnings and fmt --check pass."
+    handoff:
+      constraints:
+        - "Owns deploy/engine.rs (shared-files stage), deploy/place.rs, deploy/plan.rs, the new loadorder/ue4ss_mods_txt.rs plus its registration in loadorder.rs, and loadorder/conflicts.rs. Edit staging.rs only if placement exclusion needs it (rebase on T01). Rebase on the T01+T02 patches."
+      high_risk_signals: [shared_state, data_flow_change]
+
+  - id: T04
+    title: Data-safe restage action (core + CLI)
+    description: "Reuse the install pipeline with kept archives. New: affected-mod selection, carry-over of user-modified files, an atomic dir swap, and a poisoned-backup precheck."
+    wave: 2
+    depends_on: [T01, T02]
+    agent: gem-implementer
+    status: completed
+    output: "patch plc/T04.patch (base tree 82323c6+T01+T02); app::restage::{restage,RestageRequest,RestageReport}; CLI `modman mods restage`; also edits modman-cli commands/mod.rs (dispatch); 563 workspace tests pass"
+    retries_used: 0
+    context_cluster: ue4ss_layout
+    acceptance_criteria:
+      - "Restage first runs T02 dry_run for the game. If confirmed poisoned backups exist, it blocks with a message pointing to clean-backups unless --ignore-poisoned is given. Test with a poisoned backup present: restage blocks and changes nothing."
+      - "Restage reinstalls affected mods (or the given ids) from kept archives into a new staging dir, keeping enabled state, priority and FOMOD choices. Mods with no archive are reported, not failed."
+      - "User-modified staged files (staged sha != archive sha) carry over to the matching relative path within the mod folder in the new layout. Files with no match go to a backup dir and are reported. Tests cover both."
+      - "The old staged dir is kept until the new one is fully built, then swapped atomically (rename). A test injecting a failure mid-restage shows the old staged dir intact."
+      - "Test: a mod staged with the old root layout is restaged under ue4ss/Mods/<Folder>/, and the following deploy removes the old root-level files from the temp game dir."
+      - "CLI: `modman mods restage [--all|<id>...] [--ignore-poisoned]` with a CLI test."
+      - "Hermetic: temp HOME/XDG/modman data-dir env and temp game dirs only."
+      - "cargo test --workspace, clippy -D warnings and fmt --check pass."
+    handoff:
+      constraints:
+        - "Owns the new crates/modman-core/src/app/restage.rs and its registration in crates/modman-core/src/app.rs, crates/modman-cli/src/commands/mods.rs and crates/modman-cli/src/cli.rs (rebase on T02's cli.rs hunk). Do not edit app/mods.rs or app/games.rs (user-dirty paths)."
+      high_risk_signals: [migration, irreversible]
+
+  - id: T05
+    title: GUI for restage, backup cleanup and quarantine restore
+    description: "Reuse the existing Tauri command/ipc/query/mock patterns. Add commands and UI with a confirm dialog that passes confirmed=true."
+    wave: 3
+    depends_on: [T02, T04]
+    agent: gem-implementer
+    status: completed
+    output: "patch plc/T05.patch (base tree 70814789 = 82323c6+T01..T04); Settings 'Backups and staging' card (GameRepair.tsx); 5 Tauri commands; mock/repair.ts; 273 tests pass; patch applies cleanly onto the user's dirty tree (check only)"
+    retries_used: 0
+    acceptance_criteria:
+      - "Tauri commands registered (command_names.rs, commands.rs, lib.rs, capabilities/default.json) for clean-backups dry-run, apply(include_ambiguous, confirmed), restore-quarantine and restage. The GUI never relies on Ui::confirm auto-answers."
+      - "The UI lists poisoned backups grouped confirmed/ambiguous with an opt-in for ambiguous. Apply requires an explicit dialog confirm. The restage button shows the poisoned-backup block message. Everything is reachable by keyboard/spatial nav and has accessible labels."
+      - "Mock demo backend implements all four. Vitest proves: cancel -> no apply call; confirm -> apply called with confirmed=true and the mock state mutates (list shrinks, quarantine entry appears); restore returns the entries."
+      - "Hermetic: vitest uses the mock backend only. No Tauri instance is started and port 1420 is untouched."
+      - "vitest, tsc and npm build pass."
+    handoff:
+      constraints:
+        - "All target files are user-dirty paths in the main worktree. Work only in the worktree off 82323c6 and keep hunks minimal and additive."
+
+  - id: T06
+    title: Critic review of combined diff
+    description: "Independent review of the T01-T05 patches against the baseline criteria and revision findings 1-10."
+    wave: 4
+    depends_on: [T01, T02, T03, T04, T05]
+    agent: gem-reviewer
+    status: completed
+    output: "verdict warning / critic proceed, 0 blocking, 6 warnings. Real data: 614/614 confirmed (all deployed by enabled mods, files stay); restage selects 13 mods (ids 1,4,8,13,15,17,20,23,27,29,30,31,35), all archives present. Guard would not have prevented this poisoning (files held mod bytes before modman's first deploy); quarantine is the fix. Bounded revisions folded into T07: W1 T03 mod_folders detection, W2 T02 confirmed classification vs purge-restored vanilla, W3 T04 --ignore-poisoned overlap, W4 single ue4ss layout helper."
+    retries_used: 0
+    acceptance_criteria:
+      - "Verdict per objective acceptance criterion and per revision finding 1-10, with file:line evidence."
+      - "Explicitly confirms: the guard is provenance-based; cleanup quarantines (never deletes), defaults to dry-run and is gated by confirmed=true; ambiguous entries are excluded by default; moves go through confine.rs; mods.txt crash recovery and purge policy are tested; restage blocks on poisoned backups and preserves user edits; tests are hermetic; no secrets in argv or logs."
+      - "Blocking findings are returned as fixable items mapped to their owning task."
+    handoff:
+      high_risk_signals: [irreversible, shared_state, migration, data_flow_change]
+
+  - id: T07
+    title: Integrate on new branch, two commits, overlap report
+    description: "Apply the reviewed patches in a scratch worktree on a new branch, run all gates, make two commits and report overlap with the user's dirty paths."
+    wave: 5
+    depends_on: [T06]
+    agent: gem-implementer
+    status: completed
+    output: "branch palworld-lua-conflicts: e236e68 (core+CLI, W1-W4), 04af7b4 (GUI); cargo 551 pass, vitest 252, clippy/fmt/tsc/build ok; commit 2 overlaps 7 user-dirty paths, applies cleanly (check only)"
+    retries_used: 0
+    acceptance_criteria:
+      - "Worktree created via `git worktree add -b palworld-lua-conflicts <scratch path> 82323c6`. Nothing is written in /home/jkempf/Repositories/modman and rust-rewrite is unchanged (git rev-parse rust-rewrite == 82323c6 before and after)."
+      - "cargo test --workspace, cargo clippy --workspace --all-targets -- -D warnings, cargo fmt --check, vitest, tsc and the build all pass. Outputs are recorded."
+      - "Commit 1 = core+CLI (T01-T04 paths), commit 2 = GUI (T05 paths). Explicit git add paths, no attribution trailers, no push."
+      - "For each commit, the report gives the intersection of `git diff --name-only` with the user dirty-path list from global_constraints (empty list if none)."
+      - "The scratch worktree checkout and target dir are removed afterwards. The branch ref is kept."
+    handoff:
+      constraints:
+        - "CARGO_INCREMENTAL=0, scratch target. Never touch the real game install, ~/.steam or the user's modman data."

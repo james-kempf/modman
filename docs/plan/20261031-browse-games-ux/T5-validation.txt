@@ -1,0 +1,12 @@
+T5-plugin-installed validation (2026-10-31)
+
+cargo test --workspace: exit 0, all suites pass (vessel-core lib 481 passed, 2 ignored)
+  new: app::views::tests::browse_installed_set_includes_loader_installs (Browse-6, SMAPI local install, NULL nexus id -> 2400, loader key "smapi")
+npm run typecheck: exit 0
+npm test: 401 passed, 2 failed (403)
+  new: src/views/loaderInstalled.test.tsx (2 passed; Mods Loaders group; Browse Remove -> loader_preview -> consent -> loader_run, no mods_uninstall)
+  red check: forcing Browse routing to kind "mod" makes the Browse test fail
+  updated: src/mock/demo.test.ts:193 expects loaders: [] in mods_list
+  failures not caused by T5 (files not touched by T5):
+    src/app/App.test.tsx PageDown/PageUp: expects Mods two tabs after Overview; VIEWS in app/store.ts now has Browse between them
+    src/style.test.ts focus highlight: expects --color-zinc-200, index.css has --color-zinc-100 (style.test.ts/index.css edited in baseline)

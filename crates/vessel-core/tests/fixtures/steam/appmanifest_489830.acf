@@ -1,0 +1,20 @@
+"AppState"
+{
+	"appid"		"489830"
+	"universe"		"1"
+	"LauncherPath"		"/home/deck/.local/share/Steam/ubuntu12_32/steam"
+	"name"		"The Elder Scrolls V: Skyrim Special Edition"
+	"StateFlags"		"4"
+	"installdir"		"Skyrim Special Edition"
+	"LastUpdated"		"1700000000"
+	"SizeOnDisk"		"17523413261"
+	"buildid"		"15916224"
+	"InstalledDepots"
+	{
+		"489833"
+		{
+			"manifest"		"1234"
+			"size"		"100"
+		}
+	}
+}

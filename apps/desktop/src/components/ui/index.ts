@@ -1,0 +1,58 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// UI primitives in the legacy web UI's visual language (soft surfaces, chips,
+// Phosphor icons). Large (>= 44px) targets, no hover-only affordances, no
+// inline styles (CSP style-src 'self').
+// Barrel: each primitive lives in its own file; import from here.
+
+export { Badge } from "./display/Badge";
+export { Button } from "./controls/Button";
+export { Card } from "./layout/Card";
+export { CardSection } from "./layout/CardSection";
+export { Empty } from "./feedback/Empty";
+export { ErrorNote } from "./feedback/ErrorNote";
+export { Fact } from "./display/Fact";
+export { IconButton } from "./controls/IconButton";
+export { ListToggle } from "./controls/ListToggle";
+export { MsgLine } from "./display/MsgLine";
+export { Notice, type NoticeTone } from "./feedback/Notice";
+export { PadGlyph } from "./display/PadGlyph";
+export { Picture } from "./display/Picture";
+export { Row } from "./layout/Row";
+export { SearchRow } from "./layout/SearchRow";
+export { Segmented } from "./controls/Segmented";
+export { Tabs, type TabItem } from "./controls/Tabs";
+export { SearchField } from "./controls/SearchField";
+export { Select } from "./controls/Select";
+export { StatusDot, type DotTone } from "./display/StatusDot";
+export { SupportBadge } from "./display/SupportBadge";
+export { TextField } from "./controls/TextField";
+export { Thumb } from "./display/Thumb";
+export { Toggle } from "./controls/Toggle";
+export { ViewFrame } from "./layout/ViewFrame";
+export { ViewHeader } from "./layout/ViewHeader";
+export { ago, bytes, count, monogram, when } from "./format";
+export {
+  CARD_SHELL,
+  CARD_TILE,
+  CARD_TITLE,
+  DIVIDE,
+  INSET_HEADER_PAD,
+  LIST_ROW,
+  MUTED_NOTE,
+  PILL,
+  SECTION_PAD,
+  SETTING_CONTROL,
+  SKELETON_DELAY_MS,
+  TILE,
+  TOAST_DISC,
+  TOAST_CLOSE,
+  TOAST_CLOSE_MS,
+  TOAST_IN,
+  TOAST_OPEN,
+  TOAST_OUT,
+  TOAST_SHELL,
+  TOAST_TEXT,
+  TOAST_TITLE,
+  VIEW_FRAME,
+  cx,
+} from "./styles";

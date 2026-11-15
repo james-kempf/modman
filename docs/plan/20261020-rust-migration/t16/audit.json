@@ -1,0 +1,201 @@
+{
+ "views": {
+  "overview": {
+   "tabAfterNav": "overview",
+   "focusAfterPageNav": "button:overview",
+   "overflow": {
+    "docScrollW": 1280,
+    "clientW": 1280,
+    "mainScrollW": 1056,
+    "mainClientW": 1056,
+    "wide": []
+   },
+   "focusables": 14,
+   "unreachable": [],
+   "traps": [],
+   "toBody": [],
+   "escFromLast": {
+    "from": "Remove|BUTTON",
+    "to": "button:overview"
+   },
+   "focusRing": {
+    "el": "Deploy",
+    "before": "none0pxnone",
+    "after": "solid 3px oklab(0.155 0.00110255 -0.00384505) / none"
+   },
+   "axe": []
+  },
+  "mods": {
+   "tabAfterNav": "mods",
+   "focusAfterPageNav": "button:mods",
+   "overflow": {
+    "docScrollW": 1280,
+    "clientW": 1280,
+    "mainScrollW": 1056,
+    "mainClientW": 1056,
+    "wide": []
+   },
+   "focusables": 21,
+   "unreachable": [],
+   "traps": [],
+   "toBody": [],
+   "escFromLast": {
+    "from": "Details|BUTTON",
+    "to": "button:mods"
+   },
+   "focusRing": {
+    "el": "Mods",
+    "before": "none0pxnone",
+    "after": "solid 3px oklch(0.78 0.12 165) / none"
+   },
+   "axe": []
+  },
+  "install": {
+   "tabAfterNav": "install",
+   "focusAfterPageNav": "button:install",
+   "overflow": {
+    "docScrollW": 1280,
+    "clientW": 1280,
+    "mainScrollW": 1056,
+    "mainClientW": 1056,
+    "wide": []
+   },
+   "focusables": 15,
+   "unreachable": [],
+   "traps": [],
+   "toBody": [],
+   "escFromLast": {
+    "from": "Search|INPUT",
+    "to": "button:install"
+   },
+   "focusRing": {
+    "el": "Ask (wizard)",
+    "before": "none0pxnone",
+    "after": "solid 3px oklch(0.78 0.12 165) / none"
+   },
+   "axe": []
+  },
+  "collections": {
+   "tabAfterNav": "collections",
+   "focusAfterPageNav": "button:collections",
+   "overflow": {
+    "docScrollW": 1280,
+    "clientW": 1280,
+    "mainScrollW": 1056,
+    "mainClientW": 1056,
+    "wide": []
+   },
+   "focusables": 8,
+   "unreachable": [],
+   "traps": [],
+   "toBody": [],
+   "escFromLast": {
+    "from": "Collection URL, nxm link or slug|INPUT",
+    "to": "button:collections"
+   },
+   "focusRing": {
+    "el": "Overview",
+    "before": "none0pxnone",
+    "after": "solid 3px oklch(0.78 0.12 165) / none"
+   },
+   "axe": []
+  },
+  "requirements": {
+   "tabAfterNav": "requirements",
+   "focusAfterPageNav": "button:requirements",
+   "overflow": {
+    "docScrollW": 1280,
+    "clientW": 1280,
+    "mainScrollW": 1056,
+    "mainClientW": 1056,
+    "wide": []
+   },
+   "focusables": 10,
+   "unreachable": [],
+   "traps": [],
+   "toBody": [],
+   "escFromLast": {
+    "from": "I have it|BUTTON",
+    "to": "button:requirements"
+   },
+   "focusRing": {
+    "el": "Refresh from Nexus",
+    "before": "none0pxnone",
+    "after": "solid 3px oklab(0.967 0.000281923 -0.000959437) / none"
+   },
+   "axe": []
+  },
+  "activity": {
+   "tabAfterNav": "activity",
+   "focusAfterPageNav": "button:activity",
+   "overflow": {
+    "docScrollW": 1280,
+    "clientW": 1280,
+    "mainScrollW": 1056,
+    "mainClientW": 1056,
+    "wide": []
+   },
+   "focusables": 10,
+   "unreachable": [],
+   "traps": [],
+   "toBody": [],
+   "escFromLast": {
+    "from": "Log|PRE",
+    "to": "button:activity"
+   },
+   "focusRing": {
+    "el": "Refresh",
+    "before": "none0pxnone",
+    "after": "solid 3px oklab(0.967 0.000281923 -0.000959437) / none"
+   },
+   "axe": []
+  },
+  "settings": {
+   "tabAfterNav": "settings",
+   "focusAfterPageNav": "button:settings",
+   "overflow": {
+    "docScrollW": 1280,
+    "clientW": 1280,
+    "mainScrollW": 1056,
+    "mainClientW": 1056,
+    "wide": []
+   },
+   "focusables": 13,
+   "unreachable": [
+    "Auto-update off|BUTTON"
+   ],
+   "traps": [],
+   "toBody": [],
+   "escFromLast": {
+    "from": "autoupdate-interval hours between auto-u|INPUT",
+    "to": "button:settings"
+   },
+   "focusRing": {
+    "el": "Paste",
+    "before": "none0pxnone",
+    "after": "solid 3px oklab(0.967 0.000281923 -0.000959437) / none"
+   },
+   "axe": [
+    {
+     "id": "definition-list",
+     "impact": "serious",
+     "n": 1,
+     "help": "<dl> elements must only directly contain properly-ordered <dt> and <dd> groups, <script>, <template> or <div> elements",
+     "targets": [
+      "section:nth-child(5) > dl"
+     ]
+    }
+   ]
+  }
+ },
+ "global": {
+  "initialFocus": "button:overview",
+  "hoverOnlyRules": [],
+  "pageUpFromWrap": "settings"
+ },
+ "logs": {
+  "console": [],
+  "pageerr": [],
+  "net": []
+ }
+}

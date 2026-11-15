@@ -1,0 +1,181 @@
+plan_id: 20261031-browse-games-ui-fixes
+status: completed
+tldr: |
+  Fix Browse (B1-B4) and Games (G1-G2) issues in apps/desktop + vessel-core.
+  W1: debugger root-causes G2; researcher confirms Nexus description fields/format.
+  W2: Browse UI layout/tabs (B1-B3) || Games art + detection (G1-G2).
+  W3: rich About rendering (B4, backend query + safe renderer).
+  W4: independent security/quality review of B4 renderer and G1 art-by-appid surface.
+created_at: "2026-10-31"
+created_by: gem-planner
+revision: 2
+replan_count: 0
+planner_revision_used: true
+
+decisions:
+  - "Baseline: apps/desktop npm test has 2 failures on HEAD 4b2bfdc (style.test.ts highlight token; App.test.tsx PageDown/PageUp tabs); not counted against tasks."
+  - "T5 image handling: plan default (link only) applied; user decision on inline Nexus-hosted images pending."
+  - "T1 (2026-11-01): root cause = preset-only detect_installed (games.rs:557-568); 7/20 games shown; discovery/parse ruled out. Fits T4 scope; debugger needs_replan overridden (no replan). Install filter: accept FULLY_INSTALLED incl. UPDATE_REQUIRED unless BUSY_OR_BROKEN. Tools: skip dirs with toolmanifest.vdf + denylist 228980."
+  - "G2 routed debugger -> implementer: requirement demands root cause; planner evidence suggests filter-by-preset (games.rs detect_installed iterates GameDefinition list only) but scan bugs (StateFlags filter, Flatpak/native root, libraryfolders) not ruled out."
+  - "G1+G2 coalesced into one implementer task: same files (Games.tsx, app/games.rs, Detected IPC type), same agent, G1 fix needs appid on Detected which G2 also touches."
+  - "B1-B3 coalesced (BrowseDetails.tsx/Browse.tsx, routine UI). B4 kept separate: new Nexus query + rendering untrusted remote content is security-scoped; overlaps BrowseDetails.tsx so placed in W3 after B1-B3."
+  - "B4 renderer must not use dangerouslySetInnerHTML; output React elements only. Reuse rung: vetted BBCode->React library if it fits CSP, else small in-repo renderer (justify in description)."
+  - "Reviewer task (W4) added because B4 renders untrusted Nexus content and G1 adds a webview-reachable art lookup by appid."
+  - "G2 scope fixed by user decision (2026-11-01): list ALL fully-installed Steam games, excluding Steam tools/runtimes; unsupported games open AddGameDialog with install path prefilled."
+  - "T5 depends on T4: both edit src-tauri commands.rs, lib.rs invoke_handler, command_names.rs, capabilities/default.json, ipc/types.ts, ipc/commands.ts, mocks."
+  - "External links from descriptions reuse the allow-listed backend-command pattern (mod_open_page / allow-mod-open-page): URL parsed in Rust, http/https only."
+  - "No browser-tester task: vitest component tests (existing browse.test.tsx, GamesUnmanaged.test.tsx) cover acceptance; Tauri app has no e2e harness in repo."
+
+assumptions:
+  - "B4 'About' = Nexus mod/collection full description (BBCode, possibly HTML fragments) rendered safely; current UI shows only `summary`."
+  - "Production CSP (tauri.conf.json) is img-src 'self' data:, style-src 'self': remote images in descriptions are not loaded (render as link/alt text); no inline style attributes."
+  - "Steam tools/runtimes to exclude: Proton*, Steam Linux Runtime*, Steamworks Common Redistributables (identified by appid/name; exact list finalized from T1 findings)."
+  - "G1 root cause (planner-observed): DetectedTile passes appid:null to Art, disabling the gameArt query; game_art requires a managed game id."
+
+shared_context:
+  browse_details:
+    - "apps/desktop/src/components/dialogs/BrowseDetails.tsx (141 lines): Summary() shows plain summary; ModList always rendered under collection facts; Picture then Summary then Facts stacked vertically."
+    - "apps/desktop/src/views/Browse.tsx:399 <Select label='Sort'> - Select.tsx renders label above (text-label) vs Segmented.tsx label inline-left with className 'eyebrow'."
+    - "Nexus GraphQL queries: crates/vessel-core/src/nexus/graphql.rs (mods/collections search, summary only); collection revision query in crates/vessel-core/src/collections.rs:164."
+    - "Tests: apps/desktop/src/views/browse.test.tsx; mocks apps/desktop/src/mock/browse.ts."
+
+tasks:
+  - id: T1
+    title: Root-cause missing Steam games in unmanaged list (G2)
+    description: "Diagnose why some Steam-installed games are absent from Games > Found in Steam on user's Linux host. Rung: diagnosis only, no fix."
+    wave: 1
+    depends_on: []
+    agent: gem-debugger
+    status: completed
+    retries_used: 0
+    acceptance_criteria:
+      - "Report enumerates on this host: Steam roots found (native/Flatpak), every library path from each libraryfolders.vdf, every appmanifest_*.acf with appid/name/StateFlags, and which of them reach the detect() output."
+      - "Each missing game is attributed to a concrete cause with file:line evidence (e.g. preset-only filter in games.rs detect_installed, StateFlags filter, root/library not discovered, manifest parse failure)."
+      - "Report states recommended fix scope for the decided G2 scope (all fully-installed Steam games minus tools/runtimes), lists tool/runtime appids seen on host, and includes a reproducible fixture description for a regression test."
+    handoff:
+      constraints:
+        - "Read-only: never write to Steam folders."
+        - "No code changes; output findings to docs/plan/20261031-browse-games-ui-fixes/T1-findings.md."
+      relevant_context:
+        - "apps/desktop/src/views/Games.tsx: Unmanaged() uses ipc.gamesDetect; DetectedTile renders <Art game={{id: domain, name, appid: null}}> -> query disabled -> monogram (G1)."
+        - "crates/vessel-core/src/app/games.rs:268 Detected{domain,name,install_dir,support,configured} - no appid; detect() calls games::detect_installed (crates/vessel-core/src/games.rs:557) which only iterates preset GameDefinitions with steam_appid."
+        - "crates/vessel-core/src/games/steam.rs: steam_roots (native + .var/app/com.valvesoftware.Steam/.local/share/Steam), steam_libraries (roots + libraryfolders.vdf paths), find_app, state_flags::fully_installed (only flags==4 clean)."
+        - "crates/vessel-core/src/app/art.rs:194 game_art(cx, game, kind) requires managed game -> appid; lookup(roots, art_dir, appid, kind, ...) is reusable by appid."
+        - "apps/desktop/src-tauri/src/commands.rs:247 games_detect, :435 game_art; IPC types in apps/desktop/src/ipc/types.ts, commands in apps/desktop/src/ipc/commands.ts."
+        - "Fixture: crates/vessel-core/tests/fixtures/steam/libraryfolders.vdf."
+        - "Steam may be native (~/.local/share/Steam, ~/.steam/steam) and/or Flatpak (~/.var/app/com.valvesoftware.Steam/.local/share/Steam)."
+
+  - id: T2
+    title: Confirm Nexus description fields and format (B4)
+    description: "Answer: which Nexus GraphQL v2 fields return full mod and collection descriptions, their markup format (BBCode/HTML/markdown), and a safe React rendering option compatible with the app CSP."
+    wave: 1
+    depends_on: []
+    agent: gem-researcher
+    exploration_mode: question
+    status: completed
+    retries_used: 0
+    acceptance_criteria:
+      - "Names exact GraphQL query/field paths for mod description (by game domain + modId) and collection description (by slug/revision), with one sample payload shape each."
+      - "States markup format per entity with examples of tags in use (e.g. [b], [url], [img], [spoiler], [youtube], HTML entities, line breaks)."
+      - "Recommends one renderer approach (named npm package+pinned version, or in-repo renderer) that emits React elements without dangerouslySetInnerHTML and works under CSP img-src 'self' data:, style-src 'self'; identifies existing external-link opening mechanism in the app (or absence)."
+    handoff:
+      constraints:
+        - "Findings to docs/plan/20261031-browse-games-ui-fixes/T2-findings.md; no code changes."
+      relevant_context:
+        - "Current queries: crates/vessel-core/src/nexus/graphql.rs:18-27 (summary only), crates/vessel-core/src/collections.rs:164."
+        - "CSP: apps/desktop/src-tauri/tauri.conf.json:26."
+
+  - id: T3
+    title: Browse sort label, collection Details/Mods tabs, side-by-side metadata (B1-B3)
+    description: "Rung: reuse existing Segmented/Select/Dialog/Fact components and tokens; no new deps."
+    wave: 2
+    depends_on: []
+    agent: gem-implementer
+    status: completed
+    retries_used: 0
+    context_cluster: browse_details
+    acceptance_criteria:
+      - "B1: Browse Sort label renders to the left of the sort control, inline on the same row, using the same 'eyebrow' styling as Segmented labels (Show/Created); accessible name of the control unchanged ('Sort')."
+      - "B2: Opening a collection's details shows a Details tab selected by default with no mod list visible; a Details/Mods tab control (role=tablist, keyboard/gamepad focusable) switches to the Mods list; Mods tab label shows count when known."
+      - "B2: Activating a mod row in the Mods tab opens that mod's details dialog (existing mod details view) and Back returns to the collection with Mods tab still selected and focus restored."
+      - "B3: Collection details render image on the left and metadata facts (Author, Category, Latest revision, Status, Mods, Revision status, Update) to its right at wide widths; stacks vertically at narrow widths with no horizontal scroll."
+      - "browse.test.tsx (or new tests) cover B1-B3; `npm test` and `npm run typecheck` in apps/desktop pass."
+    handoff:
+      constraints:
+        - "Do not change summary/description rendering (owned by T4)."
+        - "Mod rows without mod_id: non-activatable, visibly so."
+      relevant_context:
+        - "RevisionMod type and ModList in BrowseDetails.tsx:45; Dialog supports onBack/returnFocus chaining (see ct1.test.tsx chained dialog focus test)."
+
+  - id: T4
+    title: Steam art for unmanaged games and full Steam game detection (G1, G2)
+    description: "Rung: reuse art::lookup and steam:: scanners; extend Detected with appid; new code only for the fix T1 identifies."
+    wave: 2
+    depends_on: [T1]
+    agent: gem-implementer
+    status: completed
+    retries_used: 0
+    acceptance_criteria:
+      - "G1: Detected IPC payload includes Steam appid; unmanaged tiles in Games view show the same Steam portrait art (local cache, else CDN) as managed games, falling back to monogram only when no art exists."
+      - "G1: new art-by-appid Tauri command takes appid typed u32 (serde rejects non-numeric input) and optional ArtKind only; no URL or path args; cache path derived only from the u32; fetch goes only through art::lookup with the existing allowed_url CDN guard."
+      - "G1: command registered in lib.rs invoke_handler and command_names.rs, listed in ipc/commands.ts, and granted by exactly one new allow-* entry in capabilities/default.json."
+      - "G2: Every root cause in T1-findings.md is fixed; unit tests with Steam fixtures (multiple libraryfolders entries, Flatpak root, the specific failing manifest shape) prove previously-missing games now appear."
+      - "G2: unmanaged list shows every fully-installed appmanifest across all libraries (native and Flatpak roots, all libraryfolders.vdf paths) except Steam tools/runtimes (Proton*, Steam Linux Runtime*, Steamworks Common Redistributables)."
+      - "G2: unsupported (non-preset) games are visibly distinguished from supported ones; selecting one opens AddGameDialog with install path prefilled (user supplies Nexus domain); supported games keep direct add."
+      - "`cargo test -p vessel-core`, `cargo clippy --workspace -- -D warnings`, apps/desktop `npm test` (incl. GamesUnmanaged.test.tsx, Games.test.tsx) and `npm run typecheck` pass."
+      - "Gate: git diff of capabilities/default.json adds only the new allow-* entry; no other permission changes."
+    handoff:
+      constraints:
+        - "Read-only access to Steam folders."
+        - "Keep CLI (crates/vessel-cli/src/commands/steam.rs, game.rs) behavior compatible; update its output only if Detected shape change requires."
+      relevant_context:
+        - "docs/plan/20261031-browse-games-ui-fixes/T1-findings.md (root causes, fixture spec)."
+        - "Code map: see T1.handoff.relevant_context in this plan."
+      high_risk_signals:
+        - "New webview-reachable command (art by appid) triggers outbound CDN fetch."
+
+  - id: T5
+    title: Render Nexus About/description in mod and collection details (B4)
+    description: "Fetch full description via Nexus GraphQL (per T2) and render rich content safely. Rung: library if T2 recommends a fitting vetted one, else minimal in-repo BBCode->React renderer (justify)."
+    wave: 3
+    depends_on: [T2, T3, T4]
+    agent: gem-implementer
+    status: completed
+    retries_used: 0
+    context_cluster: browse_details
+    acceptance_criteria:
+      - "Mod and collection details show an About section with the Nexus description rendered as formatted content (bold/italic/underline, headings/size, lists, quotes, links, line breaks, spoilers collapsed) instead of raw markup; summary stays as fallback when description is empty or fetch fails."
+      - "Description is fetched lazily when details open (not in search results), cached via react-query, with loading and error states."
+      - "Renderer never uses dangerouslySetInnerHTML or inline style attributes; only a fixed allow-list of BBCode tags maps to React elements; raw HTML fragments render as plain text."
+      - "Renderer enforces a nesting-depth limit and an input-size limit; beyond them content degrades to plain text without throwing."
+      - "[img] and [youtube] render as a plain link only (no <img>, no iframe)."
+      - "External links: anchors call preventDefault so the webview never navigates; click invokes a backend command (reusing the mod_open_page / allow-mod-open-page pattern) that parses the URL in Rust and opens only http/https, rejecting file:, javascript:, data: and custom schemes with an error; Rust unit tests cover each rejected scheme."
+      - "Link-open command registered in lib.rs invoke_handler and command_names.rs, listed in ipc/commands.ts, granted by exactly one new allow-* entry in capabilities/default.json."
+      - "Rust unit test for the new query parsing; vitest tests for renderer covering formatting tags and an XSS corpus (script tag, onerror attr, javascript: url, raw HTML fragments, nested/unclosed tags, over-depth nesting, oversize input)."
+      - "`cargo test -p vessel-core`, `cargo clippy --workspace -- -D warnings`, apps/desktop `npm test` and `npm run typecheck` pass; tauri.conf.json CSP unchanged."
+      - "Gate: git diff of capabilities/default.json adds only the new allow-* entry; no other permission changes."
+    handoff:
+      constraints:
+        - "No CSP relaxation."
+        - "Pin any new npm dependency to an exact version."
+        - "No new opener plugin permission scopes; links go through the backend command only."
+      high_risk_signals:
+        - "Renders untrusted remote content in privileged Tauri webview."
+
+  - id: T6
+    title: Independent review of B4 renderer, link-open, G1 art surface and capabilities
+    description: "Security + correctness review of T5 renderer and link-open command, T4 art-by-appid command, and capabilities/default.json changes; acceptance criteria spot-check for B1-B3, G1-G2."
+    wave: 4
+    depends_on: [T3, T4, T5]
+    agent: gem-reviewer
+    status: completed
+    retries_used: 0
+    acceptance_criteria:
+      - "Confirms no HTML injection path in description rendering (no dangerouslySetInnerHTML, sanitized URLs, external link handling) with file:line evidence, or lists blocking findings."
+      - "Confirms art-by-appid command cannot fetch arbitrary URLs or read arbitrary paths, or lists blocking findings."
+      - "Confirms link-open command parses URLs in Rust and opens only http/https (file:, javascript:, data:, custom schemes rejected) and renderer anchors never navigate the webview, or lists blocking findings."
+      - "Confirms capabilities/default.json diff adds only the two new allow-* entries (art-by-appid, link-open) and nothing broader, or lists blocking findings."
+      - "Verifies each acceptance criterion B1-B4, G1-G2 maps to a passing test or verified code path; reports pass/fail per criterion."
+    handoff:
+      constraints:
+        - "Review only; findings to docs/plan/20261031-browse-games-ui-fixes/T6-review.md."

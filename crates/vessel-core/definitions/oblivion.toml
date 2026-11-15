@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Ported from the legacy bash tool game_preset (L269-300).
+domain = "oblivion"
+name = "Oblivion"
+steam_appid = 22330
+subdir = "Data"
+target = "game_dir"
+profile = "bethesda"
+support = "experimental"
+
+[plugins]
+format = "plain"
+appdata_folder = "Oblivion"

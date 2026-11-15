@@ -1,0 +1,560 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//! Mod thumbnail cache for the GUI. The webview never loads remote images
+//! (its CSP allows no remote origins): the app asks for a mod's picture,
+//! core fetches the Nexus `picture_url` once, checks it is a small image
+//! from a Nexus host, caches it under `<data>/thumbs/<game>/<mod>` and
+//! returns a `data:` URL.
+
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+
+use super::nexus as nx;
+use super::{fail, AppError, Cx, R};
+use crate::blocking::block_on;
+use crate::download::{FetchRequest, Fetcher};
+use crate::games;
+use crate::paths::Paths;
+use crate::store;
+
+/// Cached pictures are refreshed after a week.
+pub const TTL_SECS: i64 = 7 * 86_400;
+/// Larger downloads are rejected.
+pub const MAX_BYTES: u64 = 4 << 20;
+
+pub fn thumbs_dir(paths: &Paths) -> PathBuf {
+    paths.data_dir.join("thumbs")
+}
+
+/// Image type from the first bytes (JPEG, PNG, GIF, WebP only).
+pub fn sniff(b: &[u8]) -> Option<&'static str> {
+    if b.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some("image/jpeg")
+    } else if b.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if b.starts_with(b"GIF87a") || b.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else if b.len() >= 12 && &b[..4] == b"RIFF" && &b[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else {
+        None
+    }
+}
+
+/// Only https pictures from Nexus hosts are fetched.
+pub fn allowed_url(u: &str) -> bool {
+    let Ok(url) = url::Url::parse(u) else {
+        return false;
+    };
+    let host = url.host_str().unwrap_or("").to_ascii_lowercase();
+    url.scheme() == "https"
+        && ["nexusmods.com", "nexus-cdn.com"]
+            .iter()
+            .any(|d| host == *d || host.ends_with(&format!(".{d}")))
+}
+
+fn base64(bytes: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut s = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for c in bytes.chunks(3) {
+        let n = (u32::from(c[0]) << 16)
+            | (u32::from(*c.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*c.get(2).unwrap_or(&0));
+        for (i, shift) in [18, 12, 6, 0].into_iter().enumerate() {
+            if i <= c.len() {
+                s.push(T[(n >> shift & 63) as usize] as char);
+            } else {
+                s.push('=');
+            }
+        }
+    }
+    s
+}
+
+/// `data:<mime>;base64,...` for an image; `None` when not an image.
+pub fn data_url(bytes: &[u8]) -> Option<String> {
+    sniff(bytes).map(|m| format!("data:{m};base64,{}", base64(bytes)))
+}
+
+fn cache_path(dir: &Path, game: &str, mod_id: u64) -> R<PathBuf> {
+    if !games::is_valid_domain(game) {
+        fail!("invalid game domain '{game}'");
+    }
+    Ok(dir.join(game).join(mod_id.to_string()))
+}
+
+/// A cached picture younger than [`TTL_SECS`].
+pub fn cached(dir: &Path, game: &str, mod_id: u64, now: i64) -> R<Option<Vec<u8>>> {
+    let p = cache_path(dir, game, mod_id)?;
+    let Ok(meta) = std::fs::metadata(&p) else {
+        return Ok(None);
+    };
+    let age = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(i64::MAX, |d| now - d.as_secs() as i64);
+    if age > TTL_SECS {
+        return Ok(None);
+    }
+    Ok(std::fs::read(&p).ok().filter(|b| sniff(b).is_some()))
+}
+
+/// A download name of its own for each fetch, so concurrent fetches of
+/// the same picture never write into one `.part`.
+fn temp_path(dest: &Path) -> PathBuf {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    dest.with_extension(format!("{}-{n}.download", std::process::id()))
+}
+
+/// Fetches `url` into the cache after the host, size and type checks;
+/// `allow` is applied to the URL and to every redirect hop, and the body
+/// is capped at [`MAX_BYTES`] while streaming.
+pub fn fetch_into(
+    dir: &Path,
+    game: &str,
+    mod_id: u64,
+    url: &str,
+    allow: impl Fn(&str) -> bool + Send + Sync + 'static,
+) -> R<Vec<u8>> {
+    let dest = cache_path(dir, game, mod_id)?;
+    fetch_image(&dest, url, MAX_BYTES, allow)
+}
+
+/// Downloads an image from `url` to `dest` (parent dirs created): `allow`
+/// must accept the URL and every redirect hop, the body is capped at
+/// `max_bytes` while streaming, and only a sniffed image is kept. Each
+/// fetch writes a temp file of its own, renamed into place when complete.
+pub(crate) fn fetch_image(
+    dest: &Path,
+    url: &str,
+    max_bytes: u64,
+    allow: impl Fn(&str) -> bool + Send + Sync + 'static,
+) -> R<Vec<u8>> {
+    if !allow(url) {
+        fail!(
+            "refusing to fetch a picture from {}",
+            super::nxm::redact_url(url)
+        );
+    }
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = temp_path(dest);
+    let fetcher = Fetcher::new()?
+        .with_retry(1, std::time::Duration::ZERO)
+        .with_max_bytes(max_bytes)
+        .with_redirect_check(Arc::new(allow))?;
+    let fetched = block_on(fetcher.fetch(FetchRequest {
+        url,
+        dest: &tmp,
+        md5: None,
+        sha256: None,
+        events: None,
+    }))
+    .map_err(|e| AppError::Msg(format!("cannot start the async runtime: {e}")))?;
+    let res = (|| -> R<Vec<u8>> {
+        let f = fetched?;
+        if f.size > max_bytes {
+            fail!("picture too large ({} bytes)", f.size);
+        }
+        let bytes = std::fs::read(&f.path)?;
+        if sniff(&bytes).is_none() {
+            fail!("not an image");
+        }
+        std::fs::rename(&f.path, dest)?;
+        Ok(bytes)
+    })();
+    let _ = std::fs::remove_file(&tmp);
+    let _ = std::fs::remove_file(Fetcher::part_path(&tmp));
+    res
+}
+
+/// Tile and header image of a collection (its latest revision). Kept out of
+/// the install query, so a schema change here only costs the picture.
+pub const COLLECTION_ART_QUERY: &str =
+    "query CollArt($slug: String, $domainName: String, $viewAdultContent: Boolean) {
+  collectionRevision(slug: $slug, domainName: $domainName, viewAdultContent: $viewAdultContent) {
+    collection { tileImage { url } headerImage { url } }
+  }
+}";
+
+/// A collection slug as Nexus spells it (also safe as a file name).
+fn is_slug(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 64 && s.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
+/// `<thumbs>/collections/<game>/<slug>`.
+fn collection_cache_path(dir: &Path, game: &str, slug: &str) -> R<PathBuf> {
+    if !games::is_valid_domain(game) || !is_slug(slug) {
+        fail!("invalid collection '{game}/{slug}'");
+    }
+    Ok(dir.join("collections").join(game).join(slug))
+}
+
+/// The picture URL of a `collectionRevision` answer: the tile image, else
+/// the header image; only https Nexus URLs.
+pub fn collection_image_url(data: &serde_json::Value) -> Option<String> {
+    let c = data.pointer("/collectionRevision/collection")?;
+    ["/tileImage/url", "/headerImage/url"]
+        .iter()
+        .filter_map(|p| c.pointer(p).and_then(serde_json::Value::as_str))
+        .find(|u| allowed_url(u))
+        .map(str::to_owned)
+}
+
+/// Cached picture, else `query` (the GraphQL answer) and `fetch` (into the
+/// cache path). A collection without a picture, or a failed query or
+/// fetch, is `None` (the UI shows a monogram).
+pub fn collection_art_lookup(
+    dir: &Path,
+    game: &str,
+    slug: &str,
+    now: i64,
+    query: impl FnOnce() -> R<serde_json::Value>,
+    fetch: impl FnOnce(&Path, &str) -> R<Vec<u8>>,
+) -> R<Option<String>> {
+    let dest = collection_cache_path(dir, game, slug)?;
+    if let Some(b) = fresh(&dest, now) {
+        return Ok(data_url(&b));
+    }
+    let got = query().and_then(|data| match collection_image_url(&data) {
+        Some(url) => fetch(&dest, &url).map(Some),
+        None => Ok(None),
+    });
+    match got {
+        Ok(b) => Ok(b.as_deref().and_then(data_url)),
+        Err(e) => {
+            tracing::debug!("no picture for collection {game}/{slug}: {e}");
+            Ok(None)
+        }
+    }
+}
+
+/// A file younger than [`TTL_SECS`] that is an image.
+fn fresh(p: &Path, now: i64) -> Option<Vec<u8>> {
+    let age = std::fs::metadata(p)
+        .ok()?
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(i64::MAX, |d| now - d.as_secs() as i64);
+    if age > TTL_SECS {
+        return None;
+    }
+    std::fs::read(p).ok().filter(|b| sniff(b).is_some())
+}
+
+/// Nexus domain of the game with id `game` (`None`: not linked to Nexus).
+fn nexus_domain_of(cx: &Cx<'_>, game: &str) -> R<Option<String>> {
+    Ok(games::require_game(cx.store.conn(), game)
+        .map_err(super::games_hint)?
+        .nexus_domain)
+}
+
+/// A collection's tile picture from Nexus as a `data:` URL (`None`: it has
+/// none, the game is not linked to Nexus, or Nexus could not be asked).
+/// `game` is the game id.
+pub fn collection_art(cx: &Cx<'_>, game: &str, slug: &str) -> R<Option<String>> {
+    let Some(domain) = nexus_domain_of(cx, game)? else {
+        return Ok(None);
+    };
+    let game = domain.as_str();
+    let adult = cx.config()?.adult;
+    collection_art_lookup(
+        &thumbs_dir(cx.paths),
+        game,
+        slug,
+        store::now(),
+        || {
+            let nexus = nx::connect(cx.paths, cx.store, false)?
+                .ok_or_else(|| AppError::Msg("no Nexus client".into()))?;
+            let vars = serde_json::json!({ "slug": slug, "domainName": game });
+            Ok(nexus.run(
+                nexus
+                    .client
+                    .collection_graphql(COLLECTION_ART_QUERY, vars, adult),
+            )??)
+        },
+        |dest, url| fetch_image(dest, url, MAX_BYTES, allowed_url),
+    )
+}
+
+/// The mod's picture as a `data:` URL (`None`: the mod has none, or the
+/// game is not linked to Nexus). `game` is the game id; pictures are cached
+/// by Nexus domain.
+pub fn thumbnail(cx: &Cx<'_>, game: &str, mod_id: u64) -> R<Option<String>> {
+    let Some(domain) = nexus_domain_of(cx, game)? else {
+        return Ok(None);
+    };
+    let game = domain.as_str();
+    let dir = thumbs_dir(cx.paths);
+    if let Some(b) = cached(&dir, game, mod_id, store::now())? {
+        return Ok(data_url(&b));
+    }
+    let Some(nexus) = nx::connect(cx.paths, cx.store, false)? else {
+        return Ok(None);
+    };
+    let info = nexus.run(nexus.client.mod_info(game, mod_id))??;
+    let Some(url) = info.picture_url.filter(|u| !u.is_empty()) else {
+        return Ok(None);
+    };
+    let bytes = fetch_into(&dir, game, mod_id, &url, allowed_url)?;
+    Ok(data_url(&bytes))
+}
+
+/// Cache file of a picture fetched by URL: `<dir>/url/<sha256 of the URL>`.
+pub fn url_cache_path(dir: &Path, url: &str) -> PathBuf {
+    use sha2::{Digest, Sha256};
+    let name: String = Sha256::digest(url.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    dir.join("url").join(name)
+}
+
+/// A Nexus picture by URL (browse listings carry their thumbnail URLs) as
+/// a `data:` URL, cached for [`TTL_SECS`]. Only https Nexus hosts, as for
+/// every picture; `None` when the URL is not one or the fetch fails.
+pub fn picture(cx: &Cx<'_>, url: &str) -> R<Option<String>> {
+    if !allowed_url(url) {
+        return Ok(None);
+    }
+    let dest = url_cache_path(&thumbs_dir(cx.paths), url);
+    if let Some(b) = fresh(&dest, store::now()) {
+        return Ok(data_url(&b));
+    }
+    match fetch_image(&dest, url, MAX_BYTES, allowed_url) {
+        Ok(b) => Ok(data_url(&b)),
+        Err(e) => {
+            tracing::debug!("no picture from {}: {e}", super::nxm::redact_url(url));
+            Ok(None)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_https_nexus_hosts_are_allowed() {
+        assert!(allowed_url(
+            "https://staticdelivery.nexusmods.com/mods/1704/images/1.jpg"
+        ));
+        assert!(allowed_url("https://nexus-cdn.com/x.png"));
+        assert!(!allowed_url("http://staticdelivery.nexusmods.com/x.jpg"));
+        assert!(!allowed_url("https://evilnexusmods.com/x.jpg"));
+        assert!(!allowed_url("https://127.0.0.1/x.jpg"));
+        assert!(!allowed_url("file:///etc/passwd"));
+    }
+
+    #[test]
+    fn data_urls_are_built_only_for_images() {
+        assert_eq!(base64(b"Man"), "TWFu");
+        assert_eq!(base64(b"Ma"), "TWE=");
+        assert_eq!(base64(b"M"), "TQ==");
+        let png = b"\x89PNG\r\n\x1a\nrest";
+        assert!(data_url(png).unwrap().starts_with("data:image/png;base64,"));
+        assert_eq!(data_url(b"<svg onload=alert(1)>"), None);
+    }
+
+    #[test]
+    fn cache_paths_reject_traversal_and_honour_the_ttl() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(cached(dir.path(), "../etc", 1, 0).is_err());
+        let p = dir.path().join("g").join("7");
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, b"GIF89a....").unwrap();
+        let now = store::now();
+        assert!(cached(dir.path(), "g", 7, now).unwrap().is_some());
+        assert!(cached(dir.path(), "g", 7, now + TTL_SECS + 10)
+            .unwrap()
+            .is_none());
+    }
+
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\nbody";
+
+    fn rev(tile: Option<&str>, header: Option<&str>) -> serde_json::Value {
+        serde_json::json!({ "collectionRevision": { "collection": {
+            "tileImage": tile.map(|u| serde_json::json!({ "url": u })),
+            "headerImage": header.map(|u| serde_json::json!({ "url": u })),
+        } } })
+    }
+
+    // Fails when a non-Nexus or http picture URL from the API would be fetched, or the header is not the fallback.
+    #[test]
+    fn collection_image_url_prefers_the_tile_and_only_nexus_hosts() {
+        let tile = "https://staticdelivery.nexusmods.com/images/tile.jpg";
+        let head = "https://staticdelivery.nexusmods.com/images/head.jpg";
+        assert_eq!(
+            collection_image_url(&rev(Some(tile), Some(head))).as_deref(),
+            Some(tile)
+        );
+        assert_eq!(
+            collection_image_url(&rev(None, Some(head))).as_deref(),
+            Some(head)
+        );
+        assert_eq!(
+            collection_image_url(&rev(Some("https://evil.example/t.jpg"), Some(head))).as_deref(),
+            Some(head)
+        );
+        assert_eq!(
+            collection_image_url(&rev(
+                Some("http://staticdelivery.nexusmods.com/t.jpg"),
+                None
+            )),
+            None
+        );
+        assert_eq!(collection_image_url(&rev(None, None)), None);
+        assert_eq!(
+            collection_image_url(&serde_json::json!({ "collectionRevision": null })),
+            None
+        );
+    }
+
+    // Fails when the cache is bypassed, a failure is an error instead of "no art", or slugs reach the file system unchecked.
+    #[test]
+    fn collection_art_lookup_caches_and_falls_back_to_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = store::now();
+        let tile = "https://staticdelivery.nexusmods.com/images/tile.png";
+        let no_query = || -> R<serde_json::Value> { panic!("must not query") };
+        let no_fetch = |_: &Path, _: &str| -> R<Vec<u8>> { panic!("must not fetch") };
+        // No picture: None, nothing fetched.
+        let r = collection_art_lookup(
+            dir.path(),
+            "g",
+            "abc",
+            now,
+            || Ok(rev(None, None)),
+            no_fetch,
+        );
+        assert_eq!(r.unwrap(), None);
+        // Query fails: None, not an error.
+        let r = collection_art_lookup(
+            dir.path(),
+            "g",
+            "abc",
+            now,
+            || Err(AppError::Msg("offline".into())),
+            no_fetch,
+        );
+        assert_eq!(r.unwrap(), None);
+        // Fetched into the cache path, then served from it.
+        let r = collection_art_lookup(
+            dir.path(),
+            "g",
+            "abc",
+            now,
+            || Ok(rev(Some(tile), None)),
+            |dest, url| {
+                assert_eq!(url, tile);
+                assert!(dest.ends_with("collections/g/abc"));
+                std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+                std::fs::write(dest, PNG).unwrap();
+                Ok(PNG.to_vec())
+            },
+        );
+        assert_eq!(r.unwrap(), data_url(PNG));
+        assert_eq!(
+            collection_art_lookup(dir.path(), "g", "abc", now, no_query, no_fetch).unwrap(),
+            data_url(PNG)
+        );
+        // Bad slug or game: refused before any file or network access.
+        assert!(collection_art_lookup(dir.path(), "g", "../x", now, no_query, no_fetch).is_err());
+        assert!(collection_art_lookup(dir.path(), "../g", "abc", now, no_query, no_fetch).is_err());
+    }
+
+    /// Two servers on 127.0.0.1; `allow` accepts only the first's URLs.
+    fn servers() -> (tokio::runtime::Runtime, MockServer, MockServer) {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (a, b) = rt.block_on(async { (MockServer::start().await, MockServer::start().await) });
+        (rt, a, b)
+    }
+
+    use wiremock::matchers::path;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn a_redirect_off_the_allowed_hosts_is_refused() {
+        let (rt, good, evil) = servers();
+        rt.block_on(async {
+            Mock::given(path("/p.png"))
+                .respond_with(
+                    ResponseTemplate::new(302)
+                        .insert_header("Location", format!("{}/p.png", evil.uri())),
+                )
+                .mount(&good)
+                .await;
+            Mock::given(path("/p.png"))
+                .respond_with(ResponseTemplate::new(200).set_body_bytes(PNG.to_vec()))
+                .mount(&evil)
+                .await;
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let prefix = format!("{}/", good.uri());
+        let url = format!("{}/p.png", good.uri());
+        let r = fetch_into(dir.path(), "g", 1, &url, move |u| u.starts_with(&prefix));
+        assert!(r.is_err());
+        assert!(rt.block_on(evil.received_requests()).unwrap().is_empty());
+        assert!(!dir.path().join("g").join("1").exists());
+    }
+
+    #[test]
+    fn an_oversize_picture_is_rejected() {
+        let (rt, good, _) = servers();
+        rt.block_on(
+            Mock::given(path("/big.png"))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_bytes(vec![0u8; MAX_BYTES as usize + 1]),
+                )
+                .mount(&good),
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let url = format!("{}/big.png", good.uri());
+        let e = fetch_into(dir.path(), "g", 1, &url, |_| true).unwrap_err();
+        assert!(e.to_string().contains("limit"), "{e}");
+        let left: Vec<_> = std::fs::read_dir(dir.path().join("g")).unwrap().collect();
+        assert!(left.is_empty(), "{left:?}");
+    }
+
+    #[test]
+    fn concurrent_fetches_of_one_picture_do_not_splice() {
+        let (rt, good, _) = servers();
+        let body: Vec<u8> = PNG
+            .iter()
+            .copied()
+            .chain((0..200_000).map(|i| i as u8))
+            .collect();
+        rt.block_on(
+            Mock::given(path("/p.png"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_bytes(body.clone())
+                        .set_delay(std::time::Duration::from_millis(50)),
+                )
+                .mount(&good),
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let url = format!("{}/p.png", good.uri());
+        let a = temp_path(&dir.path().join("1"));
+        assert_ne!(a, temp_path(&dir.path().join("1")));
+        let results: Vec<_> = std::thread::scope(|s| {
+            let hs: Vec<_> = (0..4)
+                .map(|_| s.spawn(|| fetch_into(dir.path(), "g", 1, &url, |_| true)))
+                .collect();
+            hs.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        for r in results {
+            assert_eq!(r.unwrap(), body);
+        }
+        assert_eq!(std::fs::read(dir.path().join("g").join("1")).unwrap(), body);
+        let names: Vec<_> = std::fs::read_dir(dir.path().join("g"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, vec![std::ffi::OsString::from("1")]);
+    }
+}

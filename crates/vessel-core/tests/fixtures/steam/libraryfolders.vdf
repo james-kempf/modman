@@ -1,0 +1,27 @@
+"libraryfolders"
+{
+	"0"
+	{
+		"path"		"/home/deck/.local/share/Steam"
+		"label"		""
+		"contentid"		"1234567890123456789"
+		"totalsize"		"0"
+		"update_clean_bytes_tally"		"0"
+		"time_last_update_verified"		"0"
+		"apps"
+		{
+			"228980"		"0"
+		}
+	}
+	"1"
+	{
+		"path"		"/run/media/mmcblk0p1"
+		"label"		"SD \"Card\""
+		"contentid"		"9876543210987654321"
+		"totalsize"		"511859089408"
+		"apps"
+		{
+			"489830"		"17523413261"
+		}
+	}
+}

@@ -1,0 +1,371 @@
+plan_id: 20261029-loader-plugin-architecture
+status: completed
+tldr: |
+  New vessel-core loaders module. One LoaderPlugin trait serves Rust plugins (vendor installers) and
+  declarative [[loaders]] TOML (game-root deploy plus launch changes), so later loaders need no core changes.
+  SMAPI is the first plugin and runs the vendor scripts by default:
+    native: /bin/bash "install on Linux.sh" via argv;
+    Proton: "install on Windows.bat" via core-built `<proton> run cmd.exe /c`, with strict
+    cmd-metacharacter rejection.
+  Every spawning op (install, upgrade, repair, uninstall, adopt) goes through these steps:
+    provenance (Nexus API 2400 or Pathoschild GitHub, downloaded by Vessel only)
+    -> preview in a 0700 read-only scratch dir
+    -> plan_hash over archive/target/install.dat/scratch-manifest/unverified_ack
+    -> core-enforced consent token
+    -> preflight (Proton: game not running, fully installed, pfx exists, mapped tool)
+    -> phase-tracked run: backing_up -> spawned -> diffing -> done, with pid/pgid stored,
+       PDEATHSIG, timeout kill plus wineserver -k
+    -> lstat diff into loader_files, with backups kept as GC roots.
+  Steam-update vanilla classification runs before repair, upgrade and uninstall. Launch option: copy plus
+  ack by default; an explicit Apply writes localconfig.vdf for the MostRecent account.
+  Runs with user permissions (no sandbox in v1), and the UI and docs say so plainly. Seven waves.
+created_at: "2026-10-29"
+created_by: gem-planner
+revision: 2
+replan_count: 1
+planner_revision_used: true
+
+baseline:
+  objective: 'Design and plan a plugin architecture in the Vessel mod manager (Rust workspace /home/jkempf/Repositories/modman, crates/vessel-*, Tauri desktop apps/desktop) that can install installer/loader-style mods (archive installers, game-root drop-in loaders, loaders needing launch/exe changes). First concrete plugin: Stardew Valley SMAPI, which must run the bundled vendor installer: "install on Linux.sh" for the native Linux game, and "install on Windows.bat" for the Proton version.'
+  acceptance_criteria:
+    - 'A plugin abstraction (trait and/or declarative definition) that per game/loader can: detect a loader archive at install time (instead of deploying it into Mods/), choose an install strategy (run vendor installer | declarative file deploy to game root | launch-option/DLL-override changes), detect installed state and version, uninstall/repair, and report status to the Requirements view.'
+    - 'SMAPI plugin: detects the SMAPI archive; determines native vs Proton for the game; native runs the Linux installer non-interactively (--install --no-prompt --game-path <dir>, or the equivalent via its internal installer) with captured output; Proton runs install on Windows.bat (or the SMAPI.Installer.exe it invokes) inside the game''s Proton/Wine prefix with the right Proton binary and env, then surfaces or applies the needed Steam launch option ("<game>\StardewModdingAPI.exe" %command%). Supports uninstall (--uninstall) and upgrade.'
+    - 'Integrates with the existing pipeline: crates/vessel-core/src/mods/install.rs install_archive (L133), staging.rs marker_layout/ModRoot{Deploy,Game}, deploy/plan.rs root=game, backup/journal, requirements.rs TOOLS (smapi detection), the Requirements.tsx Install button, games/steam.rs Proton prefix discovery, app/games.rs launch, app/shortcut.rs Steam config handling.'
+    - 'Safety for running downloaded scripts: verify archive provenance (Nexus mod id 2400 / expected file layout, optional hash), show the user what will run and require explicit consent, scoped working dir, timeout, captured logs, snapshot or manifest of game-dir changes before/after so Vessel can report and roll back, no shell interpolation of paths.'
+    - 'Tracks resulting files for status and uninstall even though a vendor installer made the changes (pre/post diff of the game dir).'
+    - 'Extensible: the same architecture can later express BepInEx, script extenders (SKSE/F4SE), REFramework, RED4ext/CET, ENB/ReShade, MelonLoader via declarative definitions or additional plugins, without core changes.'
+    - 'Tests: unit tests with fixture archives (no real vendor binaries), fake runner for installer execution, native/Proton selection tests; cargo test, clippy, and desktop vitest/tsc pass.'
+  captured_at: "2026-10-29"
+
+replan:
+  reason: "The critic review returned 'revise': blocking security and recovery gaps (findings 1-22), plus orchestrator decisions that restore requirement fidelity (vendor scripts are the default)."
+  changed_tasks: [R1, T1, T2, T3, T5, T6, V1]
+  added_tasks: [S1, T4a, T4b, T7, T8, D1]
+  removed_tasks: [T4]
+  revised_tasks: [R1, T1, T2, T3, T5, T6, V1]
+  invalidated_tasks: []
+  invalidated_assumptions:
+    - "rev1: 'Exec SMAPI.Installer directly, scripts only if R1 allows' -> the scripts are now the default. If a script cannot run non-interactively, that is needs_input to the user, never a silent switch."
+    - "rev1: 'Provenance from download meta or a GitHub asset name pattern' -> only downloads Vessel itself made from the Nexus API (mod 2400) or the Pathoschild GitHub release API count as verified."
+    - "rev1: 'Single InstallerSpec.program' -> split into target and host. Core builds the Proton wrapping."
+    - "rev1: 'Status row running + recovery marks interrupted' -> phase-tracked loader_runs with stored pid/pgid and a persisted pre-manifest."
+    - "rev1: 'DISPLAY/WAYLAND in allowlist' -> minimal env; display vars only if R1 proves they are needed."
+    - "rev1: 'T5 depends only on T1' -> T5 depends on T4b's preview API (finding 7)."
+  preserved_acceptance_criteria: ["All 7 baseline acceptance criteria unchanged"]
+  new_risks:
+    - "cmd.exe parses the .bat command line itself, so argv quoting alone does not prevent injection. Mitigation: reject metacharacters and test for injection."
+    - "Recovery could kill a reused pgid. Mitigation: store the process start time and verify it before killing."
+    - "The installer has side effects outside the game dir (~/.smapi) that cannot be rolled back. They are recorded and disclosed."
+  progress_signal: "No tasks executed yet. Revision before build."
+
+decisions:
+  - "Requirement fidelity: SMAPI runs the vendor scripts by default. Native: program=/bin/bash, argv=[<abs script>, --install|--uninstall, --no-prompt, --game-path, <dir>] (no -c). Proton: program=<validated proton>, argv=[run, cmd.exe, /c, <bat win path>, args...]. The orchestrator recorded the tradeoff: R1 had recommended declarative deploy, and the user's choice wins. Isolation is consent plus env, cwd and timeout limits plus rollback, with no sandbox; the UI and docs state 'runs with your user permissions'."
+  - "Trait: `trait LoaderPlugin { key(); matches(&GameCtx,&ArchiveProbe)->Option<LoaderMatch>; provenance(&LoaderMatch,&DownloadOrigin)->Provenance; plan(op: Install|Upgrade|Repair|Uninstall|Adopt, &GameCtx, &Runtime, extracted: Option<&Path>)->Result<LoaderPlan>; detect(&GameCtx,&Store)->LoaderStatus }`. `LoaderPlan { steps: Vec<Step>, touch_scope: Vec<Glob>, external_side_effects: Vec<String>, expected_version }`. `enum Step { RunInstaller(InstallerSpec), DeployFiles(PayloadRecipe{select(nested), root=game, map, exclude, mode per file}), Launch(LaunchChange{exe|env|dll_overrides|steam_launch_option}) }`. extracted=None is allowed for uninstall and detect."
+  - "InstallerSpec = { target: Target{rel_path, kind: BashScript|BatScript|Exe} /*canonicalized inside the scratch dir, no symlink components*/, args: Vec<Arg{Lit|GamePath|GamePathWin}>, host: Native | Proton{proton, compat_data, client_root, app_id} }. Only core turns host+target into argv. The proton path must be under a known Steam library steamapps/common/* or compatibilitytools.d/*, owned by the user or root, and not group- or world-writable. For BatScript, every arg is checked against the cmd metacharacters [&|<>^%!\"()\\r\\n] and rejected with UnsafeForCmd; allowed args are double-quoted."
+  - "plan_hash = sha256(serialized plan + archive_sha256 + target sha256 + install.dat sha256 + scratch manifest hash + unverified_ack + op + game_id). The scratch dir is 0700 under <data>/loaders/scratch/<preview_id> and is made read-only after preview. The manifest is re-verified immediately before spawn. If R1 shows the installer writes into its own dir, it runs from a per-run copy verified against the manifest. Previews expire after 10 min."
+  - "Every spawning op (install, upgrade, repair, uninstall, adopt) requires a preview_id plus a matching plan_hash. Repair re-verifies the cached archive's sha256 against loader_installs.archive_sha256. NXM, collections and auto-deploy only create pending previews."
+  - "Provenance: verified only when Vessel itself downloaded the archive, either through the Nexus API (domain stardewvalley, mod 2400, file id recorded) or from a Pathoschild/SMAPI GitHub release asset through the API. The layout check is always enforced: a mismatch is a hard reject. Any other source is unverified and allowed only with unverified_ack=true inside the hashed plan, which core checks."
+  - "Env (native): env_clear plus PATH, HOME, LANG, SMAPI_NO_TERMINAL=true, SMAPI_USE_CURRENT_SHELL=true. TERM, DISPLAY or WAYLAND_DISPLAY are added only if R1 proves they are needed. Proton adds STEAM_COMPAT_DATA_PATH, STEAM_COMPAT_CLIENT_INSTALL_PATH and, per R1, SteamAppId/SteamGameId. The Nexus API key and any Vessel secret are never in the env; a test asserts this."
+  - "Process control: process_group(0), PR_SET_PDEATHSIG(SIGKILL) via pre_exec, stdin null, captured stdout/stderr, timeout (default 300s) -> kill pgid. On Proton timeout or interrupt: `<proton dir>/files/bin/wineserver -k` with WINEPREFIX=<compat_data>/pfx. The pid, pgid and process start time are stored, and recovery kills the stored pgid only when the start time still matches."
+  - "Recovery: loader_runs.phase is backing_up, then spawned, then diffing, then done. The pre-manifest is persisted before spawn. On startup: phase=backing_up -> discard the run and refuse rollback (the backup is incomplete; the game is untouched). spawned -> kill the pgid if it is live, then offer rollback. diffing -> finish the diff, then offer rollback. done -> no action."
+  - "Snapshot: lstat, never follow symlinks; symlinks are recorded as links. Backups are copies or reflinks, never hardlinks. Before backup, the in-scope paths are checked against the deploy manifest: a Vessel-deployed file or link in scope is a preflight conflict and the op is blocked. loader_files.backup_ref entries are GC roots of the backup store."
+  - "SMAPI touch_scope: StardewValley, StardewValley-original, StardewModdingAPI*, smapi-internal/** (config.user.json preserved and tracked), steam_appid.txt, *.deps.json, Mods/ConsoleCommands/**, Mods/SaveBackup/**, Mods/.cache/**, Mods/ErrorHandler/**, Mods/TrainerMod/**, plus the obsolete DLL list from R1. external_side_effects: ~/.smapi (moved or created), recorded as unrecoverable."
+  - "Vanilla classification before repair, upgrade and uninstall: hash the current StardewValley. If it equals the loader post hash, SMAPI is intact. If it equals the vanilla backup hash, the game reverted to the same vanilla. Any third hash means a Steam update: refresh the vanilla backup, and the StardewValley-original handling, from the new file. The pre-first-install vanilla is otherwise never replaced by SMAPI content."
+  - "Manual SMAPI already installed (StardewModdingAPI.dll or StardewValley-original present, no loader_installs row): a normal install is blocked with ManualInstallDetected. 'Adopt' runs a consented op: vendor --uninstall, then verify StardewValley is an ELF and not a script, then a managed install. If verification fails, it is blocked with a 'verify game files in Steam' hint."
+  - "Launch options: copy plus ack by default. Apply is explicit, targets the MostRecent account in loginusers.vdf, and shows a picker when there are several accounts. It refuses while Steam is running and re-checks steam_running() right before the atomic rename. It backs up the file, round-trips VDF escaping, and matches the apps key case-insensitively."
+  - "Schema, migration 0007_loaders.sql: loader_installs(id PK, game_id NULL REFERENCES games ON DELETE SET NULL, game_dir TEXT, loader_key, version, runtime, strategy, status, nexus_mod_id, nexus_file_id, origin, archive_sha256, archive_path /*copy under <data>/loaders/archives/<sha>*/, vanilla_sha256, game_build, installed_at, updated_at), plus a partial UNIQUE index on (game_id, loader_key) WHERE status IN ('installed','running','interrupted'). loader_files(install_id, path, change, kind file|link, pre_sha256, post_sha256, backup_ref, out_of_scope, PRIMARY KEY(install_id, path)). loader_runs(id, install_id, op, consent_hash, phase, pid, pgid, proc_start, pre_manifest_path, started_at, ended_at, exit_code, timed_out, log_path). games gains runtime_override TEXT, launch_options_desired TEXT, launch_options_acked TEXT, launch_options_applied TEXT. The mods table is unchanged. Rollback data survives game removal."
+  - "Wave order: T5 depends on T4b's preview API (finding 7). S1 reviews runner.rs and snapshot.rs after W2 and before the orchestrator builds on them. V1 stays as the final review."
+  - "Coalescing: the opt-in manual smoke-test runbook is merged into D1 (same agent, same docs dir), and D1 inherits its criteria. The user runs it; no agent executes real SMAPI. The typed error-to-UX mapping (T7) is its own task, kept on core error codes plus a new TS module so it can run in parallel with T5 and T8."
+  - "Scope cuts: no shipped BepInEx or SKSE definitions; fixtures prove extensibility end to end. No bubblewrap. Proton under Flatpak Steam is detected and reported unsupported in v1. Collection-to-loader mapping is limited to a pending preview."
+
+assumptions:
+  - "USER DECISION (2026-10-29): option A, fully automatic. SMAPI runs internal/linux/SMAPI.Installer (native) or internal/windows/SMAPI.Installer.exe (Proton) directly with --install|--uninstall --no-prompt --game-path. This supersedes the orchestrator's scripts-default decision, because R1 showed neither script forwards args (both BLOCKERs)."
+  - "Orchestrator decision: the vendor scripts are the default (Linux.sh via /bin/bash argv with SMAPI_NO_TERMINAL/SMAPI_USE_CURRENT_SHELL; Windows.bat via core-owned Proton wrapping with metacharacter rejection). If R1 finds a script cannot run non-interactively and safely, the orchestrator raises needs_input to the user. Implementers must not switch to SMAPI.Installer on their own."
+  - "Orchestrator decision: no sandbox in v1 is accepted. The consent dialog and docs state 'runs with your user permissions' and list the out-of-game side effects (~/.smapi) as unrecoverable."
+  - "Orchestrator decision: launch options are copy plus ack by default. localconfig.vdf is written only on explicit Apply, for the loginusers.vdf MostRecent account, with a picker if there are several."
+  - "Orchestrator decision: unverified archives are allowed only with a core-enforced unverified_ack inside the hashed plan."
+  - "`<proton> run` works outside the Steam client with the STEAM_COMPAT_* env set. R1 confirms the pressure-vessel/SLR requirements. If Vessel ships as a Flatpak (R1 item), the runner prefixes `flatpak-spawn --host` as argv inside core."
+  - "The working tree may have concurrent uncommitted user edits. Each task re-reads its target files right before editing and touches only the files listed for it."
+  - "No real vendor binaries in automated tests. FakeRunner applies scripted fs mutations, and real-process runner tests use tiny test helper binaries or scripts written by the tests."
+
+shared_context:
+  loader_core:
+    - "Research report: /tmp/claude-1000/-home-jkempf-Repositories-modman/af51194a-7607-4280-a9ca-ab6ed9403978/scratchpad/smapi-research.md (sections 1-2, 5)"
+    - "R1 findings (filled by orchestrator): /tmp/claude-1000/-home-jkempf-Repositories-modman/af51194a-7607-4280-a9ca-ab6ed9403978/scratchpad/loader-r1-findings.md"
+    - "install_archive: crates/vessel-core/src/mods/install.rs L133 -> Result<InstallOutcome, ModsError>; normalize_layout staging.rs ~L912; marker_layout L726; ModRoot L208"
+    - "GameDefinition: crates/vessel-core/src/games/definitions.rs L153 (deny_unknown_fields); crates/vessel-core/definitions/stardewvalley.toml"
+    - "Migrations: crates/vessel-core/migrations/000N_*.sql registered in store.rs MIGRATIONS (L53+); latest 0006_game_identity.sql"
+    - "Steam: games/steam.rs find_prefix L138, find_app L153, text VDF parse_library_folders L61; app/shortcut.rs steam_running L260, account enumeration L232"
+    - "Spawn precedent: app/games.rs launch_opener L397"
+    - "Requirements: requirements.rs Tool L19, TOOLS L28, scan L350, analyze L391; apps/desktop/src/views/Requirements.tsx L243"
+    - "Consent infra: apps/desktop/src-tauri/src/prompt.rs; IPC apps/desktop/src/ipc/{commands,types,events}.ts, src-tauri/src/{commands,command_names,events}.rs"
+    - "Deploy: crates/vessel-core/src/deploy/{backup,engine,plan,quarantine,provenance}.rs; plan.rs L144 root==game"
+
+tasks:
+  - id: R1
+    title: Verify SMAPI script, Proton and packaging facts (read-only)
+    description: "Research from upstream source and docs only; nothing is executed. (1) SMAPI 4.x layout (internal/linux vs internal/unix; install.dat is a zip; installer file names; whether the installer writes into its own dir). (2) 'install on Linux.sh': does it forward \"$@\", any `read` prompts, terminal relaunch logic, stdin handling, the env it needs (TERM/DISPLAY?), and the effect of SMAPI_NO_TERMINAL/SMAPI_USE_CURRENT_SHELL. (3) 'install on Windows.bat': arg forwarding, `pause`/`set /p`, how it invokes SMAPI.Installer.exe, behaviour under `proton run cmd.exe /c`, and the Z:\\ path form for --game-path. (4) Proton: `proton run` env (STEAM_COMPAT_DATA_PATH, STEAM_COMPAT_CLIENT_INSTALL_PATH, SteamAppId/SteamGameId), whether it waits for exit, pressure-vessel/SLR requirement for recent Proton outside Steam, wineserver location, config_info format, config.vdf CompatToolMapping, appmanifest StateFlags meaning, loginusers.vdf MostRecent, localconfig.vdf apps/<appid>/LaunchOptions casing and escaping. (5) SMAPI's obsolete-file list and ~/.smapi behaviour. (6) Vessel packaging: is Vessel or a Flatpak manifest shipped (repo packaging files)? Does it need flatpak-spawn --host? Flatpak Steam roots. (7) Code boundaries: every install_archive and InstallOutcome call site, the deploy/plan.rs replaced-file classification, the backup store GC function, the startup recovery hook, the prompt.rs confirm flow, and whether libc or nix is already a dependency."
+    wave: 1
+    depends_on: []
+    agent: gem-researcher
+    exploration_mode: question
+    status: completed
+    blocker: "needs_input: both vendor scripts drop args (Linux.sh: no \"$@\", relaunches in GUI terminal when stdin not TTY; bat: no %*, ReadLine loop on null stdin). User must choose invocation strategy before T4a."
+    retries_used: 0
+    acceptance_criteria:
+      - "The findings file /tmp/claude-1000/-home-jkempf-Repositories-modman/af51194a-7607-4280-a9ca-ab6ed9403978/scratchpad/loader-r1-findings.md answers items 1-7. Each answer cites a URL or file:line, or is marked unverified."
+      - "An explicit verdict for each script: runs non-interactively and safely with argv X and env Y, or BLOCKER with the reason. A BLOCKER is returned as needs_input. It is not a recommendation to switch to the internal installer."
+      - "Lists every install_archive and InstallOutcome call site, plus the backup GC function, with file:line."
+    handoff:
+      constraints: ["Read-only; no code edits; never run downloaded installers", "Write only the findings file"]
+
+  - id: T1
+    title: Loader contract, declarative schema, migration 0007
+    description: "New code; nothing existing to reuse. Create crates/vessel-core/src/loaders.rs and loaders/{types,registry,declarative}.rs with the trait and types from the decisions (InstallerSpec target/host split, Arg, Step, PayloadRecipe with per-file mode, LaunchChange, Runtime, Provenance/DownloadOrigin, LoaderStatus, LoaderError). Add `#[serde(default)] loaders: Vec<LoaderDef>` to GameDefinition, keeping deny_unknown_fields. LoaderDef has match fields (nexus_mod_id, required_paths globs, forbidden_paths), payload, launch, couples_to. DeclarativeLoader implements plan() for DeployFiles and Launch, including conflict detection: payload paths that collide with another active loader or with Vessel-deployed files produce LoaderError::Conflict. Write migration 0007_loaders.sql exactly per the schema decision, register it in store.rs, and add store accessors. Wire lib.rs."
+    wave: 1
+    depends_on: []
+    agent: gem-implementer
+    status: completed
+    retries_used: 0
+    context_cluster: loader_core
+    acceptance_criteria:
+      - "BepInEx-shaped fixture (winhttp.dll + BepInEx/ to the game root, dll_overrides=[winhttp]) and SKSE-shaped fixture (game-root exe/dll + Data/Scripts, launch exe) parse, match their fixture archives, and plan Step::DeployFiles + Step::Launch. An unknown field is rejected. Per-file mode is honored in the plan. A payload collision yields Conflict."
+      - "plan(Uninstall, .., extracted=None) works for declarative loaders."
+      - "Migration 0007 applies on a fresh DB and on a v0006 DB. The partial UNIQUE index rejects a second active (game_id, loader_key) and allows one after status=uninstalled. The loader_files PK rejects a duplicate (install_id, path). Deleting a game keeps loader_installs rows with game_id NULL and game_dir set."
+      - "All shipped definition TOMLs still load. cargo test -p vessel-core and cargo clippy --all-targets -- -D warnings pass."
+    handoff:
+      constraints: ["Re-read files before editing", "Do not alter mods table or existing migrations"]
+      high_risk_signals: [schema_change, contract_change]
+
+  - id: T2
+    title: Runtime detection, Proton preflight, hardened runner, lstat snapshot
+    description: "Extend games/steam.rs; add loaders/{runtime,runner,snapshot}.rs. (a) steam.rs: CompatToolMapping, config_info, the proton binary resolved from the mapped tool only, proton path location and ownership validation, appmanifest StateFlags, loginusers.vdf MostRecent, Flatpak Steam roots. (b) runtime.rs: detect, in order: override -> mapping -> ELF/.exe sniff -> Unknown. Preflight for Proton: game not running (/proc exe/cwd scan under the game dir), StateFlags fully installed, pfx exists, mapped tool; warn if config_info differs. (c) runner.rs: `trait ProcessRunner`. RealRunner builds argv from host+target (bash, or proton run cmd.exe /c with metacharacter rejection and quoting; flatpak-spawn --host prefix if R1 requires it), canonicalizes the target inside the scratch dir with no symlink components, uses the minimal env per decision, process_group(0), PDEATHSIG via pre_exec, stdin null, captured logs, and on timeout kills the pgid and runs wineserver -k for Proton. It returns pid, pgid and proc_start through a callback before waiting, so the caller can persist them. FakeRunner applies scripted mutations and counts calls. (d) snapshot.rs: an lstat no-follow manifest (scoped sha256, whole-dir stat), a deploy-manifest conflict check for in-scope paths, a copy/reflink backup into deploy/backup.rs (never hardlink), a diff that covers links, rollback, and registration of backup_ref as GC roots in the backup store's GC."
+    wave: 2
+    depends_on: [R1, T1]
+    agent: gem-implementer
+    status: completed
+    retries_used: 0
+    context_cluster: loader_core
+    acceptance_criteria:
+      - "Runtime and preflight tests (fixture Steam trees) cover: mapping -> Proton with the resolved path; ELF and no mapping -> Native; .exe only -> Proton; override wins; ambiguous -> Unknown; a world-writable or out-of-library proton is rejected; StateFlags not fully installed is blocked; a missing pfx is blocked; a config_info mismatch warns; a Flatpak root is flagged unsupported for Proton."
+      - "Injection tests: a game path containing spaces, $(), ;, backticks and quotes is passed as one argv element to a test helper on the bash host. For BatScript, any arg containing & | < > ^ % ! \" ( ) or a newline is rejected with UnsafeForCmd before spawn, and the generated cmd line for a safe path is exactly as expected."
+      - "Runner tests: a target outside the scratch dir, or with a symlinked path component, is rejected; the timeout kills the whole pgid (a grandchild helper is gone); a child sees no env vars beyond the allowlist, including a planted NEXUS_API_KEY; logs capture stdout and stderr; pid, pgid and proc_start reach the callback before exit."
+      - "Snapshot tests: symlinks are recorded as links and never followed; a backup is never a hardlink (inode differs); an in-scope Vessel-deployed file or link yields a conflict; create, modify and delete are classified and rolled back; out-of-scope changes are flagged unrecoverable; a backup GC run keeps blobs referenced by loader_files."
+      - "No `sh -c`/`bash -c` or joined-string shell invocation in loaders/. cargo test and clippy -D warnings pass."
+    handoff:
+      constraints: ["Re-read steam.rs and deploy/backup.rs before editing", "Reuse backup store API", "Add libc only if not already a dependency (per R1)"]
+      high_risk_signals: [security_sensitive]
+
+  - id: T3
+    title: Launch-option model and explicit localconfig.vdf Apply
+    description: "New launch.rs, reusing the shortcut.rs helpers. compose(Vec<LaunchChange>) -> the desired string (exe %command%, merged WINEDLLOVERRIDES, env prefixes) with correct quoting. Persist desired, acked (stores the acked string) and applied. Read LaunchOptions from text localconfig.vdf. apply(account) targets the MostRecent account by default and returns the list of accounts when there are several. It refuses while Steam is running, backs up the file, edits only apps/<appid>/LaunchOptions (key matched case-insensitively) with VDF escaping round-trip, writes temp+fsync, re-checks steam_running() immediately before an atomic rename, and aborts if Steam started. app/games.rs launch reports a mismatch between desired and acked/applied. shortcut.rs behaviour stays the same."
+    wave: 2
+    depends_on: [T1]
+    agent: gem-implementer
+    status: completed
+    retries_used: 0
+    acceptance_criteria:
+      - "Compose tests: SMAPI Proton gives `\"<game win path>\\StardewModdingAPI.exe\" %command%`; two DLL overrides merge into one WINEDLLOVERRIDES; quoting holds for spaces and quotes."
+      - "VDF tests: existing values containing \\\" and \\\\ round-trip; other bytes are unchanged; the apps key is matched case-insensitively (\"Apps\"/\"apps\"); a backup is created; Steam running before or at the re-check aborts with no write and no temp file left; with several accounts and no choice, the account list is returned."
+      - "Existing shortcut.rs and app/games.rs tests pass. cargo test and clippy -D warnings pass."
+    handoff:
+      constraints: ["Re-read shortcut.rs and app/games.rs before editing", "Never write without explicit apply call"]
+      high_risk_signals: [shared_state]
+
+  - id: S1
+    title: Security review of runner.rs and snapshot.rs
+    description: "Independent security review of the W2 output before the orchestrator builds on it: argv construction, cmd metacharacter policy, target confinement and symlink TOCTOU, env minimality, pgid kill and wineserver cleanup, PDEATHSIG, snapshot no-follow, backup non-hardlink, GC roots, and proton path validation. Return blocking findings as fix tasks."
+    wave: 3
+    depends_on: [T2]
+    agent: gem-reviewer
+    status: completed
+    note: "S1 verdict blocking (1H/4M); fix task S1-F applied by T2 owner: F1-F6 + LOWs fixed, 426 tests, clippy clean. T4b must call set_loader_run_wine in on_spawn, kill_stale_run in recovery, clear_loader_run_backups after loader_files/rollback."
+    retries_used: 0
+    acceptance_criteria:
+      - "Report with findings by severity and file:line. Zero open critical or high findings, or fix tasks returned that block W4."
+      - "Confirms the injection, env, timeout and symlink tests in T2 exist and fail when the protection is removed (spot-check by reasoning or mutation)."
+    handoff:
+      high_risk_signals: [security_sensitive]
+
+  - id: T4a
+    title: SMAPI plugin and fixtures
+    description: "New loaders/smapi.rs implementing LoaderPlugin. matches: the R1 layout signature. provenance: per decision (DownloadOrigin from a Vessel Nexus API or Pathoschild GitHub download only; layout and install.dat zip containing StardewModdingAPI.dll are always enforced; version from the folder name cross-checked with install.dat). plan: Install/Upgrade/Repair/Uninstall/Adopt build InstallerSpec{target=BashScript 'install on Linux.sh' | BatScript 'install on Windows.bat', args=[--install|--uninstall, --no-prompt, --game-path, GamePath|GamePathWin]} following R1's verdicts, with touch_scope and external_side_effects per decision; Proton adds Step::Launch(steam_launch_option). detect: managed/unmanaged/manual-install/drift. classify_vanilla(current, post, vanilla) -> Intact|SameVanilla|SteamUpdated. Fixture archives contain stub files only, for the internal/unix and internal/linux variants."
+    wave: 3
+    depends_on: [R1, T1, T2]
+    agent: gem-implementer
+    status: completed
+    retries_used: 0
+    context_cluster: loader_core
+    acceptance_criteria:
+      - "Both layout variants match. A missing internal/windows, a non-zip install.dat, or an install.dat without StardewModdingAPI.dll is a hard reject. Provenance is Verified only for Nexus API/2400 and Pathoschild GitHub origins; a local file or other origin is Unverified."
+      - "The native plan target is 'install on Linux.sh' with the BashScript kind and the exact argv. The Proton plan target is 'install on Windows.bat' with the BatScript kind, Z:\\ game path and launch step. Uninstall plans with extracted=None use the cached archive."
+      - "touch_scope includes every path listed in the decision. external_side_effects lists ~/.smapi."
+      - "classify_vanilla has tests for all three outcomes. detect reports manual-install when StardewModdingAPI.dll or StardewValley-original exists with no loader_installs row."
+      - "cargo test and clippy -D warnings pass."
+    handoff:
+      constraints: ["No process spawning in smapi.rs", "If R1 returned a script BLOCKER, stop and return needs_input"]
+      high_risk_signals: [security_sensitive]
+
+  - id: T4b
+    title: Loader orchestrator, consent token, phase-tracked runs, recovery
+    description: "New app/loaders.rs, registered in app.rs. preview(game, source, op, unverified_ack): copy the archive to <data>/loaders/archives/<sha>, extract into a 0700 scratch dir, make it read-only, compute the manifest and plan_hash, and return a Preview{preview_id, plan_hash, argv list, env, cwd, runtime, touch_scope, external_side_effects, provenance, warnings, 'runs with your user permissions'}. run(preview_id, plan_hash): check the token, expiry and unverified_ack, re-verify the scratch manifest (and the cached archive sha for repair), run preflight and the vanilla classification (a Steam update refreshes the vanilla backup), take the deploy lock, then phase backing_up (scoped backup, persist the pre-manifest) -> spawned (persist pid/pgid/proc_start) -> diffing -> done, and record loader_installs/files/runs. On non-zero exit or timeout, roll back and set status=failed with the log kept. Then apply the launch step via launch.rs (desired set, ack pending). Ops: install, upgrade (keeps the original vanilla), repair, uninstall (vendor --uninstall, then the diff, falling back to rollback on failure or leftovers), adopt (ManualInstallDetected flow), rollback. Startup recovery per the phase decision, with the start-time check before killing. The declarative loaders' DeployFiles and Launch steps run through the same orchestrator using the existing deploy engine with root=game."
+    wave: 4
+    depends_on: [T4a, T3, S1]
+    agent: gem-implementer
+    status: completed
+    note: "Deviations: declarative DeployFiles via orchestrator+confine (not deploy engine); startup recover() wiring left to T6; loader_installs.launch column added."
+    retries_used: 0
+    context_cluster: loader_core
+    acceptance_criteria:
+      - "Each spawning op (install, upgrade, repair, uninstall, adopt) with a missing, mismatched or expired token, a tampered scratch file, a changed cached archive, or an unverified plan without unverified_ack leaves FakeRunner calls == 0."
+      - "Native e2e (FakeRunner): install records loader_files (StardewValley modified, StardewValley-original created, smapi-internal/** created); detect gives Installed+version; uninstall restores the vanilla; a non-zero exit triggers rollback and status=failed."
+      - "Steam-update test: install -> replace StardewValley with vanilla V2 -> repair -> uninstall leaves StardewValley == V2 with the right hash. Upgrade keeps the original vanilla backup."
+      - "Crash tests for each phase: backing_up refuses rollback and leaves the game unchanged; spawned kills the stored pgid only when proc_start matches (a reused-pid fixture is not killed) and then offers rollback; diffing completes the diff; done needs no action."
+      - "Proton e2e: install sets launch_options_desired with acked NULL; Flatpak Steam or Unknown runtime gives typed errors."
+      - "Adopt: the manual-install fixture is blocked on a normal install, adopt runs uninstall then install, and a non-ELF post-uninstall launcher is blocked."
+      - "The BepInEx and SKSE fixtures install and uninstall end to end through the orchestrator (DeployFiles + Launch dll_overrides/exe) with no loader-specific core code."
+      - "cargo test and clippy -D warnings pass."
+    handoff:
+      constraints: ["All spawning via ProcessRunner", "Deploy lock held for every mutating op", "Re-read app.rs before editing"]
+      high_risk_signals: [security_sensitive, data_flow_change, shared_state]
+
+  - id: T5
+    title: Pipeline interception, deploy exclusion, requirements, junk cleanup
+    description: "Changes existing code, reusing the existing paths. mods/install.rs install_archive: after extract and before find_fomod/normalize_layout, registry.match_archive yields InstallOutcome::Loader{loader_key, preview_id} via T4b preview (op=Install, or Adopt when a manual install is detected), with no mods/mod_files rows. Update every R1 call site: app/install.rs, app/nxm.rs (emit loader_pending, never run), and collections (a Loader outcome is pending, not failed). deploy/plan.rs: exclude active loader-owned paths from placement and from replaced-file backup/restore, and purge leaves them alone. requirements.rs: tool:smapi status, version and drift come from loader_installs, falling back to the file scan; the install hint routes to the loader flow. Junk cleanup: detect existing mod rows whose files match the 'SMAPI * installer/' signature and offer removal through the existing mod-remove path (purge + delete). Add a minimal src-tauri passthrough so the Loader outcome serializes."
+    wave: 5
+    depends_on: [R1, T4b]
+    agent: gem-implementer
+    status: completed
+    note: "Full workspace test not re-run after no-shell scan hardening; V1 re-verifies. Gaps: NXM process() not e2e-tested; requirements::analyze uses built-in defs only."
+    retries_used: 0
+    context_cluster: loader_core
+    acceptance_criteria:
+      - "Regression: a SMAPI fixture archive through install_archive (stardew profile) creates no mod row and nothing under Mods/, and returns Loader. A normal manifest.json mod installs as before."
+      - "NXM for mod 2400 with auto-deploy on: FakeRunner calls == 0 and a pending preview exists. A collection containing SMAPI reports pending, not failed."
+      - "A deploy plan that collides with a loader-owned path skips and reports it. Purge keeps loader-owned files."
+      - "Requirements: an installed smapi row gives Ok+version; drift gives a warning; with no row, the existing behaviour holds (existing tests pass)."
+      - "Junk cleanup: a fixture DB with a 'SMAPI 4.1.0 installer' mod row is detected, and removal deletes the row and its deployed files from Mods/."
+      - "cargo test --workspace (including src-tauri) and clippy -D warnings pass."
+    handoff:
+      constraints: ["Re-read install.rs, app/install.rs, app/nxm.rs, deploy/plan.rs, requirements.rs before editing", "No staging.rs changes unless unavoidable"]
+      high_risk_signals: [contract_change, data_flow_change, cross_domain_impact]
+
+  - id: T7
+    title: Typed loader error codes and UX message mapping
+    description: "Reuse the existing error serialization pattern (error.rs/ipc.rs). Give each LoaderError variant a stable code: UnsafeForCmd, ProvenanceUnverified, LayoutRejected, ConsentInvalid, ConsentExpired, PreflightGameRunning, PreflightNotInstalled, PrefixMissing, ProtonUntrusted, FlatpakProtonUnsupported, RuntimeUnknown, ManualInstallDetected, Conflict, SteamRunning, Timeout, InstallerFailed, RollbackIncomplete, RecoveryInterrupted. New apps/desktop/src/ipc/loaderErrors.ts maps each code to a title, an explanation and an action (retry, pick runtime, close game, verify files, adopt, open log)."
+    wave: 5
+    depends_on: [T4b]
+    agent: gem-implementer
+    status: completed
+    note: "Pending: clippy and the state.rs loader_errors_serialize_their_code test were not run (tree mid-edit by T5); re-verify after T5. Follow-up: replace the VerifyFailed reason-text split (\'in Steam\') with a field."
+    retries_used: 0
+    acceptance_criteria:
+      - "A Rust test asserts that every LoaderError variant serializes to a unique stable code. A vitest asserts that every code in a shared fixture list has a mapping with an action."
+      - "cargo test, clippy -D warnings, vitest and tsc pass."
+    handoff:
+      constraints: ["Touch only loaders error type, error.rs/ipc.rs serialization glue, and the new TS file"]
+
+  - id: T8
+    title: Loader log retention, redaction, scratch cleanup
+    description: "New loaders/housekeeping.rs plus a startup hook. Logs go under <data>/loaders/logs/. Keep the last 20 runs per install and delete logs older than 90 days, but always keep the logs of failed or interrupted runs that are still referenced. Exported or UI-displayed logs are redacted: Nexus key and token patterns, and $HOME replaced with ~. Scratch dirs are removed after a run finishes, on preview expiry, and at startup (orphans). Cached archives are deleted only when no loader_installs row references them."
+    wave: 5
+    depends_on: [T4b]
+    agent: gem-implementer
+    status: completed
+    note: "T6 must wire housekeeping::run and app::loaders::recover at startup; read_log(nexus_key from app::nexus::load_key)."
+    retries_used: 0
+    acceptance_criteria:
+      - "Tests: retention prunes old runs but keeps referenced failed or interrupted logs; redaction removes a planted API key and the home path; orphan scratch dirs are removed at startup; a referenced archive survives cleanup."
+      - "cargo test and clippy -D warnings pass."
+    handoff:
+      constraints: ["Do not touch app/loaders.rs logic beyond calling the hook"]
+
+  - id: T6
+    title: Tauri IPC and Requirements UI (consent, logs, launch option, adopt, cleanup)
+    description: "Extend the existing IPC and components. Commands: loader_preview, loader_run, loader_status, loader_rollback, loader_adopt_preview, game_runtime_set, launch_options_get/ack/apply (with account), loader_junk_scan/remove, loader_log_get (redacted). Register them in command_names.rs; events loader_log and loader_pending; TS ipc and mock. A LoaderConsent dialog shows: a 'Runs with your user permissions (no sandbox)' notice; the provenance badge; for unverified archives, an unverified checkbox that sets unverified_ack in the preview request; runtime; the program and argv as list items; env; cwd; touch scope; out-of-game side effects (~/.smapi) labeled unrecoverable; timeout. Confirm sends preview_id+plan_hash. A live log panel. A Requirements loader card: status, version, runtime picker for Unknown, drift and Steam-update notice, Install/Upgrade/Repair/Uninstall/Rollback/Adopt (each through the consent dialog), launch-option Copy, an 'I've set it' ack, Apply with an account picker (disabled while Steam is running), and a junk-cleanup prompt. Errors are rendered through loaderErrors.ts."
+    wave: 6
+    depends_on: [T5, T7, T8]
+    agent: gem-implementer
+    status: completed
+    note: "Added core wrappers reopen_preview, latest_run, set_runtime_override, views. loader_adopt_preview folded into loader_preview; no discard_preview command (Cancel calls nothing). Startup recover+housekeeping wired."
+    retries_used: 0
+    acceptance_criteria:
+      - "Vitest: the dialog shows the permissions notice, the argv list and the unrecoverable side effects. An unverified archive cannot be confirmed until the box is checked, and the box sets unverified_ack. Confirm calls loader_run(preview_id, plan_hash). Cancel calls nothing."
+      - "Vitest: the card states come from a mocked loader_status; every op opens the consent dialog; Copy and Ack work; Apply is disabled while steam_running; the account picker shows when there are several accounts; the Unknown runtime picker calls game_runtime_set; the junk-cleanup prompt calls loader_junk_remove; a typed error renders its mapped action."
+      - "src-tauri tests cover the registration of the new command names. The dialog is keyboard-accessible (focus trap, labelled controls)."
+      - "Desktop vitest and tsc --noEmit pass; cargo test --workspace and clippy -D warnings pass."
+    handoff:
+      constraints: ["Re-read Requirements.tsx, ipc/*.ts, commands.rs, command_names.rs before editing", "Use existing design tokens/components"]
+
+  - id: D1
+    title: User docs (security model, SMAPI native/Proton) and manual smoke-test runbook
+    description: "Docs only. Write docs/loaders.md (or the existing docs location): the loader architecture for users; the security model ('runs with your user permissions', no sandbox, provenance rules, consent, what gets backed up, unrecoverable ~/.smapi side effects); SMAPI native vs Proton flows; the launch-option copy/ack/Apply flow; Steam-update repair; adopt and junk cleanup; Flatpak Steam limits. Also an opt-in manual smoke-test runbook, docs/loaders-smoke-test.md, that the user runs with a real SMAPI download on native and on Proton (steps, expected file changes, expected launch option, uninstall verification, rollback check). No agent runs it."
+    wave: 6
+    depends_on: [T5, T7]
+    agent: gem-documentation-writer
+    status: completed
+    note: "V1 check: possible adopt->uninstall baseline bug (baseline/vanilla from the adopt pre-snapshot = the manual SMAPI state; app/loaders.rs baseline() ~L918). T4b reported an adopt-then-uninstall test restoring V1; D1 says untested. Verify. README has no link to docs/loaders.md yet."
+    retries_used: 0
+    acceptance_criteria:
+      - "docs/loaders.md covers every topic listed. Its error and action names match T7's codes."
+      - "docs/loaders-smoke-test.md has numbered native and Proton procedures, each with expected results, including install -> launch -> Steam verify -> repair -> uninstall -> confirm vanilla."
+    handoff:
+      constraints: ["Docs files only"]
+
+  - id: V1
+    title: Final security and integration review plus full validation
+    description: "Independent final review of the whole loader path: consent bypass (every op, NXM, collections, auto-deploy), plan_hash coverage, cmd injection, path traversal, env leakage, recovery races and pgid reuse, rollback and Steam-update correctness, VDF write safety, deploy exclusion, schema constraints, log redaction, and UX disclosure. Run the full suite."
+    wave: 7
+    depends_on: [T6, D1]
+    agent: gem-reviewer
+    status: completed
+    note: "verdict=warning; 0 critical/high; 727 cargo tests, clippy, vitest 384, tsc all green. Open fix tasks F1-F8 (4 medium, 4 low) pending user decision."
+    retries_used: 0
+    acceptance_criteria:
+      - "Findings by severity with file:line. Zero open critical or high findings, or fix tasks returned."
+      - "cargo test --workspace, cargo clippy --workspace --all-targets -- -D warnings, desktop vitest and tsc --noEmit pass, with the outputs recorded."
+      - "Confirms no code path spawns an installer without a valid consent token, and that the dialog and docs disclose user-permission execution and unrecoverable side effects."
+    handoff:
+      critic_signals: [architecture, cross_domain_impact]
+      high_risk_signals: [security_sensitive]
+
+  - id: F-CODE
+    title: V1 follow-up code fixes F1-F6, F8 plus extra lows
+    description: "F1 requirements uses load_definitions(defs dir); F2 bind game_dir into PreviewRecord::compute_hash, reject mismatch in run(); F3 re-verify tree_hash(scratch) right before runner.run; F4 dialog TMPDIR/PATH match the real run (derive deterministically or label placeholders); F5 VerifyFailed.steam_hint replaces reason.contains split in codes.rs; F6 nxm::process e2e SMAPI test; F8 reopen_preview re-hashes archive before reusing origin; extras: nexus existing_download re-hash, runner final kill_group behind group_alive."
+    wave: 8
+    depends_on: [V1]
+    agent: gem-implementer
+    status: completed
+    note: "All F items done. cargo 734 pass, clippy/tsc clean, vitest 383/384 (1 fail from user's uncommitted Overview.tsx grid edit vs ct1.test.tsx). Deviations: F8 errors instead of downgrade; F6 runner-0 shown via 0 loader_runs."
+    retries_used: 0
+  - id: F7
+    title: Link loader docs from README
+    wave: 8
+    depends_on: [V1]
+    agent: gem-documentation-writer
+    status: completed
+    note: "README links both docs; loaders.md updated for F2/F3/F4/F8."
+    retries_used: 0
+  - id: V2
+    title: Re-review of F fixes plus full validation
+    wave: 9
+    depends_on: [F-CODE, F7]
+    agent: gem-reviewer
+    status: completed
+    note: "verdict=warning, 0 crit/high; 3 low (2 docs, 1 TOCTOU reopen_preview->cache_archive). cargo 734, clippy, release, tsc green; vitest 383/384 (user Overview.tsx edit)."
+    retries_used: 0
+  - id: F9
+    title: Close reopen_preview/cache_archive TOCTOU
+    wave: 10
+    depends_on: [V2]
+    agent: gem-implementer
+    status: completed
+    note: "cache_archive hashes its private copy, refuses on expected-sha mismatch; cargo 735 pass, clippy clean, mutation-checked."
+    retries_used: 0
+  - id: F10
+    title: loaders.md accuracy (late re-hash outcome, PATH in hash, python3 PATH)
+    wave: 10
+    depends_on: [V2]
+    agent: gem-documentation-writer
+    status: completed
+    retries_used: 0

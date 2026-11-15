@@ -1,0 +1,34 @@
+[package]
+name = "vessel-desktop"
+description = "Vessel desktop app (Tauri v2)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "vessel_desktop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "vessel-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "=2.7.3", features = [] }
+
+[dependencies]
+vessel-core.workspace = true
+tauri = { version = "=2.12.4", features = [] }
+# No `semver` feature: it would suffix the D-Bus name that `vessel nxm`
+# forwards to (spikes.md §5). No `deep-link` feature/plugin on Linux.
+tauri-plugin-single-instance = { version = "=2.5.4", default-features = false }
+# Already in the tree through tauri (same version); start-up abort dialog.
+gtk = "=0.18.2"
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

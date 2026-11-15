@@ -1,0 +1,80 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Vessel",
+  "version": "0.1.0",
+  "identifier": "org.vessel.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Vessel",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 1024,
+        "minHeight": 640,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'",
+      "devCsp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'",
+      "freezePrototype": true,
+      "capabilities": [
+        "default"
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "appimage",
+      "deb",
+      "rpm"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png"
+    ],
+    "category": "Game",
+    "shortDescription": "Nexus Mods manager for Linux",
+    "longDescription": "Install, order and deploy Nexus Mods for Steam/Proton games on Linux and the Steam Deck. Ships the desktop app (vessel-desktop) and the command-line tool (vessel), which also handles nxm:// links.",
+    "license": "GPL-3.0-or-later",
+    "licenseFile": "../../../LICENSE",
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": false,
+        "files": {
+          "/usr/bin/vessel": "../../../target/release/vessel"
+        }
+      },
+      "deb": {
+        "section": "games",
+        "depends": [
+          "libarchive13t64 | libarchive13"
+        ],
+        "files": {
+          "/usr/bin/vessel": "../../../target/release/vessel",
+          "/usr/share/applications/vessel-nxm.desktop": "../../../packaging/common/vessel-nxm.desktop"
+        }
+      },
+      "rpm": {
+        "depends": [
+          "libarchive"
+        ],
+        "files": {
+          "/usr/bin/vessel": "../../../target/release/vessel",
+          "/usr/share/applications/vessel-nxm.desktop": "../../../packaging/common/vessel-nxm.desktop"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,499 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Typed wrappers of every Tauri command (apps/desktop/src-tauri/src/commands.rs).
+// Arguments are snake_case. `game` is a game id; omitted/null = the
+// active game. Every command rejects with a `CmdError` ({ message }).
+// Long commands ("job") emit `vessel:job` start/finish events, stream
+// `vessel:activity` messages and may raise `vessel:prompt` questions that
+// must be answered with `promptAnswer`.
+
+import { transport } from "./transport";
+import type {
+  AccountInfo,
+  AfterChange,
+  Answer,
+  AppInfo,
+  ApplyOutcome,
+  LaunchState,
+  LoaderCard,
+  LoaderJunk,
+  LoaderOp,
+  Preview,
+  RunReport,
+  ShortcutStatus,
+  ArtKind,
+  AutoupdateStatus,
+  AboutTarget,
+  AboutView,
+  BrowseRequest,
+  BrowseView,
+  CollectionInfo,
+  CollectionRemoved,
+  CollectionResult,
+  CollectionSummary,
+  ConfigChange,
+  ConfigEntry,
+  ConflictData,
+  DeployReport,
+  DeployStatus,
+  Detected,
+  Download,
+  FilesView,
+  GameConfig,
+  GameFolder,
+  GameView,
+  InstallResult,
+  Launched,
+  LoginResult,
+  ModsView,
+  MoveResult,
+  NxmReceived,
+  PluginLine,
+  PluginStage,
+  PoisonedBackup,
+  ProfileLoaded,
+  ProfileSummary,
+  PurgeReport,
+  QuarantineManifest,
+  QuarantineReport,
+  ReadyInfo,
+  Reinstalled,
+  ReqRow,
+  RestageReport,
+  RestoreReport,
+  RunLogEntry,
+  StartupCheck,
+  UninstallResult,
+  UpdateReport,
+  VerifyReport,
+} from "./types";
+
+type Game = string | null | undefined;
+
+const call = <T>(cmd: string, args?: Record<string, unknown>): Promise<T> =>
+  transport().invoke<T>(cmd, args);
+
+/** Every command name, as registered in the backend. */
+export const COMMANDS = [
+  "app_info",
+  "quit_app",
+  "steam_shortcut_status",
+  "steam_shortcut_set",
+  "app_ready",
+  "startup_check",
+  "prompt_answer",
+  "log_tail",
+  "config_list",
+  "config_set",
+  "account",
+  "login",
+  "logout",
+  "games_list",
+  "games_detect",
+  "game_add",
+  "game_use",
+  "game_remove",
+  "game_set",
+  "game_launch",
+  "game_art",
+  "steam_art",
+  "open_folder",
+  "mods_list",
+  "mod_detail",
+  "mod_open_page",
+  "open_url",
+  "mods_set_enabled",
+  "mod_move",
+  "mods_uninstall",
+  "mod_restore",
+  "mod_reinstall",
+  "thumbnail",
+  "picture",
+  "install",
+  "mod_files",
+  "nxm_submit",
+  "downloads_list",
+  "deploy",
+  "purge",
+  "verify",
+  "deploy_status",
+  "conflicts",
+  "deps",
+  "deps_ack",
+  "deps_unack",
+  "profiles_list",
+  "profile_save",
+  "profile_load",
+  "profile_delete",
+  "collection_art",
+  "collections_list",
+  "collection_info",
+  "collection_install",
+  "collection_update",
+  "collection_remove",
+  "plugins_list",
+  "plugins_sort",
+  "plugins_masterlist",
+  "updates_check",
+  "updates_install",
+  "browse",
+  "autoupdate_status",
+  "autoupdate_enable",
+  "autoupdate_disable",
+  "autoupdate_runs",
+  "backups_poisoned",
+  "backups_clean",
+  "quarantines_list",
+  "quarantine_restore",
+  "restage",
+  "loader_status",
+  "loader_preview",
+  "loader_preview_reopen",
+  "loader_run",
+  "loader_rollback",
+  "loader_decline_rollback",
+  "game_runtime_set",
+  "launch_options_get",
+  "launch_options_ack",
+  "launch_options_apply",
+  "loader_junk_scan",
+  "loader_junk_remove",
+  "loader_log_get",
+] as const;
+export type CommandName = (typeof COMMANDS)[number];
+
+// ── app ─────────────────────────────────────────────────────
+
+export const quitApp = () => call<void>("quit_app");
+export const appInfo = () => call<AppInfo>("app_info");
+export const steamShortcutStatus = () => call<ShortcutStatus>("steam_shortcut_status");
+export const steamShortcutSet = (enabled: boolean) => call<ShortcutStatus>("steam_shortcut_set", { enabled });
+/** Call once listeners are registered: start-up check + queued nxm links start processing. */
+export const appReady = () => call<ReadyInfo>("app_ready");
+/** The one auto-update check of this app start (cached). */
+export const startupCheck = () => call<StartupCheck | null>("startup_check");
+/** false = that prompt is gone. */
+export const promptAnswer = (id: number, answer: Answer) =>
+  call<boolean>("prompt_answer", { id, answer });
+export const logTail = (lines?: number) => call<string[]>("log_tail", { lines: lines ?? null });
+export const configList = () => call<ConfigEntry[]>("config_list");
+export const configSet = (key: string, value: string) =>
+  call<ConfigChange>("config_set", { key, value });
+
+// ── account ─────────────────────────────────────────────────
+
+export const account = () => call<AccountInfo>("account");
+/** The key is validated with Nexus and stored; it is never returned. */
+export const login = (apiKey: string) => call<LoginResult>("login", { api_key: apiKey });
+/** true = NEXUS_API_KEY is still set in the environment. */
+export const logout = () => call<boolean>("logout");
+
+// ── games ───────────────────────────────────────────────────
+
+export const gamesList = () => call<GameView[]>("games_list");
+export const gamesDetect = () => call<Detected[]>("games_detect");
+/** Job (prompts: folder, profile, active game). */
+export const gameAdd = (a: {
+  domain: string;
+  path?: string | null;
+  subdir?: string | null;
+  profile?: string | null;
+}) =>
+  call<GameConfig>("game_add", {
+    domain: a.domain,
+    path: a.path ?? null,
+    subdir: a.subdir ?? null,
+    profile: a.profile ?? null,
+  });
+export const gameUse = (game: string) => call<null>("game_use", { game });
+/** Job (confirm prompt). false = declined. */
+export const gameRemove = (game: string, deleteData: boolean) =>
+  call<boolean>("game_remove", { game, delete_data: deleteData });
+/** Keys: folder, subdir, profile, appid, method, prefix, plugins-file, paks-dir, name. */
+export const gameSet = (key: string, value: string, game?: Game) =>
+  call<GameConfig>("game_set", { game: game ?? null, key, value });
+/** Job: start the game through Steam (asks to deploy pending changes first). */
+export const gameLaunch = (game?: Game) => call<Launched>("game_launch", { game: game ?? null });
+/** Steam library art as a `data:` URL; null = none. kind: portrait (default, a monogram stands in) or wide hero. */
+export const gameArt = (game: string, kind: ArtKind = "library_600x900") =>
+  call<string | null>("game_art", { game, kind });
+/** Library art of any Steam app by id (installed games not managed yet), as gameArt. */
+export const steamArt = (appid: number, kind: ArtKind = "library_600x900") =>
+  call<string | null>("steam_art", { appid, kind });
+/** Open the game folder or the Proton prefix in the file manager (the backend resolves the path). Resolves to the path. */
+export const openFolder = (game: string, which: GameFolder) => call<string>("open_folder", { game, which });
+
+// ── mods ────────────────────────────────────────────────────
+
+export const modsList = (game?: Game) => call<ModsView>("mods_list", { game: game ?? null });
+/** Opens an http/https link (from a description) in the browser; the backend rejects other schemes. */
+export const openUrl = (url: string) => call<string>("open_url", { url });
+/** Job (auto-deploy may run). ids = ModRecord.id. */
+export const modsSetEnabled = (ids: number[], enabled: boolean, game?: Game) =>
+  call<AfterChange>("mods_set_enabled", { game: game ?? null, ids, enabled });
+/** Job. spec: "#N" | first | last | up | down | before | after; arg: count or mod. */
+export const modMove = (reference: string, spec: string, arg?: string | null, game?: Game) =>
+  call<MoveResult>("mod_move", { game: game ?? null, reference, spec, arg: arg ?? null });
+/** Job (confirm prompt). refs: uids or other references. */
+export const modsUninstall = (refs: string[], deleteArchive: boolean, game?: Game) =>
+  call<UninstallResult>("mods_uninstall", {
+    game: game ?? null,
+    refs,
+    delete_archive: deleteArchive,
+  });
+/** Job (FOMOD/variant prompts). fomod: ask | default | none | reuse. */
+export const modReinstall = (
+  reference: string,
+  opts: { fomod?: string | null; ask?: boolean } = {},
+  game?: Game,
+) =>
+  call<Reinstalled>("mod_reinstall", {
+    game: game ?? null,
+    reference,
+    fomod: opts.fomod ?? null,
+    ask: opts.ask ?? false,
+  });
+/** data: URL of the mod picture (cached), null when it has none. */
+/** A Nexus picture by URL as a `data:` URL (cached); null = not a Nexus URL or no picture. */
+export const picture = (url: string) => call<string | null>("picture", { url });
+export const thumbnail = (game: string, modId: number) =>
+  call<string | null>("thumbnail", { game, mod_id: modId });
+
+// ── install & downloads ─────────────────────────────────────
+
+export interface InstallArgs {
+  /** Mod id, Nexus URL, <game>:<id>, nxm:// link, archive path or collection URL. */
+  target: string;
+  game?: Game;
+  fileId?: number | null;
+  /** ask | default | none | reuse */
+  fomod?: string | null;
+  name?: string | null;
+  deploy?: boolean;
+  /** Collections: all | none | ask */
+  optional?: string | null;
+  revision?: number | null;
+  downloadOnly?: boolean;
+}
+/** Job (prompts: file choice, reinstall/replace, FOMOD, variants, optional mods). */
+export const install = (a: InstallArgs) =>
+  call<InstallResult>("install", {
+    game: a.game ?? null,
+    target: a.target,
+    file_id: a.fileId ?? null,
+    fomod: a.fomod ?? null,
+    name: a.name ?? null,
+    deploy: a.deploy ?? false,
+    optional: a.optional ?? null,
+    revision: a.revision ?? null,
+    download_only: a.downloadOnly ?? false,
+  });
+export const modFiles = (modId: number, game?: Game) =>
+  call<FilesView>("mod_files", { game: game ?? null, mod_id: modId });
+/** Paste-link box: same intake as a link forwarded by `vessel nxm`. */
+export const nxmSubmit = (url: string) => call<NxmReceived>("nxm_submit", { url });
+export const downloadsList = () => call<Download[]>("downloads_list");
+
+// ── deploy ──────────────────────────────────────────────────
+
+/** Job (progress: vessel:deploy-progress). method: auto | hardlink | reflink | symlink | copy. */
+export const deploy = (opts: { dryRun?: boolean; method?: string | null } = {}, game?: Game) =>
+  call<DeployReport>("deploy", {
+    game: game ?? null,
+    dry_run: opts.dryRun ?? false,
+    method: opts.method ?? null,
+  });
+/** Job (confirm prompt). null = nothing deployed or declined. */
+export const purge = (game?: Game) => call<PurgeReport | null>("purge", { game: game ?? null });
+export const verify = (game?: Game) => call<VerifyReport>("verify", { game: game ?? null });
+export const deployStatus = (game?: Game) =>
+  call<DeployStatus>("deploy_status", { game: game ?? null });
+export const conflicts = (game?: Game) => call<ConflictData>("conflicts", { game: game ?? null });
+
+// ── requirements ────────────────────────────────────────────
+
+/** All enabled mods, or one mod (modRef). */
+export const deps = (opts: { modRef?: string | null; refresh?: boolean } = {}, game?: Game) =>
+  call<ReqRow[]>("deps", {
+    game: game ?? null,
+    mod_ref: opts.modRef ?? null,
+    refresh: opts.refresh ?? false,
+  });
+export const depsAck = (name: string, game?: Game) =>
+  call<ReqRow>("deps_ack", { game: game ?? null, name });
+export const depsUnack = (name: string, game?: Game) =>
+  call<ReqRow>("deps_unack", { game: game ?? null, name });
+
+// ── profiles ────────────────────────────────────────────────
+
+export const profilesList = (game?: Game) =>
+  call<ProfileSummary[]>("profiles_list", { game: game ?? null });
+/** Job (overwrite confirm). null = declined; else the mod count. */
+export const profileSave = (name: string, game?: Game) =>
+  call<number | null>("profile_save", { game: game ?? null, name });
+/** Job (auto-deploy may run). */
+export const profileLoad = (name: string, game?: Game) =>
+  call<ProfileLoaded>("profile_load", { game: game ?? null, name });
+export const profileDelete = (name: string, game?: Game) =>
+  call<null>("profile_delete", { game: game ?? null, name });
+
+// ── collections ─────────────────────────────────────────────
+
+/** The collection's Nexus tile picture as a `data:` URL; null = none (show a monogram). */
+export const collectionArt = (game: string, slug: string) =>
+  call<string | null>("collection_art", { game, slug });
+export const collectionsList = (game?: Game) =>
+  call<CollectionSummary[]>("collections_list", { game: game ?? null });
+/** reference: URL, nxm:// link or slug (of the active game). */
+export const collectionInfo = (reference: string, game?: Game) =>
+  call<CollectionInfo>("collection_info", { game: game ?? null, reference });
+export interface CollectionArgs {
+  reference: string;
+  game?: Game;
+  /** all | none | ask */
+  optional?: string | null;
+  /** collection | ask | default */
+  fomod?: string | null;
+  revision?: number | null;
+  deploy?: boolean;
+  downloadOnly?: boolean;
+}
+/** Job (prompts: proceed, optional mods, manual downloads, FOMOD). */
+export const collectionInstall = (a: CollectionArgs) =>
+  call<CollectionResult>("collection_install", {
+    game: a.game ?? null,
+    reference: a.reference,
+    optional: a.optional ?? null,
+    fomod: a.fomod ?? null,
+    revision: a.revision ?? null,
+    deploy: a.deploy ?? false,
+    download_only: a.downloadOnly ?? false,
+  });
+/** Job: latest revision; dropped mods are removed after a confirm. */
+export const collectionUpdate = (a: Omit<CollectionArgs, "revision" | "downloadOnly">) =>
+  call<CollectionResult>("collection_update", {
+    game: a.game ?? null,
+    reference: a.reference,
+    optional: a.optional ?? null,
+    fomod: a.fomod ?? null,
+    deploy: a.deploy ?? false,
+  });
+/** Job (confirm prompt). */
+export const collectionRemove = (reference: string, keepMods: boolean, game?: Game) =>
+  call<CollectionRemoved>("collection_remove", {
+    game: game ?? null,
+    reference,
+    keep_mods: keepMods,
+  });
+
+// ── plugins ─────────────────────────────────────────────────
+
+/** null = no plugins.txt yet. Rejects for games without plugins.txt. */
+export const pluginsList = (game?: Game) =>
+  call<PluginLine[] | null>("plugins_list", { game: game ?? null });
+export const pluginsSort = (updateMasterlist: boolean, game?: Game) =>
+  call<PluginStage>("plugins_sort", { game: game ?? null, update_masterlist: updateMasterlist });
+/** Path of the downloaded LOOT masterlist. */
+export const pluginsMasterlist = (game?: Game) =>
+  call<string>("plugins_masterlist", { game: game ?? null });
+
+// ── updates & search ────────────────────────────────────────
+
+export const updatesCheck = (refresh: boolean, game?: Game) =>
+  call<UpdateReport>("updates_check", { game: game ?? null, refresh });
+/** Job: check, then install (pinned ones only with all). */
+export const updatesInstall = (opts: { all?: boolean; refresh?: boolean } = {}, game?: Game) =>
+  call<UpdateReport>("updates_install", {
+    game: game ?? null,
+    all: opts.all ?? false,
+    refresh: opts.refresh ?? false,
+  });
+/** A page of the game's mods or collections on Nexus (24 per page). */
+export const browse = (request: BrowseRequest, game?: Game) =>
+  call<BrowseView>("browse", { game: game ?? null, request });
+/** A mod's (BBCode) or collection's (Markdown) Nexus description; null when it has none. */
+export const browseAbout = async (about: AboutTarget, game?: Game): Promise<string | null> => {
+  const r = await call<AboutView>("browse", { game: game ?? null, request: { about } });
+  return typeof r?.description === "string" ? r.description : null;
+};
+
+// ── auto-update ─────────────────────────────────────────────
+
+export const autoupdateStatus = (runs?: number) =>
+  call<AutoupdateStatus>("autoupdate_status", { runs: runs ?? null });
+/** Installs the systemd user timer (runs the `vessel` CLI) and records the baseline. */
+export const autoupdateEnable = () => call<AutoupdateStatus>("autoupdate_enable");
+/** false = it was not enabled. */
+export const autoupdateDisable = () => call<boolean>("autoupdate_disable");
+/** Last-run log, newest first. */
+export const autoupdateRuns = (limit?: number) =>
+  call<RunLogEntry[]>("autoupdate_runs", { limit: limit ?? null });
+
+// ── backup cleanup and restage ──────────────────────────────
+
+/** Dry run of clean-backups: changes nothing. */
+export const backupsPoisoned = (game?: Game) =>
+  call<PoisonedBackup[]>("backups_poisoned", { game: game ?? null });
+/** Job. The caller asks the user first; the backend refuses unless confirmed is true. */
+export const backupsClean = (opts: { includeAmbiguous: boolean; confirmed: boolean }, game?: Game) =>
+  call<QuarantineReport>("backups_clean", {
+    game: game ?? null,
+    include_ambiguous: opts.includeAmbiguous,
+    confirmed: opts.confirmed,
+  });
+/** Oldest first. */
+export const quarantinesList = (game?: Game) =>
+  call<QuarantineManifest[]>("quarantines_list", { game: game ?? null });
+/** Job. Refused unless confirmed is true. */
+export const quarantineRestore = (id: string, confirmed: boolean, game?: Game) =>
+  call<RestoreReport>("quarantine_restore", { game: game ?? null, id, confirmed });
+/** Job. Fails while confirmed poisoned backups exist (unless ignorePoisoned). Does not deploy. */
+export const restage = (opts: { ids?: number[]; all?: boolean; ignorePoisoned?: boolean } = {}, game?: Game) =>
+  call<RestageReport>("restage", {
+    game: game ?? null,
+    ids: opts.ids ?? [],
+    all: opts.all ?? false,
+    ignore_poisoned: opts.ignorePoisoned ?? false,
+  });
+
+// ── loaders ─────────────────────────────────────────────────
+
+/** The game's loaders (SMAPI, ...) with status, runtime and launch options. */
+export const loaderStatus = (game?: Game) => call<LoaderCard[]>("loader_status", { game: game ?? null });
+/** Preview a loader op; nothing runs. archive: a local loader archive (install/upgrade/adopt); repair/uninstall use the cached one. */
+export const loaderPreview = (
+  a: { op: LoaderOp; loaderKey: string; archive?: string | null; unverifiedAck?: boolean },
+  game?: Game,
+) =>
+  call<Preview>("loader_preview", {
+    game: game ?? null,
+    op: a.op,
+    loader_key: a.loaderKey,
+    archive: a.archive ?? null,
+    unverified_ack: a.unverifiedAck ?? false,
+  });
+/** A pending preview in full, re-previewed with unverifiedAck (a new preview_id/plan_hash; the old one is dropped). */
+export const loaderPreviewReopen = (previewId: string, unverifiedAck: boolean) =>
+  call<Preview>("loader_preview_reopen", { preview_id: previewId, unverified_ack: unverifiedAck });
+/** Job: run a confirmed preview (streams vessel:loader-log). */
+export const loaderRun = (previewId: string, planHash: string) =>
+  call<RunReport>("loader_run", { preview_id: previewId, plan_hash: planHash });
+/** Job: undo every tracked change of an install. Returns what could not be restored. */
+export const loaderRollback = (installId: number) => call<string[]>("loader_rollback", { install_id: installId });
+/** Keep an interrupted install's files as they are. */
+export const loaderDeclineRollback = (installId: number) =>
+  call<null>("loader_decline_rollback", { install_id: installId });
+/** runtime: native | proton | null (detect again). */
+export const gameRuntimeSet = (runtime: "native" | "proton" | null, game?: Game) =>
+  call<null>("game_runtime_set", { game: game ?? null, runtime });
+export const launchOptionsGet = (game?: Game) => call<LaunchState>("launch_options_get", { game: game ?? null });
+/** The user set the launch options by hand. */
+export const launchOptionsAck = (game?: Game) => call<string | null>("launch_options_ack", { game: game ?? null });
+/** Write the launch options to Steam (refused while Steam runs). No account + several = choose_account. */
+export const launchOptionsApply = (account: number | null, game?: Game) =>
+  call<ApplyOutcome>("launch_options_apply", { game: game ?? null, account });
+export const loaderJunkScan = (game?: Game) => call<LoaderJunk[]>("loader_junk_scan", { game: game ?? null });
+/** Job: remove loader archives installed as mods (purge, delete, redeploy). */
+export const loaderJunkRemove = (modIds: number[], game?: Game) =>
+  call<number>("loader_junk_remove", { game: game ?? null, mod_ids: modIds });
+/** A run's installer output, redacted. */
+export const loaderLogGet = (runId: number) => call<string>("loader_log_get", { run_id: runId });

@@ -1,0 +1,24 @@
+[package]
+name = "vessel-cli"
+description = "Nexus Mods manager for Linux"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "vessel"
+path = "src/main.rs"
+
+[dependencies]
+vessel-core.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+zbus.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
+tempfile.workspace = true
