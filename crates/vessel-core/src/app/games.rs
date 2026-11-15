@@ -549,21 +549,28 @@ mod tests {
         let mut store = Store::open_in_memory().unwrap();
         let ui = Recorder::default();
         let cx = Cx::new(&paths, &mut store, &ui);
+        // Pick whichever builtin is still experimental so promoting one game to tested
+        // does not break this test.
+        let domain = games::builtin_definitions()
+            .into_iter()
+            .find(|d| d.support == Support::Experimental)
+            .expect("at least one builtin game definition is experimental")
+            .domain;
         let e = add_game(
             &cx,
             AddGame {
-                domain: "stardewvalley".into(),
+                domain: domain.clone(),
                 ..Default::default()
             },
         )
         .unwrap_err();
         assert!(e.to_string().contains("pass it: vessel game add"), "{e}");
-        let dir = home.path().join("sv");
+        let dir = home.path().join("game");
         std::fs::create_dir(&dir).unwrap();
         let g = add_game(
             &cx,
             AddGame {
-                domain: "stardewvalley".into(),
+                domain,
                 path: Some(dir.display().to_string()),
                 ..Default::default()
             },
