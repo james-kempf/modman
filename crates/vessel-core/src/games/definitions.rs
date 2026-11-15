@@ -379,13 +379,8 @@ mod tests {
     #[test]
     fn every_other_preset_is_experimental() {
         for d in builtin_definitions() {
-            if ![
-                "skyrimspecialedition",
-                "cyberpunk2077",
-                "stardewvalley",
-                "schedule1",
-            ]
-            .contains(&d.domain.as_str())
+            if !["skyrimspecialedition", "cyberpunk2077", "stardewvalley"]
+                .contains(&d.domain.as_str())
             {
                 assert_eq!(d.support, Support::Experimental, "{}", d.domain);
             }
@@ -470,13 +465,15 @@ mod tests {
     }
 
     /// Catches: schedule1.toml losing the MelonLoader entry, its `version`
-    /// DLL override or the tested level, and the loader claiming a mod pack
+    /// DLL override, the experimental level (unhandled loader routes, see
+    /// docs/game-support/schedule1.md) and the loader claiming a mod pack
     /// or a plain mod DLL.
     #[test]
     fn schedule1_declares_the_melonloader_loader() {
         let defs = builtin_definitions();
         let d = find_definition(&defs, "schedule1").unwrap();
-        assert_eq!(d.support, Support::Tested);
+        assert_eq!(d.support, Support::Experimental);
+        assert_eq!(d.loaders[0].nexus_mod_id, None);
         assert_eq!(d.steam_appid, Some(3164500));
         assert_eq!(
             (d.subdir.as_str(), d.profile.as_str()),

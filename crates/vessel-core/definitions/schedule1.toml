@@ -8,7 +8,7 @@ steam_appid = 3164500
 subdir = "."
 target = "game_dir"
 profile = "melonloader"
-support = "tested"
+support = "experimental"
 
 # The game has no native Linux build: it runs under Proton. Mods are
 # MelonLoader .dll files in Mods/ (and Plugins/, UserLibs/, UserData/ for
@@ -17,6 +17,9 @@ support = "tested"
 # MelonLoader: Unity mod loader. The Windows x64 zip holds a MelonLoader/
 # folder plus the proxy version.dll and dobby.dll. Under Proton the proxy
 # only loads with a native-first `version` DLL override.
+# Experimental: mods name MelonLoader as an off-site requirement (GitHub), and
+# the Nexus page (schedule1 mod 1196) could not be verified, so no
+# nexus_mod_id is set. See docs/game-support/schedule1.md (Gaps).
 [[loaders]]
 key = "melonloader"
 name = "MelonLoader"
