@@ -3,8 +3,10 @@
 You are completing Vessel's configuration for exactly one game. Vessel is a
 Linux mod manager (Rust core in `crates/vessel-core`). The game to work on,
 its definition file and the branch are given to you by the caller as
-`DOMAIN`, `NAME`, `DEFINITION`, `BRANCH` and `CHECKER` (the path of
-`check_game_support_note.py`), plus `RERUN=1` when this is a re-run of a
+`DOMAIN`, `NAME`, `DEFINITION`, `BRANCH`, `CHECKER` (the path of
+`check_game_support_note.py`), `NEXUS_INFO` (the path of
+`nexus_mod_info.py`) and `INSPECT_ARCHIVE` (the path of
+`inspect_archive.py`), plus `RERUN=1` when this is a re-run of a
 game an earlier run already completed (see "Re-run" below). Work on that
 game only.
 
@@ -16,7 +18,11 @@ command that changes branches, history or the remote.
 ## 0. Tools
 
 Only these shell commands are allowed: `cargo fmt`, `cargo clippy`,
-`cargo test`, `git diff`, `git status`, `ls` and `python3 <CHECKER>`.
+`cargo test`, `git diff`, `git status`, `ls`, `python3 <CHECKER>`,
+`python3 -I <NEXUS_INFO>`, `python3 -I <INSPECT_ARCHIVE>` and read-only
+`gh api repos/...` (GET only; no `-X`, `-f`, `-F` or `--input`). The
+helpers read the Nexus API key themselves; never look for, read or print
+the key.
 Make every file change with the Edit or Write tool, never with
 `python`, `sed`, heredocs or other scripts. Any other shell command is
 denied. A denied command does not mean Bash is unavailable: the allowed
@@ -71,10 +77,45 @@ Read these before researching, so you know what Vessel can express:
 
 ## 2. Research the game
 
-Use WebSearch and WebFetch. Prefer primary sources, in this order:
+### Nexus data and archive contents
 
-1. The game's Nexus Mods pages (`https://www.nexusmods.com/<DOMAIN>`), its
-   most-endorsed loader/script-extender mod pages, and the Nexus wiki.
+Nexus mod pages often return HTTP 403 to WebFetch. Use the helpers first
+and WebFetch on Nexus HTML only as a fallback:
+
+- `python3 -I <NEXUS_INFO> mod <DOMAIN> <mod_id>`: mod page data
+  (name, summary, author, description, endorsements).
+- `python3 -I <NEXUS_INFO> files <DOMAIN> <mod_id>`: the file list
+  (file ids, names, versions, categories, sizes).
+- `python3 -I <NEXUS_INFO> requirements <DOMAIN> <mod_id>`: the mod's
+  Nexus requirements (`nexus_requirements`, with `other_game_id` when the
+  required mod is on another game) and off-site requirements
+  (`offsite_requirements`: name and URL).
+- `python3 -I <NEXUS_INFO> top <DOMAIN> [n]`: the most-endorsed mods with
+  their requirements (`--trending` for the trending list).
+- `python3 -I <NEXUS_INFO> contents <DOMAIN> <mod_id> [file_id]`: the file
+  listing of a mod's archives from Nexus's own index, with
+  `top_level_installers`.
+- `python3 -I <INSPECT_ARCHIVE> github <owner/repo> --asset <GLOB> [--tag <TAG>]`
+  and `python3 -I <INSPECT_ARCHIVE> nexus <DOMAIN> <mod_id> <file_id>`:
+  download one release asset or Nexus file to a cache and list its entries,
+  `top_level` and `top_level_installers` (nothing is extracted or run).
+  `nexus` needs a Nexus Premium account; on "Nexus download requires
+  Premium" use `contents` instead. Without an asset glob, `github` lists
+  the release's asset names.
+
+Confirm what every loader route actually ships with `INSPECT_ARCHIVE` or
+`contents`, and compare the listing with the loader's `required_paths`.
+If a helper fails (no API key, rate limit, network), say which call failed
+in the note and fall back to WebSearch/WebFetch.
+
+### Sources
+
+Use WebSearch and WebFetch for everything else. Prefer primary sources,
+in this order:
+
+1. The game's Nexus Mods data (through `NEXUS_INFO` first, then
+   `https://www.nexusmods.com/<DOMAIN>`), its most-endorsed
+   loader/script-extender mod pages, and the Nexus wiki.
 2. The official docs or repository of each loader / script extender /
    plugin framework (GitHub README, releases page, install guide).
 3. Community modding wikis for the game (for example UESP, the
@@ -110,12 +151,16 @@ handle each of them. For every loader, script extender and framework:
    - what each route actually ships: the loader archive itself, or an
      installer (`.exe`) that downloads or writes the loader. A Nexus page
      that ships only an installer is a different route from the GitHub zip.
-2. Find out how popular mods declare the requirement. Open the
-   requirements of at least five of the most-endorsed mods that need the
-   loader and record, for each style you find: a Nexus "requirements"
-   entry linking the loader's mod page (which mod id, which domain), or an
-   "off-site requirements" entry (its name and URL, for example a GitHub
-   or wiki link).
+2. Find out how popular mods declare the requirement. This check is
+   mandatory: run `python3 -I <NEXUS_INFO> top <DOMAIN> 10`, and
+   `requirements` for more mods if fewer than five of them need the
+   loader. Record the requirements of at least five of the most-endorsed
+   mods that need the loader, and for each style you find: a Nexus
+   "requirements" entry linking the loader's mod page (which mod id, which
+   domain), or an "off-site requirements" entry (its name and URL, for
+   example a GitHub or wiki link). If `NEXUS_INFO` cannot run, say so in
+   the note's `## Summary` and do the check from the web as far as you
+   can.
 3. Map each route to the definition so that Vessel both (i) recognizes a
    mod-page requirement or an off-site requirement as that loader and
    offers to install it, and (ii) registers the loader as a loader, not as
@@ -140,17 +185,33 @@ handle each of them. For every loader, script extender and framework:
    bullet naming the loader, the route and the Rust change needed, and keep
    `support = "experimental"`. Never claim full support while a loader
    route is unhandled.
-5. If you cannot verify a route (for example the Nexus page returns HTTP
-   403), try search results and pages that link to it (READMEs, guides,
-   Thunderstore). If it is still unverified, treat it as unhandled: mark
-   it Gap and add a Gaps bullet "unverified route: <loader> <route>; ...".
-   An unverified route keeps the game experimental.
+5. If you cannot verify a route (for example a helper fails and the
+   Nexus page returns HTTP 403), try search results and pages that link to
+   it (READMEs, guides, Thunderstore). If it is still unverified, treat it
+   as unhandled: mark it Gap. An unverified route keeps the game
+   experimental.
+6. Start every route Gaps bullet with one of two labels, so a reader can
+   tell them apart:
+   - `- unverified route: <loader> <route>; ...` when you could not
+     confirm what the route ships or how it is declared. Name what is
+     missing and how to confirm it (for example a `contents` or
+     `INSPECT_ARCHIVE` call that failed). Do not propose a Rust change
+     that depends on the unconfirmed facts.
+   - `- unhandled route: <loader> <route>; <Rust change>` when the route
+     is verified (archive listing or requirement data seen) and the schema
+     cannot express it.
+7. Never propose a remedy that assumes an archive shape you have not
+   confirmed with a listing (for example "match `required_paths` against
+   the Nexus archive" when you never saw its contents).
 
 Record the result in the `## Loader routes` table of the note (section 5).
 
 If sources disagree, say so and pick the most recent primary source.
 Never invent a path, appid or mod id. If you cannot verify a value, leave
-it out and list it as an open question.
+it out and list it as an open question. Wherever a mod id, file name, URL
+or other identifier comes only from search-result summaries (you did not
+open the page or get it from a helper), write
+"(from search summaries; not verified)" next to it in the note.
 
 ## 3. Write the configuration
 
@@ -251,12 +312,16 @@ Values you could not verify.
 The commands from section 4 and pass/fail for each.
 
 ## Manual test
-Install a mod, deploy, launch, uninstall (plan section 4.4). Promotion to
-tested here is based on research, not hardware testing.
+Install a mod, deploy, launch, uninstall (plan section 4.4).
+Promotion to tested here is based on research, not hardware testing.
 
 ## Sources
 Numbered list of every URL used, with the date you read it.
 ```
+
+In `## Manual test`, write the line "Promotion to tested here is based on
+research, not hardware testing." only when the definition has
+`support = "tested"`; leave it out for `"experimental"`.
 
 ### Gaps format (machine-checked)
 

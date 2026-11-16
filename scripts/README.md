@@ -27,8 +27,73 @@ scripts/run-game-support.sh --game schedule1 --rerun
 
 The interactive equivalent is `/add-game-support <domain> --rerun`.
 
-Tests: `python3 -m unittest scripts/test_pick_game_support_target.py
-scripts/test_check_game_support_note.py`.
+Tests: `python3 -B -m unittest scripts/test_*.py`.
+
+## Research helpers: Nexus data and archive listings
+
+The research agent gets two read-only helpers (stdlib only, always run as
+`python3 -I`). The runner passes their absolute paths to the agent as
+`NEXUS_INFO` and `INSPECT_ARCHIVE` and allows exactly those commands.
+
+`nexus_mod_info.py` prints compact JSON; rate-limit headers and warnings go
+to stderr, and HTTP 429 is retried with backoff.
+
+```sh
+python3 -I scripts/nexus_mod_info.py mod schedule1 1196           # v1 mod data
+python3 -I scripts/nexus_mod_info.py files schedule1 1196         # v1 file list
+python3 -I scripts/nexus_mod_info.py requirements schedule1 397   # v2 GraphQL
+python3 -I scripts/nexus_mod_info.py top schedule1 10             # most endorsed + requirements
+python3 -I scripts/nexus_mod_info.py top schedule1 10 --trending  # v1 trending
+python3 -I scripts/nexus_mod_info.py contents schedule1 1196      # archive listing from Nexus's index
+python3 -I scripts/nexus_mod_info.py key-status                   # which key source is used
+```
+
+API v1 has no requirements or "most endorsed" endpoint, so `requirements`,
+`top` and `contents` use the v2 GraphQL endpoint (they also work without a
+key). `requirements` separates Nexus requirements (with `other_game_id`
+for cross-game ones) from off-site requirements (name + URL).
+
+`inspect_archive.py` downloads one archive and prints its file listing,
+its top-level entries and any `.exe`/`.msi` at the archive root. It never
+extracts or runs anything: zip is read with `zipfile`, 7z/rar/tar with
+`bsdtar -tf` (without bsdtar it reports "unsupported format").
+
+```sh
+python3 -I scripts/inspect_archive.py github LavaGang/MelonLoader --asset 'MelonLoader.x64.zip'
+python3 -I scripts/inspect_archive.py nexus schedule1 1196 3486
+```
+
+Downloads go only to `${XDG_CACHE_HOME:-~/.cache}/vessel-game-support/archives/`,
+over HTTPS, up to 200 MiB, from these hosts (redirects included):
+`api.github.com`, `github.com`, `objects.githubusercontent.com`,
+`release-assets.githubusercontent.com`, `api.nexusmods.com` and the
+`*.nexusmods.com` / `*.nexus-cdn.com` CDN hosts that the Nexus
+`download_link` endpoint returns.
+
+**Premium limitation:** Nexus only hands out download links to Premium
+accounts. For other accounts `inspect_archive.py nexus` prints "Nexus
+download requires Premium; listing unavailable" and exits 3; use
+`nexus_mod_info.py contents` instead, which lists the files from Nexus's
+own index without a download.
+
+### Nexus API key
+
+The helpers look for the key in this order and use the first one found:
+
+1. Vessel's own stored key: the Secret Service item
+   `service=vessel username=nexus-api-key` (read with `secret-tool`), then
+   `$XDG_CONFIG_HOME/vessel/credentials.toml` (must be mode 0600, as Vessel
+   requires).
+2. `$XDG_CONFIG_HOME/vessel-game-support/nexus_api_key`, a file holding
+   only the key. Create it with mode 0600; the helpers warn when it is
+   readable by others.
+
+The key is never printed (all output is scrubbed), never passed in argv or
+in the environment of `claude`, and only sent to `api.nexusmods.com` in a
+header that is not forwarded on redirects. The runner denies the agent
+`Read`/`Grep`/`Glob` on both key files and `secret-tool`. Without a key the
+runner warns and continues: `mod`, `files`, `top --trending` and
+`inspect_archive.py nexus` fail cleanly and the agent falls back to the web.
 
 ## rebrand.py: rename the app
 

@@ -1,7 +1,7 @@
 ---
 description: Research one pending Nexus game and complete its Vessel definition (interactive version of scripts/run-game-support.sh)
 argument-hint: "[nexus-domain] [--rerun]"
-allowed-tools: Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, Bash(python3 scripts/pick_game_support_target.py:*), Bash(python3 scripts/check_game_support_note.py:*), Bash(cargo fmt:*), Bash(cargo clippy:*), Bash(cargo test:*), Bash(git status:*), Bash(git diff:*), Bash(git switch:*), Bash(git ls-remote:*), Bash(gh pr list:*)
+allowed-tools: Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, Bash(python3 scripts/pick_game_support_target.py:*), Bash(python3 scripts/check_game_support_note.py:*), Bash(python3 -I scripts/nexus_mod_info.py:*), Bash(python3 -I scripts/inspect_archive.py:*), Bash(gh api repos/*:*), Bash(cargo fmt:*), Bash(cargo clippy:*), Bash(cargo test:*), Bash(git status:*), Bash(git diff:*), Bash(git switch:*), Bash(git ls-remote:*), Bash(gh pr list:*)
 ---
 
 Interactive version of `scripts/run-game-support.sh`. Same picker, prompt
@@ -29,12 +29,19 @@ PR), run `scripts/run-game-support.sh` instead.
 3. Ask the user whether to create branch `<branch>` from the current HEAD
    (`git switch -c <branch>`), or to work on the current branch.
 4. Read `.github/prompts/add-game-support.md` and follow it exactly, with
-   DOMAIN, NAME, DEFINITION and BRANCH from step 1 and
-   CHECKER=`scripts/check_game_support_note.py`, plus `RERUN=1` when
+   DOMAIN, NAME, DEFINITION and BRANCH from step 1,
+   CHECKER=`scripts/check_game_support_note.py`,
+   NEXUS_INFO=`scripts/nexus_mod_info.py` and
+   INSPECT_ARCHIVE=`scripts/inspect_archive.py`, plus `RERUN=1` when
    `--rerun` was given (follow the prompt's "Re-run" section). Do the "Loader routes"
-   research in its section 2 for every loader: sample the requirements of
-   several top mods, and list every route (Nexus page, off-site sources)
-   and how mods declare it. Make every file change
+   research in its section 2 for every loader: get Nexus data with
+   `python3 -I scripts/nexus_mod_info.py` first (WebFetch on Nexus HTML
+   only as a fallback), run the mandatory top-mods requirements check
+   (`top <domain> 10`; say in the Summary if it cannot run), confirm what
+   each route ships with `python3 -I scripts/inspect_archive.py` or
+   `nexus_mod_info.py contents` against `required_paths`, and list every
+   route (Nexus page, off-site sources) and how mods declare it. Never
+   read, print or search for the Nexus API key; the helpers load it. Make every file change
    with Edit or Write, never with `python`, `sed` or heredoc scripts. A
    denied shell command does not mean Bash is unavailable; the allowed
    commands still work. Before finishing, run `cargo fmt --all -- --check`,
@@ -50,7 +57,8 @@ PR), run `scripts/run-game-support.sh` instead.
    GitHub release, ...), each handled by a backticked definition field or
    `Gap` with a Gaps bullet naming the loader. Any `Gap` row rules out full
    support. Fix any error it reports. Promotion to tested here is based on
-   research, not hardware testing.
+   research, not hardware testing; the note's Manual test section says so
+   only when support is `"tested"`.
 6. Show `git status` and `git diff --stat` for the allowed files only.
    Do not commit, push or open a PR. Tell the user the commands the
    runner would run:

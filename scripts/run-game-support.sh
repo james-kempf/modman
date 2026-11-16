@@ -70,6 +70,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 PICKER="$SCRIPT_DIR/pick_game_support_target.py"
 CHECKER="$SCRIPT_DIR/check_game_support_note.py"
+NEXUS_INFO="$SCRIPT_DIR/nexus_mod_info.py"
+INSPECT_ARCHIVE="$SCRIPT_DIR/inspect_archive.py"
+# Nexus API key locations (see nexus_mod_info.py). The agent never reads
+# them: the helpers load the key themselves and never print it.
+CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+KEY_DIR="$CONFIG_HOME/vessel-game-support"
+VESSEL_CREDENTIALS="$CONFIG_HOME/vessel/credentials.toml"
 PROMPT_FILE="$REPO/.github/prompts/add-game-support.md"
 CACHE="${VESSEL_GAME_SUPPORT_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/vessel-game-support}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -90,7 +97,8 @@ unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_SESSION_ID
 for tool in git python3 cargo flock timeout; do
   command -v "$tool" >/dev/null || die "'$tool' not found in PATH"
 done
-{ [ -f "$PICKER" ] && [ -f "$CHECKER" ]; } || die "picker/checker missing next to $0"
+{ [ -f "$PICKER" ] && [ -f "$CHECKER" ] && [ -f "$NEXUS_INFO" ] && [ -f "$INSPECT_ARCHIVE" ]; } \
+  || die "picker/checker/research helpers missing next to $0"
 [ -f "$PROMPT_FILE" ] || die "prompt file missing: $PROMPT_FILE"
 
 if [ "$PICK_ONLY" -eq 0 ]; then
@@ -117,6 +125,15 @@ for p in sys.argv[1:]:
         print(f"offending settings: {p}", file=sys.stderr)
         sys.exit(1)
 PY
+fi
+if [ "$PICK_ONLY" -eq 0 ]; then
+  # Only the source is printed, never the key.
+  if key_src="$(python3 -I "$NEXUS_INFO" key-status 2>/dev/null)"; then
+    log "Nexus API key: $(python3 -I -c 'import json,sys; print(json.loads(sys.argv[1])["source"])' "$key_src")"
+  else
+    log "warning: no Nexus API key (Vessel keyring/credentials or $KEY_DIR/nexus_api_key);"
+    log "  Nexus v1 lookups and archive downloads are unavailable, research falls back to the web"
+  fi
 fi
 if [ "$DRY_RUN" -eq 0 ] && [ "$PICK_ONLY" -eq 0 ]; then
   command -v gh >/dev/null || die "'gh' not found; install the GitHub CLI"
@@ -179,7 +196,10 @@ LOG="$CACHE/logs/$STAMP-$DOMAIN.jsonl"
 export CARGO_TARGET_DIR="$CACHE/target"
 
 # ---- research and configure (claude, headless) ----------------------------
-ALLOWED_TOOLS="Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,Bash(cargo fmt:*),Bash(cargo clippy:*),Bash(cargo test:*),Bash(git diff:*),Bash(git status:*),Bash(ls:*),Bash(python3 $CHECKER:*)"
+ALLOWED_TOOLS="Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,Bash(cargo fmt:*),Bash(cargo clippy:*),Bash(cargo test:*),Bash(git diff:*),Bash(git status:*),Bash(ls:*),Bash(python3 $CHECKER:*),Bash(python3 -I $NEXUS_INFO:*),Bash(python3 -I $INSPECT_ARCHIVE:*),Bash(gh api repos/*:*)"
+# Deny rules win over allow rules. Absolute paths take a leading "//".
+# `gh api` is for read-only metadata: refuse the flags that make it write.
+DISALLOWED_TOOLS="Read(/$KEY_DIR/**),Grep(/$KEY_DIR/**),Glob(/$KEY_DIR/**),Read(/$VESSEL_CREDENTIALS),Grep(/$VESSEL_CREDENTIALS),Glob(/$VESSEL_CREDENTIALS),Bash(secret-tool:*),Bash(gh api * -X*),Bash(gh api * --method*),Bash(gh api * -f*),Bash(gh api * -F*),Bash(gh api * --field*),Bash(gh api * --raw-field*),Bash(gh api * --input*)"
 PROMPT="$(cat "$PROMPT_FILE")
 
 ---
@@ -188,7 +208,9 @@ DOMAIN=$DOMAIN
 NAME=$NAME
 DEFINITION=$DEFINITION
 BRANCH=$BRANCH
-CHECKER=$CHECKER"
+CHECKER=$CHECKER
+NEXUS_INFO=$NEXUS_INFO
+INSPECT_ARCHIVE=$INSPECT_ARCHIVE"
 [ "$RERUN" -eq 0 ] || PROMPT="$PROMPT
 RERUN=1"
 
@@ -199,6 +221,7 @@ set +e
   --permission-prompts none \
   --tools "Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,Bash" \
   --allowedTools "$ALLOWED_TOOLS" \
+  --disallowedTools "$DISALLOWED_TOOLS" \
   --setting-sources project,local \
   --strict-mcp-config \
   --no-session-persistence \
