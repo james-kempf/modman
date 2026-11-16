@@ -1,56 +1,78 @@
 # Schedule I (`schedule1`): game support
 
 ## Summary
-`schedule1.toml` already had the Steam appid, the game-root deploy root and the `melonloader` layout profile. This change adds a declarative `[[loaders]]` entry for MelonLoader (Windows x64 zip into the game root, `version` DLL override under Proton), marks the game `tested` (research-based), adds the completion header and a test pinning the config. No Rust change is needed.
+Re-run of a previously completed game. The definition keeps the Steam appid, the game-root deploy root, the `melonloader` profile and the MelonLoader `[[loaders]]` entry, all re-checked against sources. Under the current "Loader routes" rules the game can no longer be called fully supported: popular mods name MelonLoader as an off-site requirement, MelonLoader is also distributed through GitHub releases, an installer and Thunderstore, and its Nexus page on `schedule1` (mod 1196) ships only `MelonLoader.Installer.exe`. Vessel cannot handle those routes with config alone, so `support` drops from `tested` to `experimental`.
+
+The check of the 5 most-endorsed `schedule1` mods' requirements could not be done: Nexus returned HTTP 403 for those pages.
+
+What changed versus the prior definition and note:
+- `support` changed from `"tested"` to `"experimental"` (new Gaps).
+- `schedule1` removed from the tested-domains list in `every_other_preset_is_experimental`; `schedule1_declares_the_melonloader_loader` now pins `Support::Experimental` and no `nexus_mod_id`.
+- Comment added to `schedule1.toml` explaining the experimental level.
+- Note rewritten to the current template: new Loader routes table and Gaps bullets.
+- No change to appid, subdir, profile, target or loader fields.
 
 ## How mods are installed
-- **Runtime:** GamingOnLinux lists the game as Proton/Wine only [5]; no native Linux build was found. MelonLoader's own README says its Linux build has compatibility issues and that Proton works much better [3][4].
-- **Deploy root:** the game folder (the one holding `Schedule I.exe`) [6]. MelonLoader creates `Mods/`, `Plugins/`, `UserData/` and `MelonLoader/` there [2]. S1MAPI additionally ships `UserLibs/` [7]. The `melonloader` profile already treats `Mods`, `Plugins`, `UserData`, `UserLibs` and `MelonLoader` as game-root folders and moves loose `.dll` files into `Mods/` (`staging.rs`, `melonloader`).
-- **Load order:** none. MelonLoader loads every mod in `Mods/`; there is no plugin list file, so no `[plugins]` and no shared file.
-- **Mono vs IL2CPP:** the current public Steam branch is IL2CPP; the Steam beta branch `alternate` is Mono. Many mods publish one DLL per branch and S1MAPI ships both in `UserLibs/` [7][6]. Vessel cannot choose between them (see Open questions).
-- **Proton:** the proxy DLL is `version.dll` by default; the MelonLoader installer's Linux launch option is `WINEDLLOVERRIDES="version=n,b" %command%` [3][4]. The loader entry sets `dll_overrides = ["version"]`, which Vessel composes into the Steam launch options.
+- **Runtime:** Steam lists Windows only [1]; GamingOnLinux lists it as Proton/Wine [2]. MelonLoader's README says its Linux build has compatibility issues and Proton works much better [4][5].
+- **Deploy root:** the game folder (holds `Schedule I.exe`). MelonLoader creates `Mods/`, `Plugins/`, `UserData/` and `MelonLoader/` there [3][6]. S1MAPI additionally ships `UserLibs/` [8]. The `melonloader` profile treats those folders as game-root folders and moves loose `.dll` files into `Mods/` (`staging.rs`).
+- **Load order:** none. MelonLoader loads every mod in `Mods/`; no plugin list file, so no `[plugins]` and no shared file.
+- **Mono vs IL2CPP:** the public Steam branch is IL2CPP; the `alternate` beta branch is Mono. Many mods ship one DLL per branch [7][8]. Vessel cannot choose between them (Open questions).
+- **Proton:** the proxy is `version.dll`; the installer's Linux launch option is `WINEDLLOVERRIDES="version=n,b" %command%` [4][5]. The entry sets `dll_overrides = ["version"]`.
 
 ## Loaders and script extenders
 | Name | Nexus id | Installs to | Detect | Build-coupled | Launch change | Source |
 |---|---|---|---|---|---|---|
-| MelonLoader | not verified (Nexus returned HTTP 403) | game root: `version.dll`, `dobby.dll`, `MelonLoader/` | `MelonLoader`, `dobby.dll` | no | `dll_overrides = ["version"]` | [2][3][4][8] |
+| MelonLoader | `schedule1` 1196 (installer only, from the user's installed archive; not set in definition) | game root: `version.dll`, `dobby.dll`, `MelonLoader/` | `MelonLoader`, `dobby.dll` | no | `dll_overrides = ["version"]` | [3][4][5][9][10] |
 
-The archive layout (`MelonLoader/` folder plus `version.dll` and `dobby.dll` at the root) is the manual install described in the README [2]. The latest release at the time of reading was v0.7.3 (2026-05-14), which ships `MelonLoader.x64.zip` for Windows and a separate `MelonLoader.Linux.x64.zip` for native Linux [8]; the Windows zip is the one that applies under Proton. S1MAPI requires MelonLoader 0.7.0 or newer [7].
+The manual-install archive layout (`MelonLoader/` folder plus `version.dll` and `dobby.dll`) is documented on Thunderstore and GitHub [3][4]. Latest release v0.7.3 (2026-05-14) ships `MelonLoader.Installer.exe`, `MelonLoader.Installer.Linux`, `MelonLoader.Installer.MacOS.dmg`, `MelonLoader.x64.zip`, `MelonLoader.x86.zip`, `MelonLoader.Linux.x64.zip` and `MelonLoader.macOS.x64.zip` [9]. The Windows x64 zip applies under Proton. Mods pin different versions (0.7.0, 0.7.2, 0.7.3 seen) [10].
+
+## Loader routes
+| Loader | Route | Identifier | Handled by |
+|---|---|---|---|
+| melonloader | Nexus page | schedule1 1196, installer only (from the user's installed archive): file 3486, v4.2.0, holds only `MelonLoader.Installer.exe` | Gap |
+| melonloader | Off-site requirement | https://melonwiki.xyz/#, named by ExpandRecipe (schedule1 453) | Gap |
+| melonloader | GitHub release | LavaGang/MelonLoader `MelonLoader.x64.zip` | Gap |
+| melonloader | GitHub release | LavaGang/MelonLoader `MelonLoader.Installer.exe` (installer) | Gap |
+| melonloader | Thunderstore | schedule-i/LavaGang/MelonLoader | Gap |
 
 ## Configuration changes
-- `support = "tested"` (was `experimental`): Gaps is `None`; promotion is research-based per the task.
-- Added `# vessel-game-support: complete` and `# Sources:` header lines.
-- Added `[[loaders]]` `melonloader` (key is a known tool in `requirements.rs`): `required_paths = ["version.dll", "MelonLoader"]` [2]; `forbidden_paths = ["Mods"]` so a mod pack bundling MelonLoader is not taken for the loader; `detect = ["MelonLoader", "dobby.dll"]` [2]; `launch.dll_overrides = ["version"]` [3][4].
-- No `nexus_mod_id` and no `couples_to`: the Nexus id could not be verified, and nothing found ties the loader zip to a game executable (it is tied to the Mono/IL2CPP branch, which is not a single file).
-- Unchanged and confirmed: `steam_appid = 3164500` (from the existing preset; not independently re-verified, see Open questions), `subdir = "."`, `profile = "melonloader"`, `target = "game_dir"`.
-- Test `schedule1_declares_the_melonloader_loader`; `every_other_preset_is_experimental` now also lists `schedule1`.
+- `support = "experimental"` (was `tested`): Gaps lists Rust changes.
+- Kept `[[loaders]]` `melonloader`: `required_paths = ["version.dll", "MelonLoader"]` [3][4]; `forbidden_paths = ["Mods"]` so a mod pack bundling MelonLoader is not taken for the loader; `detect = ["MelonLoader", "dobby.dll"]` [3][4]; `launch.dll_overrides = ["version"]` [4][5].
+- No `nexus_mod_id`: the page on `schedule1` (1196) ships only `MelonLoader.Installer.exe` (the user's installed archive: Vessel mod row 219, file 3486, v4.2.0), which no declarative loader can claim. No `couples_to`: the loader is tied to the Mono/IL2CPP branch, not one executable.
+- Unchanged and confirmed: `steam_appid = 3164500` (Steam store page names it Schedule I [1]), `subdir = "."`, `profile = "melonloader"`, `target = "game_dir"`.
+- Test `schedule1_declares_the_melonloader_loader` updated; `every_other_preset_is_experimental` no longer lists `schedule1`.
 
 ## Gaps
-None
+- melonloader: `crates/vessel-core/src/loaders` and `requirements.rs`: the Nexus page schedule1 1196 is installer-only (file 3486, v4.2.0, archive holds only `MelonLoader.Installer.exe`), so a declarative loader cannot claim it; Rust support is needed to map this page to the GitHub release zip source (`LavaGang/MelonLoader` `MelonLoader.x64.zip`).
+- melonloader: `requirements.rs` and the install flow: mods name MelonLoader as an off-site requirement pointing to https://melonwiki.xyz/# (ExpandRecipe, schedule1 453); Vessel recognizes the name but cannot download from a URL, so it never offers the install.
+- melonloader: GitHub release `LavaGang/MelonLoader` (`MelonLoader.x64.zip`) and the `MelonLoader.Installer.exe` installer: a new download source that can fetch a GitHub release asset and claim it as the loader is needed; declarative loaders never run installers.
+- melonloader: Thunderstore package `schedule-i/LavaGang/MelonLoader`: a new Thunderstore download source is needed so the archive is registered as the loader rather than a regular mod.
 
 ## Open questions
-- Nexus mod id of MelonLoader on `nexusmods.com/schedule1`: Nexus pages returned HTTP 403, so it is left out. Without it the loader is installed as "unverified" provenance when downloaded from Nexus.
-- Steam appid 3164500 and GOG/Epic ids: Steam appid is from the existing definition; searches did not confirm it directly. No GOG/Epic ids were found.
-- Choosing the Mono or IL2CPP build of a mod (per Steam branch) is not expressible in the definition; users pick the right file on the mod page.
-- Whether the Proton prefix needs extra runtimes beyond what Proton ships, and whether the installer's launch option differs for IL2CPP games: not verified for this game.
+- Requirement lists of other popular mods: Nexus pages returned HTTP 403. Search summaries say Schedule I Minimap (2798), ModHub v2.0 (1567) and MelonLoader FastGen (2746) link GitHub LavaGang/MelonLoader (from search summaries; not verified).
+- GOG/Epic ids: none found.
+- Choosing the Mono or IL2CPP build of a mod is not expressible in the definition.
+- Whether the Proton prefix needs extra runtimes (.NET 6 Desktop Runtime for IL2CPP is installed automatically only on Windows [3]).
 - Hardware verification is not done.
 
 ## Check results
 Run on 2026-11-15.
-- `python3 scripts/check_game_support_note.py --definition crates/vessel-core/definitions/schedule1.toml --note docs/game-support/schedule1.md`: pass (full support, gaps: none)
-- `cargo fmt --all -- --check`: pass
+- `python3 scripts/check_game_support_note.py --definition crates/vessel-core/definitions/schedule1.toml --note docs/game-support/schedule1.md`: pass (partial outcome, 4 Gaps bullets, matches `support = "experimental"`)
+- `cargo fmt --all -- --check`: pass (after `cargo fmt --all` reformatted the test list)
 - `cargo clippy -p vessel-core --all-targets --locked -- -D warnings`: pass
 - `cargo test -p vessel-core --locked`: pass (lib 511 passed, 2 ignored; integration tests all passed; 0 failed)
 
 ## Manual test
-Install a mod, deploy, launch, uninstall (plan section 4.4). Promotion to tested here is based on research, not hardware testing.
+Install a mod, deploy, launch, uninstall (plan section 4.4). Not done on hardware.
 
 ## Sources
-1. https://www.gamingonlinux.com/itemdb/app/41656/schedule-i (search result, read 2026-11-15)
-2. https://github.com/LavaGang/MelonLoader (README, 2026-11-15)
-3. https://github.com/TLD-Mods/Linux_Proton_Guide (MelonLoader on Linux/Proton guide, 2026-11-15)
-4. https://thunderstore.io/c/cairn/p/LavaGang/MelonLoader/ and the guide above, via search summary (2026-11-15)
-5. https://www.gamingonlinux.com/itemdb/app/41656 (search result, 2026-11-15)
+1. https://store.steampowered.com/app/3164500/Schedule_I/ (2026-11-15)
+2. https://www.gamingonlinux.com/itemdb/app/41656/schedule-i (2026-11-15)
+3. https://thunderstore.io/c/schedule-i/p/LavaGang/MelonLoader/ (2026-11-15)
+4. https://github.com/LavaGang/MelonLoader (2026-11-15)
+5. https://github.com/TLD-Mods/Linux_Proton_Guide (2026-11-15)
 6. https://xgamingserver.com/docs/schedule-1/melonloader (2026-11-15)
-7. https://thunderstore.io/c/schedule-i/p/ifBars/S1MAPI/ (2026-11-15)
-8. https://api.github.com/repos/LavaGang/MelonLoader/releases/latest (2026-11-15)
+7. https://www.nexusmods.com/schedule1/mods/556 (via search summary, 2026-11-15)
+8. https://thunderstore.io/c/schedule-i/p/ifBars/S1MAPI/ (2026-11-15)
+9. https://api.github.com/repos/LavaGang/MelonLoader/releases/latest (2026-11-15)
+10. Search results listing https://www.nexusmods.com/schedule1/mods/1196, /2798, /1567, /2746 (2026-11-15)
