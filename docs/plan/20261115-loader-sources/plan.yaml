@@ -1,0 +1,219 @@
+plan_id: 20261115-loader-sources
+status: pending
+tldr: |
+  Add an optional GitHub release source and url/name aliases to declarative LoaderDef,
+  a hardened GitHub release-asset fetcher into the loader archive cache (DownloadOrigin::GitHub),
+  app wiring so install/upgrade/adopt fall back to GitHub, an id-only claim that redirects
+  installer-only Nexus archives (top-level .exe/.msi) to the GitHub source, a structured
+  InstallLoader requirements action, junk detection for mod rows carrying a loader's Nexus id,
+  a Requirements "Install" button, then game-support docs/checker and finally schedule1.toml.
+created_at: "2026-11-15"
+created_by: gem-planner
+revision: 2
+replan_count: 0
+planner_revision_used: true
+
+decisions:
+  - "Schema: [loaders.github] { repo = 'owner/repo', asset = <Glob> } plus [loaders.aliases] { urls = [..], names = [..] } on LoaderDef; deny_unknown_fields kept on every new table. Reason: smallest additive shape; reuses loaders::glob::Glob (reuse rung)."
+  - "Fetcher reuses download::fetch::Fetcher (with_max_bytes, with_redirect_check, with_retry). Only new code: GitHub releases API call, asset selection, URL pinning, digest/size checks."
+  - "Release selection (accepted): GET {api}/repos/{repo}/releases/latest; exactly one asset must match the glob, else error. Tag becomes version and DownloadOrigin::GitHub.tag."
+  - "Integrity (accepted): verify sha256 when the API asset carries 'digest'; reject mismatch. Always enforce downloaded length == asset.size."
+  - "Pre-fetch URL pin: browser_download_url must be https, host exactly github.com, path prefix /{repo}/releases/download/{tag}/ (repo compared case-insensitively, tag percent-decoded) with the final segment equal to asset.name. Redirects restricted to github.com, objects.githubusercontent.com, release-assets.githubusercontent.com, https only."
+  - "Limits: API JSON body cap 1 MiB; asset cap 200 MiB (also reject asset.size > cap before download). GitHub 403 with x-ratelimit-remaining: 0, or 429, maps to a distinct RateLimited error whose message says the GitHub API rate limit was hit and when it resets (from x-ratelimit-reset when present)."
+  - "Test override: the API base URL and scheme/host relaxation for wiremock live behind a #[cfg(test)]-only constructor (or pub(crate) constructor used only from #[cfg(test)] code in vessel-core). Production entry point has no parameter for base URL, scheme, or host."
+  - "Id-only claim scope (narrowed): applies only when the archive's Nexus mod id equals the loader's nexus_mod_id (same game domain), the archive has a top-level *.exe or *.msi entry (case-insensitive), the archive does NOT match required_paths, and the loader declares github. Any other file from that Nexus page (e.g. optional docs/configs without a top-level exe/msi) follows the normal path: loader match if layout matches, else regular mod install."
+  - "T3/T5 compile boundary: T3 keeps PreviewRequest's shape unchanged. Install/upgrade/adopt with archive = None and a loader that declares github fetches from GitHub; the Local placeholder origin the Tauri command builds today is ignored in that case. So src-tauri needs no edits until T5, and `cargo test --workspace` passes at the end of every wave."
+  - "Requirements contract: ReqRow keeps `hint: String` (CLI fix text) and gains `action: Option<ReqAction>`, where ReqAction is a serde-tagged enum (kind = 'install_loader', loader_key). For loader rows, hint is empty: there is no CLI loader command, and Requirements.tsx must not print a fake 'fix: vessel ...'. T4 owns the Rust side, including the CLI's hand-written deps --json serializer, so the workspace compiles. T5 owns the TS side."
+  - "InstallLoader consumers (complete list, from grep): Rust requirements.rs (construction, tests), crates/vessel-cli/src/commands/mods.rs:510 hand-written JSON; TS apps/desktop/src/ipc/types.ts:503 ReqRow, apps/desktop/src/views/Requirements.tsx (installTarget:58, row render :188/:216), apps/desktop/src/mock/demo.ts:122-123 fixtures; Tauri passes ReqRow through serde (no match). No other views or CLI paths read hint."
+  - "Ordering: T7 (prompt/checker) runs before T6 (schedule1.toml), so the checker that decides support already knows the new fields. T6 sets support only to the value the checker accepts."
+  - "Single reviewer task in final wave; the fetcher is the only security-sensitive surface and is isolated in T2."
+
+assumptions:
+  - "No GitHub auth token: unauthenticated API (60 req/h) is acceptable for user-initiated loader installs."
+  - "wiremock (already a vessel-core dev-dependency) is used for mocked HTTP."
+  - "Built-in SMAPI plugin (loaders/smapi.rs) is unchanged; the GitHub source is declarative-only."
+  - "MelonLoader.x64.zip root contains version.dll + MelonLoader/ and so satisfies the existing required_paths."
+  - "Support::Tested still exists: verified at planning time in games/definitions.rs:15-26 (enum Tested|Experimental, as_str 'tested', test at :376). Commit 26ed9bf touched only apps/desktop/src/views/Games.tsx and Games.test.tsx (UI badge). T6 re-verifies."
+  - "Existing archive extraction guards cover GitHub archives unchanged: archive.rs tests sanitize_entry_path_rules and validate_tree_rejects_symlinks_escapes_and_hardlinks:1258, and app/loaders.rs place_file/fix_mode use deploy::confine."
+  - "The parallel scripts task (plan 20261115-vessel-game-support-workflow) has not landed as of planning (no matching commit on develop)."
+
+shared_context:
+  loader_sources:
+    - "LoaderDef: crates/vessel-core/src/loaders/declarative.rs:33 (key,name,nexus_mod_id,required_paths,forbidden_paths,detect,payload,launch,couples_to; deny_unknown_fields)."
+    - "provenance(): declarative.rs:301; GitHub arm currently always Unverified('no GitHub source is declared')."
+    - "DownloadOrigin::GitHub { repo, tag, asset } at loaders/types.rs:102; as_str -> 'github'."
+    - "matches(): declarative.rs ~290, requires all required_paths and no forbidden_paths."
+    - "App pipeline: app/loaders.rs PreviewRequest:112 (game_id, op, loader_key, archive: Option<PathBuf>, origin, unverified_ack), cache_archive:431, cached_origin:482, extract_to_scratch:491, probe_of:498, preview:567, place_file:956 (confine), find_loader_junk:1815."
+    - "Tauri loader_preview: apps/desktop/src-tauri/src/commands.rs:1205-1233 builds PreviewRequest with archive Option and origin Local{archive or empty}."
+    - "mods/install.rs loader_match:102 -> ModsError::LoaderArchive; app/install.rs:231 handles LoaderArchive with origin."
+    - "HTTP: download/fetch.rs Fetcher (new, with_max_bytes, with_redirect_check, with_retry, fetch). Tests use wiremock."
+    - "Extraction guards: archive.rs sanitize_entry_path_rules, validate_tree_rejects_symlinks_escapes_and_hardlinks (:1258)."
+    - "requirements.rs: TOOLS:29, tool_for:135, norm_url:142 (GitHub cut to owner/repo), ReqRow:216 (hint: String), analyze:440."
+
+tasks:
+  - id: T1
+    title: LoaderDef GitHub source + aliases schema, provenance, narrowed id-only claim
+    description: "Reuse rung: extend existing LoaderDef/Glob/provenance. Add optional `github: Option<GithubSource{repo, asset: Glob}>` and `aliases: Aliases{urls, names}` (deny_unknown_fields). Validate repo as exactly owner/repo ([A-Za-z0-9._-]+/[A-Za-z0-9._-]+, no '..'). Normalize alias URLs with requirements::norm_url; names must be non-empty. provenance(): a GitHub origin is Verified iff its repo equals the declared repo (case-insensitive) and the asset name matches the declared glob. Id-only claim (narrowed, see decisions): returns a distinct InstallerRedirect outcome only when all hold: probe nexus_mod_id == def.nexus_mod_id on the same domain, a top-level *.exe or *.msi entry exists, required_paths do not match, and def.github is set. Otherwise behavior is unchanged."
+    wave: 1
+    depends_on: []
+    agent: gem-implementer
+    status: completed
+    retries_used: 0
+    context_cluster: loader_sources
+    acceptance_criteria:
+      - "TOML with [loaders.github] repo+asset and [loaders.aliases] parses; unknown keys under loaders, loaders.github and loaders.aliases are rejected (unit tests)."
+      - "Invalid repo (no slash, extra segments, URL form, '..', empty) and an empty asset glob fail validation with clear messages."
+      - "provenance(): GitHub{repo match, asset glob match} -> Verified; repo mismatch, asset mismatch, or no github declared -> Unverified (one test each)."
+      - "Id-only claim tests: (a) matching id + top-level MelonLoader.Installer.exe + no layout + github -> InstallerRedirect; (b) same without github -> None; (c) matching id, no exe/msi, no layout -> None (installs normally); (d) exe only in a subfolder -> None; (e) layout-matching archive -> normal LoaderMatch; (f) different mod id with exe -> None."
+      - "Validation: `cargo test -p vessel-core --lib loaders::declarative::` and `cargo test -p vessel-core --lib games::definitions::` pass; `cargo test --workspace` passes; `cargo clippy -p vessel-core --all-targets -- -D warnings` clean."
+    handoff:
+      constraints:
+        - "Do not change DownloadOrigin serialization or loader_installs.origin values."
+        - "Do not touch smapi.rs behavior."
+      high_risk_signals: [schema_change, contract_change]
+
+  - id: T2
+    title: Hardened GitHub release-asset fetcher into archive cache
+    description: "Reuse rung: built on download::fetch::Fetcher. New module crates/vessel-core/src/loaders/github.rs exposing production `fetch_latest_asset(repo, asset_glob, dest_dir) -> Result<{path, origin: DownloadOrigin::GitHub{repo,tag,asset}, version}, GithubError>`. Base URL is the constant https://api.github.com. Steps: (1) GET releases/latest with a 1 MiB body cap; on 403 with x-ratelimit-remaining 0, or 429, return RateLimited (message names the GitHub API rate limit and the reset time when known); (2) reject draft/prerelease; (3) exactly one asset name matches the glob, and the name has no path separators or '..'; (4) reject asset.size > 200 MiB; (5) pin browser_download_url: https, host == github.com, path prefix /{repo}/releases/download/{tag}/, last segment == asset.name; (6) download with max_bytes 200 MiB and a redirect check limited to https on github.com / objects.githubusercontent.com / release-assets.githubusercontent.com; (7) require byte length == asset.size; (8) verify sha256 when digest is present; (9) on any failure remove the partial file. Never executes anything. Test-only constructor (#[cfg(test)]) injects the wiremock base URL and relaxes scheme/host."
+    wave: 1
+    depends_on: []
+    agent: gem-implementer
+    status: completed
+    retries_used: 0
+    context_cluster: loader_sources
+    acceptance_criteria:
+      - "wiremock happy path: asset written under dest_dir; returns GitHub origin with tag and asset name; version == tag."
+      - "Rejection tests, one each: zero matching assets; multiple matching assets; asset name containing '/' or '..'; prerelease/draft payload; repo argument not owner/repo; download URL http://; download URL host not github.com; download URL path not under /{repo}/releases/download/{tag}/; redirect to a non-allowlisted host; redirect to http; API body > 1 MiB; asset.size > 200 MiB; streamed body > cap; length != asset.size; sha256 digest mismatch; and the partial file is absent after each failure."
+      - "Rate limit: 403 with x-ratelimit-remaining: 0, and 429, each return RateLimited, and the Display text contains 'rate limit'."
+      - "Test override unreachable from production: the base-URL/relaxed constructor is #[cfg(test)] (or pub(crate) and referenced only from #[cfg(test)] code). Verified by `cargo build -p vessel-core --release` plus a grep in the review showing no non-test caller; no definition or IPC field can set the base URL."
+      - "Generic User-Agent; no user-identifying headers."
+      - "Validation: `cargo test -p vessel-core --lib loaders::github::` passes; `cargo test --workspace` passes; `cargo clippy -p vessel-core --all-targets -- -D warnings` clean."
+    handoff:
+      constraints:
+        - "No new HTTP crate; reuse Fetcher and the existing reqwest/wiremock deps."
+      high_risk_signals: [security_sensitive, data_flow_change]
+
+  - id: T3
+    title: App wiring - GitHub source for install/upgrade/adopt, installer redirect, loader junk
+    description: "Reuse rung: extend the app/loaders.rs pipeline, keeping PreviewRequest's shape. Install/upgrade/adopt with archive None for a loader that declares github: call T2 into the archive cache, then run the existing extract_to_scratch -> probe -> preview/run flow with the GitHub origin (any placeholder Local origin from the caller is ignored). mods/install.rs + app/install.rs: the InstallerRedirect outcome (narrowed scope from T1) never stages, deploys or runs the archive; it returns a LoaderArchive-style error/result naming the loader with a redirect flag so callers start the GitHub preview. find_loader_junk: also flag mod rows whose nexus_mod_id equals a loader's nexus_mod_id for the same game."
+    wave: 2
+    depends_on: [T1, T2]
+    agent: gem-implementer
+    status: completed
+    retries_used: 0
+    context_cluster: loader_sources
+    notes:
+      - "junk rule narrowed by J1"
+    acceptance_criteria:
+      - "pipeline_tests (wiremock): install preview with loader_key and archive None for a loader with github fetches, caches, reports provenance Verified, and run installs; upgrade and adopt take the same path."
+      - "Archive None for a loader without github keeps today's error."
+      - "Archive None source order (coordinator, after T4 gives every non-Ok loader row an install_loader action): github if declared; else the loader's Nexus mod (primary file via the Nexus API, Premium or an nxm link required); neither -> a clear 'no download source' error. Tests cover all three (MelonLoader/GitHub, SMAPI/Nexus 2400, BepInEx/none)."
+      - "GitHub-sourced archives go through the same extract_to_scratch/archive validation: a pipeline test feeds a GitHub-served zip with a '../escape' entry (or symlink escape) and gets the existing unsafe-path error with nothing written outside scratch; existing archive.rs tests sanitize_entry_path_rules and validate_tree_rejects_symlinks_escapes_and_hardlinks still pass."
+      - "Installer-only archive (matching nexus_mod_id + top-level .exe/.msi + no layout): no mod row created, nothing deployed, runner never invoked on the .exe; the result points to the loader's GitHub install."
+      - "A non-installer optional archive from the same Nexus mod id (no top-level exe/msi, no layout) installs as a regular mod, unchanged."
+      - "find_loader_junk reports a mod row with nexus_mod_id == loader nexus_mod_id (fixture mirroring the user's mod 219); removal deletes only reported rows."
+      - "cached_origin round-trips a GitHub origin for repair/rollback."
+      - "No edits under apps/desktop/src-tauri; PreviewRequest fields unchanged (compile boundary)."
+      - "Validation: `cargo test -p vessel-core --lib app::loaders::`, `cargo test -p vessel-core --lib mods::install`, `cargo test -p vessel-core --lib archive::` pass; `cargo test --workspace` passes; `cargo check -p vessel-desktop` passes where WebKitGTK is available; `cargo clippy --workspace --all-targets -- -D warnings` clean."
+    handoff:
+      constraints:
+        - "Do not change requirements.rs (owned by T4)."
+        - "Installers are never executed or deployed."
+      high_risk_signals: [data_flow_change, api_change, security_sensitive]
+
+  - id: T4
+    title: Requirements resolve off-site/Nexus rows to a structured InstallLoader action
+    description: "Reuse rung: extend requirements::analyze. Add `ReqRow.action: Option<ReqAction>` with `enum ReqAction { InstallLoader { loader_key: String } }` (serde tag 'kind' = 'install_loader'). When a row (off-site URL, name or Nexus id) resolves to a loader of the current game, via the TOOLS matcher, definition aliases (urls through norm_url, names) or the definition's [[loaders]].nexus_mod_id, set action = InstallLoader and hint = ''. A loader requirement counts as installed only from loader install records/detect; a regular mod row carrying the loader's Nexus id does not. Update the CLI's hand-written deps --json serializer (crates/vessel-cli/src/commands/mods.rs:~510) to emit action. Every Rust match on ReqAction is exhaustive (no `_` arm)."
+    wave: 2
+    depends_on: [T1]
+    agent: gem-implementer
+    status: completed
+    retries_used: 0
+    acceptance_criteria:
+      - "Unit tests: 'https://melonwiki.xyz/#' and 'https://github.com/LavaGang/MelonLoader/releases' rows resolve via aliases; Nexus row mod 1196 resolves via nexus_mod_id; 'Melon Loader' via TOOLS. Each yields action InstallLoader{melonloader} and an empty hint."
+      - "A row resolving to a tool that is not a loader of the current game gets action None (hint unchanged)."
+      - "A regular mod row with nexus_mod_id 1196 does not mark the requirement installed; a loader_installs record does."
+      - "serde test pins JSON {\"kind\":\"install_loader\",\"loader_key\":\"melonloader\"}; rows without an action serialize action:null. A CLI test checks deps --json includes the action field."
+      - "No wildcard arm in any match on ReqAction (grep checked in review)."
+      - "Validation: `cargo test -p vessel-core --lib requirements::` and `cargo test -p vessel-cli` pass; `cargo test --workspace` passes; `cargo clippy --workspace --all-targets -- -D warnings` clean."
+    handoff:
+      constraints:
+        - "Only requirements.rs, its tests, read access to loader records, and the CLI deps JSON serializer; no app/loaders.rs edits."
+      high_risk_signals: [contract_change]
+
+  - id: T5
+    title: IPC + Requirements.tsx Install button for loaders
+    description: "Reuse rung: the existing loader_preview command and loader preview/run dialog. The Tauri loader_preview command already accepts archive Option, so the Rust side changes only if T3's errors need mapping. TS consumers to update (complete list): apps/desktop/src/ipc/types.ts (ReqRow.action + ReqAction union; install result redirect shape), apps/desktop/src/ipc/commands.ts (loaderPreview archive optional, already allowed), apps/desktop/src/views/Requirements.tsx (Install button for action.kind 'install_loader', handled alongside installTarget; suppress the 'fix: vessel' line when hint is empty), apps/desktop/src/mock/demo.ts (add action:null to the existing rows and one install_loader row), plus any test fixtures that build ReqRow (views.test.tsx, App.test.tsx, ct1.test.tsx; find them with `grep -rn \"acked:\" apps/desktop/src`). The existing mod install UI handles the installer-redirect result by offering the same loader install."
+    wave: 3
+    depends_on: [T3, T4]
+    agent: gem-implementer
+    status: completed
+    retries_used: 0
+    acceptance_criteria:
+      - "vitest: a row with action install_loader shows an accessible 'Install MelonLoader' button; clicking calls loaderPreview({op:'install', loaderKey:'melonloader'}) with no archive and opens the preview dialog."
+      - "vitest: busy state while preview loads; an error shows in the row; rows with action null are unchanged (the Nexus 'install <id>' button still works)."
+      - "Exhaustive handling: every TS switch/branch on ReqAction.kind ends in an assertNever(x: never) default, so adding a kind fails typecheck. Rust matches stay wildcard-free."
+      - "types.ts mirrors the Rust serde shape exactly (ReqRow.action, ReqAction, redirect result); command_names.rs and lib.rs stay in sync if any command is added."
+      - "Validation: `cd /home/jkempf/Repositories/modman/apps/desktop && npm run typecheck && npm test` passes; `cargo test --workspace` passes; `cargo check -p vessel-desktop` passes where WebKitGTK is available."
+    handoff:
+      constraints:
+        - "Reuse existing dialog components and design tokens; no new UI library."
+        - "Do not touch DESIGN.md."
+      high_risk_signals: [api_change, contract_change]
+
+  - id: T7
+    title: Document new loader fields in game-support prompt and checker
+    description: "Docs-only rung plus minimal checker acceptance. HARD GATE: start only if the parallel scripts task (plan 20261115-vessel-game-support-workflow: Nexus API helper + archive lister + prompt tightening) has landed, meaning its commit is in `git log develop` OR an orchestrator handoff marks it completed. Otherwise return status blocked without editing. Then update .github/prompts/add-game-support.md (and the .claude/commands mirror if present) to describe [loaders.github], [loaders.aliases] and the narrowed installer-only redirect. Let scripts/check_game_support_note.py treat GitHub-sourced/aliased loader routes and installer-only Nexus loader pages as handled."
+    wave: 4
+    depends_on: [T1, T3, T4]
+    agent: gem-implementer
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "Gate check recorded: the commit hash of the parallel task, or the orchestrator completion reference. Without it the task returns blocked."
+      - "The prompt documents github.repo, github.asset, aliases.urls, aliases.names and the installer-only redirect scope (top-level .exe/.msi, layout mismatch, github declared), with a schedule1-style example."
+      - "scripts/test_check_game_support_note.py adds cases: a note whose loader route is GitHub-sourced counts as handled; an installer-only Nexus loader page with a github source counts as handled; without github it is still flagged."
+      - "Diff limited to documenting the new fields and the handled-route check; the parallel task's changes are preserved."
+      - "Validation: `cd /home/jkempf/Repositories/modman && python3 -B -m unittest scripts/test_check_game_support_note.py scripts/test_pick_game_support_target.py` passes."
+    handoff:
+      constraints:
+        - "Do not discard uncommitted script/prompt changes; do not touch DESIGN.md or git stash@{0}."
+
+  - id: T6
+    title: schedule1.toml MelonLoader sources + definition tests
+    description: "Data-only rung. Gate: PR #5 (branch vessel/game-support-schedule1-rerun-202611152214) is merged into develop; otherwise return blocked. On merged develop: set nexus_mod_id = 1196, [loaders.github] repo='LavaGang/MelonLoader' asset='MelonLoader.x64.zip', [loaders.aliases] urls=['melonwiki.xyz','github.com/LavaGang/MelonLoader'] names=['MelonLoader','Melon Loader']. Update the Gaps section of docs/game-support/schedule1.md. Run the checker (from T7) and set support only to the value it accepts. Re-verify that Support::Tested exists and parses before writing 'tested'."
+    wave: 5
+    depends_on: [T3, T4, T5, T7]
+    agent: gem-implementer
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "PR #5's commit is in `git log develop` before any edits; otherwise blocked."
+      - "Support enum check: games/definitions.rs still has Support::Tested with as_str 'tested', and a test parsing support='tested' passes (`cargo test -p vessel-core --lib games::definitions::`)."
+      - "The definition loads and validates; tests assert nexus_mod_id 1196, the github repo/asset and the aliases, and that an archive with version.dll + MelonLoader/ still matches while an archive with only MelonLoader.Installer.exe and Nexus id 1196 gets InstallerRedirect."
+      - "A requirements test with the schedule1 definition yields InstallLoader{melonloader} for the melonwiki.xyz row."
+      - "The checker passes for schedule1 with the chosen support value: `cd /home/jkempf/Repositories/modman && python3 -B scripts/check_game_support_note.py` (schedule1 invocation per its README) exits 0; support is set only to what it accepts, and the value and checker output are recorded in the task result."
+      - "Validation: `cargo test -p vessel-core --lib games::definitions::`, `cargo test -p vessel-core --lib requirements::` and `cargo test --workspace` pass."
+    handoff:
+      constraints:
+        - "Only schedule1.toml, docs/game-support/schedule1.md and definition/requirements tests."
+      high_risk_signals: [schema_change]
+
+  - id: T8
+    title: Security + contract review and full validation gate
+    description: "Independent review of T1-T7: GitHub fetch hardening (URL pin, redirect allowlist, HTTPS, caps, size equality, digest, rate-limit error, partial cleanup, test override unreachable), installer never executed or deployed, narrowed id-only claim, deny_unknown_fields, ReqAction/IPC serde parity and exhaustive handling. Run the full validation suite."
+    wave: 6
+    depends_on: [T5, T6, T7]
+    agent: gem-reviewer
+    status: pending
+    retries_used: 0
+    acceptance_criteria:
+      - "`cd /home/jkempf/Repositories/modman && cargo fmt --all -- --check` passes."
+      - "`cargo clippy --workspace --all-targets -- -D warnings` passes."
+      - "`cargo test --workspace` passes."
+      - "`cd /home/jkempf/Repositories/modman/apps/desktop && npm run typecheck && npm test` passes."
+      - "`cd /home/jkempf/Repositories/modman && python3 -B -m unittest scripts/test_check_game_support_note.py scripts/test_pick_game_support_target.py` passes."
+      - "`grep -rn` shows no non-test caller of the GitHub test constructor and no `_ =>` arm in matches on ReqAction."
+      - "The review report lists no open high-severity findings on the fetcher, installer redirect or contract parity; any findings are routed back to the owning task."
+    handoff:
+      high_risk_signals: [security_sensitive, schema_change, api_change, data_flow_change, contract_change]
