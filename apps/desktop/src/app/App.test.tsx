@@ -216,7 +216,7 @@ describe("structured results", () => {
 
   it("command errors become a notice with the CmdError message", async () => {
     const { renderApp } = await setup({
-      deps: () => [{ status: "missing", key: "skse", name: "SKSE64", hint: "install 30379", urls: [], by: [], detail: "", acked: false }],
+      deps: () => [{ status: "missing", key: "skse", name: "SKSE64", hint: "install 30379", urls: [], by: [], detail: "", acked: false, action: null }],
       install: () => {
         throw { message: "mod not found" };
       },

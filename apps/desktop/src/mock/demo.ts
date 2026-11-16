@@ -119,8 +119,9 @@ export function createDemoBackend(opts: DemoOptions = {}): FakeTransport {
     },
   ];
   const deps: ReqRow[] = [
-    { status: "missing", key: "skse", name: "SKSE64", hint: "install 30379", urls: [], by: ["SkyUI"], detail: "", acked: false },
-    { status: "external", key: "skse-loader", name: "SKSE loader", hint: "", urls: ["https://skse.silverlock.org"], by: ["SkyUI"], detail: "", acked: false },
+    // A registry loader: the app installs it through the loader preview, so no CLI hint.
+    { status: "missing", key: "tool:skse", name: "SKSE64", hint: "", urls: [], by: ["SkyUI"], detail: "", acked: false, action: { kind: "install_loader", loader_key: "skse" } },
+    { status: "external", key: "skse-loader", name: "SKSE loader", hint: "", urls: ["https://skse.silverlock.org"], by: ["SkyUI"], detail: "", acked: false, action: null },
   ];
 
   const t = createFakeTransport();

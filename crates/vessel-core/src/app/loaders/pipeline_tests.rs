@@ -2,7 +2,9 @@
 //! T5: loader archives in the install pipeline, deploy/purge exclusion,
 //! requirements status and junk cleanup.
 
-use super::tests::{smapi_zip_at, vanilla_at};
+use super::tests::{
+    smapi_zip_at, vanilla_at, zip_files, FakeGithub, MELON_FILES, MELON_TAG, MELON_TOML,
+};
 use super::*;
 use crate::app::install::{self as appinst, Installed};
 use crate::app::testing::Recorder;
@@ -480,4 +482,220 @@ fn nxm_link_to_smapi_stops_at_a_pending_preview() {
     let g = p.game.folder.clone().unwrap();
     assert!(!g.join("StardewModdingAPI.dll").exists());
     assert!(!g.join("StardewValley-original").exists());
+}
+
+/// Schedule I with the GitHub-sourced MelonLoader of [`MELON_TOML`]
+/// (Nexus mod 1196) as a user definition.
+fn schedule1() -> P {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let home = base.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let paths = Paths::for_home(&home);
+    fs::create_dir_all(paths.definitions_dir()).unwrap();
+    fs::write(paths.definitions_dir().join("schedule1.toml"), MELON_TOML).unwrap();
+    let store = Store::open_in_memory().unwrap();
+    let mut game = GameConfig::custom("schedule1");
+    game.nexus_domain = Some("schedule1".into());
+    game.folder = Some(base.join("game"));
+    game.subdir = ".".into();
+    game.profile = "melonloader".into();
+    game.definition = Some("schedule1".into());
+    games::save_game(store.conn(), &game).unwrap();
+    fs::create_dir_all(base.join("game")).unwrap();
+    set_runtime_override(&store, "schedule1", Some("native")).unwrap();
+    P {
+        tmp,
+        paths,
+        store,
+        game,
+    }
+}
+
+fn nexus_1196() -> (InstallMeta, DownloadOrigin) {
+    let meta = InstallMeta {
+        nexus_mod_id: Some(1196),
+        nexus_file_id: Some(7),
+        source: Some("nexus".into()),
+        ..Default::default()
+    };
+    let origin = DownloadOrigin::Nexus {
+        domain: "schedule1".into(),
+        mod_id: 1196,
+        file_id: 7,
+    };
+    (meta, origin)
+}
+
+fn files_named(root: &Path, name: &str) -> Vec<PathBuf> {
+    walkdir::WalkDir::new(root)
+        .into_iter()
+        .flatten()
+        .filter(|e| e.file_name() == name)
+        .map(|e| e.path().to_path_buf())
+        .collect()
+}
+
+/// Catches: the loader's Nexus installer (.exe) being staged, deployed or
+/// run as a mod, instead of pointing to the loader's GitHub release; and
+/// the redirect swallowing other files from the same Nexus page.
+#[test]
+fn nexus_installer_redirects_to_the_github_loader() {
+    let mut p = schedule1();
+    let d = data(&p);
+    let installer = zip_files(
+        p.tmp.path(),
+        "MelonLoader.Installer.zip",
+        &["MelonLoader.Installer.exe", "README.txt"],
+    );
+    let (meta, origin) = nexus_1196();
+    let game = p.game.clone();
+
+    // Without an origin (restage, reinstall): a typed refusal, nothing kept.
+    let ui = Recorder::default();
+    let mut cx = Cx::new(&p.paths, &mut p.store, &ui);
+    let e =
+        appinst::install_archive(&mut cx, &game, &d, &installer, &meta, false, None).unwrap_err();
+    assert!(
+        matches!(&e, crate::app::AppError::Mods(ModsError::LoaderInstaller { loader_key }) if loader_key == "melonloader"),
+        "{e}"
+    );
+
+    // With the Nexus origin: a pending preview of the GitHub release.
+    let gh = FakeGithub::serve(zip_files(p.tmp.path(), "melon.zip", MELON_FILES));
+    let ui = Recorder::default();
+    let mut cx = Cx::new(&p.paths, &mut p.store, &ui);
+    let out = appinst::install_archive(&mut cx, &game, &d, &installer, &meta, false, Some(&origin))
+        .unwrap_or_else(|e| panic!("{e}: {:?}", ui.texts()));
+    let Installed::Loader(l) = out else {
+        panic!("{out:?}")
+    };
+    assert_eq!(gh.calls(), 1);
+    assert_eq!(
+        (l.loader_key.as_str(), l.op, l.version.as_deref()),
+        ("melonloader", Op::Install, Some(MELON_TAG))
+    );
+    let rec =
+        fs::read_to_string(d.join(format!("loaders/previews/{}.json", l.preview_id))).unwrap();
+    assert!(
+        rec.contains("\"github\"") && rec.contains("LavaGang/MelonLoader"),
+        "{rec}"
+    );
+
+    assert_eq!(mod_count(&p), 0, "no mod row");
+    let deployed: i64 = p
+        .store
+        .conn()
+        .query_row("SELECT COUNT(*) FROM deployments", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(deployed, 0);
+    let runs: i64 = p
+        .store
+        .conn()
+        .query_row("SELECT COUNT(*) FROM loader_runs", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(runs, 0, "nothing ran");
+    // The installer exists only as the user's download.
+    assert!(files_named(&d, "MelonLoader.Installer.exe").is_empty());
+    assert!(files_named(p.game.folder.as_ref().unwrap(), "MelonLoader.Installer.exe").is_empty());
+
+    // Another file from the same page (no top-level exe/msi) is a mod.
+    let optional = zip_files(p.tmp.path(), "Extras.zip", &["Mods/Extras.dll"]);
+    let ui = Recorder::default();
+    let mut cx = Cx::new(&p.paths, &mut p.store, &ui);
+    let out = appinst::install_archive(&mut cx, &game, &d, &optional, &meta, false, Some(&origin))
+        .unwrap();
+    assert!(out.as_mod().is_some(), "{out:?}");
+    assert_eq!(mod_count(&p), 1);
+    assert_eq!(gh.calls(), 1);
+}
+
+/// Inserts a mod row for `p.game` with `nexus` as its Nexus mod id. With
+/// `staged`, the files are written under a staging folder and recorded in
+/// `mod_files`; without it the row points at a folder that does not exist.
+fn junk_candidate(p: &P, uid: &str, nexus: i64, staged: Option<&[&str]>) -> i64 {
+    let dir = p.tmp.path().join("staging").join(uid);
+    p.store
+        .conn()
+        .execute(
+            "INSERT INTO mods (game, uid, name, nexus_mod_id, staging_dir, priority, installed_at)
+             VALUES (?1, ?2, ?2, ?3, ?4, 0, 0)",
+            rusqlite::params![p.game.id, uid, nexus, dir.display().to_string()],
+        )
+        .unwrap();
+    let id = p.store.conn().last_insert_rowid();
+    for f in staged.unwrap_or(&[]) {
+        let path = dir.join(f);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, f).unwrap();
+        p.store
+            .conn()
+            .execute(
+                "INSERT INTO mod_files (mod_id, path, size, sha256) VALUES (?1, ?2, 1, 'x')",
+                rusqlite::params![id, f],
+            )
+            .unwrap();
+    }
+    id
+}
+
+/// Reports junk for `p.game`, checks it is exactly `want` (by loader
+/// `key`), removes every row through `remove_loader_junk`, and returns the
+/// uids left.
+fn junk_roundtrip(p: &mut P, ids: &[i64], want: &[i64], key: &str) -> Vec<String> {
+    let ui = Recorder::default();
+    let game = p.game.clone();
+    let mut cx = Cx::new(&p.paths, &mut p.store, &ui);
+    let junk = find_loader_junk(&cx, &game).unwrap();
+    let got: Vec<(i64, &str)> = junk
+        .iter()
+        .map(|j| (j.mod_id, j.loader_key.as_str()))
+        .collect();
+    let expect: Vec<(i64, &str)> = want.iter().map(|&i| (i, key)).collect();
+    assert_eq!(got, expect, "{junk:?}");
+    assert_eq!(remove_loader_junk(&mut cx, &game, ids).unwrap(), want.len());
+    crate::mods::list_mods(p.store.conn(), &game.id)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.uid)
+        .collect()
+}
+
+/// Catches: an old MelonLoader installer row (Nexus 1196, staged as a mod
+/// like the user's mod 219) not being reported; an optional file from the
+/// same Nexus page (installed as a mod on purpose) being reported; a row
+/// whose staging folder is gone being reported; removal touching rows that
+/// were not reported.
+#[test]
+fn mod_rows_with_a_loaders_nexus_id_are_junk_only_when_staged_as_an_installer() {
+    let mut p = schedule1();
+    let installer = junk_candidate(
+        &p,
+        "MelonLoader-219",
+        1196,
+        Some(&["MelonLoader.Installer.EXE"]),
+    );
+    let ids = [
+        installer,
+        junk_candidate(&p, "Extras", 1196, Some(&["Mods/Extras.dll"])),
+        junk_candidate(&p, "Gone", 1196, None),
+        junk_candidate(&p, "NestedExe", 1196, Some(&["tools/Helper.exe"])),
+        junk_candidate(&p, "SomeMod", 55, Some(&["Setup.msi"])),
+    ];
+    let left = junk_roundtrip(&mut p, &ids, &[installer], "melonloader");
+    assert_eq!(left, ["Extras", "Gone", "NestedExe", "SomeMod"]);
+}
+
+/// Catches: the same rule not applying to SMAPI (Nexus 2400 on Stardew).
+#[test]
+fn smapi_nexus_id_rows_are_junk_only_when_staged_as_an_installer() {
+    let mut p = stardew();
+    let installer = junk_candidate(&p, "SMAPI-installer", 2400, Some(&["SMAPI.Installer.msi"]));
+    let ids = [
+        installer,
+        junk_candidate(&p, "SMAPI-extra", 2400, Some(&["ExtraMod/manifest.json"])),
+        junk_candidate(&p, "Other", 1915, Some(&["Other.exe"])),
+    ];
+    let left = junk_roundtrip(&mut p, &ids, &[installer], "smapi");
+    assert_eq!(left, ["SMAPI-extra", "Other"]);
 }

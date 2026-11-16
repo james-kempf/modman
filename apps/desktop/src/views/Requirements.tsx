@@ -1,8 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Requirements of the enabled mods: missing / disabled / external tools,
-// with install, enable and acknowledge actions.
+// with install (Nexus mods and managed loaders), enable and acknowledge actions.
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { errMsg } from "../app/bridge";
+import { isCancelError } from "../app/jobs";
+import { assertNever } from "../app/never";
+import { useUi } from "../app/store";
+import { cancelledMsg, showMsg } from "../app/toast";
 import { useActiveGame } from "../app/queries";
 import { useBusy, useRun } from "../app/run";
 import {
@@ -27,9 +33,10 @@ import {
   cx,
 } from "../components/ui";
 import * as ipc from "../ipc/commands";
-import type { ReqRow, ReqStatus } from "../ipc/types";
+import type { ReqAction, ReqRow, ReqStatus } from "../ipc/types";
 import { NoGame } from "../components/shell/NoGame";
 import { LoaderCards } from "../components/loaders/LoaderCards";
+import { LoaderErrorNote } from "../components/loaders/LoaderError";
 
 const ORDER: ReqStatus[] = ["missing", "disabled", "external", "gone", "ok"];
 const LABEL: Record<ReqStatus, string> = {
@@ -129,7 +136,7 @@ export function Requirements() {
               >
                 <ul className="rows">
                   {items.map((r) => (
-                    <Row key={r.key} r={r} />
+                    <Row key={r.key} r={r} game={game.id} />
                   ))}
                 </ul>
               </Card>
@@ -183,9 +190,61 @@ function StatusIcon({ r }: { r: ReqRow }) {
 export const installKey = (target: string) => `Install ${target}`;
 const ackKey = (key: string) => `Acknowledge ${key}`;
 
-function Row({ r }: { r: ReqRow }) {
+/** The row's app action, if any; every ReqAction kind must be handled here. */
+function ActionButton({ action, name, game }: { action: ReqAction; name: string; game: string }) {
+  switch (action.kind) {
+    case "install_loader":
+      return <InstallLoader loaderKey={action.loader_key} name={name} game={game} />;
+    default:
+      return assertNever(action.kind);
+  }
+}
+
+/** Opens the loader consent dialog with a fresh install preview: the backend picks the
+ * download source (GitHub, then Nexus); its error stays on the row. */
+function InstallLoader({ loaderKey, name, game }: { loaderKey: string; name: string; game: string }) {
+  const openConsent = useUi((s) => s.openLoaderConsent);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const label = `Install ${name}`;
+  const go = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      openConsent({ game, preview: await ipc.loaderPreview({ op: "install", loaderKey }, game) });
+    } catch (e) {
+      if (isCancelError(errMsg(e))) showMsg("info", cancelledMsg(label));
+      else setError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <Button
+        size="sm"
+        tone="primary"
+        busy={busy}
+        icon={<DownloadSimpleIcon aria-hidden size={14} />}
+        onClick={() => void go()}
+      >
+        {label}
+      </Button>
+      {error !== null && (
+        <div className="basis-full">
+          <LoaderErrorNote error={error} handlers={{ retry: () => void go() }} />
+        </div>
+      )}
+    </>
+  );
+}
+
+function Row({ r, game }: { r: ReqRow; game: string }) {
   const run = useRun();
   const target = r.status === "missing" ? installTarget(r.hint) : null;
+  // The backend sets action only on unresolved rows; guard anyway so a satisfied row offers nothing.
+  const action = r.status === "ok" ? null : r.action;
   const installing = useBusy(installKey(target ?? ""));
   const acking = useBusy(ackKey(r.key));
   const bad = r.status === "missing";
@@ -227,8 +286,9 @@ function Row({ r }: { r: ReqRow }) {
               {u}
             </p>
           ))}
-          {(target || r.status === "external") && (
+          {(target || action || r.status === "external") && (
             <div className="mt-4 flex flex-wrap gap-2">
+              {action && <ActionButton action={action} name={r.name} game={game} />}
               {target && (
                 <Button
                   size="sm"

@@ -10,7 +10,7 @@ use std::path::Path;
 use rusqlite::{params, Connection};
 
 use crate::games::GameConfig;
-use crate::loaders::{GameCtx, LoaderRegistry, LoaderStatus};
+use crate::loaders::{GameCtx, LoaderDef, LoaderRegistry, LoaderStatus};
 use crate::mods::{list_mods, ModRecord, ModsError};
 use crate::nexus::cached_requirements;
 use crate::store::{self, Store};
@@ -138,6 +138,10 @@ pub fn tool_for(text: &str) -> Option<&'static Tool> {
     TOOLS.iter().find(|tool| tool_matches(tool.key, &t, &w))
 }
 
+fn tool_by_key(key: &str) -> Option<&'static Tool> {
+    TOOLS.iter().find(|t| t.key == key)
+}
+
 /// Scheme, `www.` and fragments stripped; GitHub cut to owner/repo.
 pub fn norm_url(u: &str) -> String {
     let mut u = u.trim().to_lowercase();
@@ -211,6 +215,14 @@ impl ReqStatus {
     }
 }
 
+/// What the app can do to resolve a row, besides the CLI `hint`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ReqAction {
+    /// Install the current game's managed loader `loader_key`.
+    InstallLoader { loader_key: String },
+}
+
 /// One requirement group (`deps --json` row).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ReqRow {
@@ -225,6 +237,8 @@ pub struct ReqRow {
     pub by: Vec<String>,
     pub detail: String,
     pub acked: bool,
+    /// Set on unresolved rows the app can fix itself (`hint` is then empty).
+    pub action: Option<ReqAction>,
 }
 
 /// A collection-level external resource.
@@ -252,6 +266,8 @@ struct Group {
     urls: Vec<String>,
     by: Vec<String>,
     tool: Option<&'static Tool>,
+    /// Key of the game's managed loader this group is.
+    loader: Option<String>,
 }
 
 fn add_url(g: &mut Group, url: &str) {
@@ -387,51 +403,104 @@ fn scan(
     }
 }
 
-/// State of every managed loader among `tools` (built-in and user
-/// definitions in `definitions_dir`, plus the plugins Vessel ships for the
-/// game). Failures count as unknown.
-fn loader_states<'a>(
-    store: &Store,
-    game: &GameConfig,
-    definitions_dir: Option<&Path>,
-    tools: impl Iterator<Item = &'a Tool>,
-) -> HashMap<&'static str, LoaderStatus> {
-    let mut out = HashMap::new();
-    let Some(folder) = game.folder.clone() else {
-        return out;
-    };
-    let defs = match crate::games::definitions::load_definitions(definitions_dir) {
-        Ok(d) => d,
-        Err(e) => {
-            tracing::debug!(error = %e, "game definitions unavailable for loader status");
-            return out;
-        }
-    };
-    let def = game
-        .definition
-        .as_deref()
-        .and_then(|d| crate::games::definitions::find_definition(&defs, d));
-    let Ok(registry) = LoaderRegistry::for_game(def, game.definition.as_deref()) else {
-        return out;
-    };
-    let ctx = GameCtx {
-        game_id: game.id.clone(),
-        nexus_domain: game.nexus_domain.clone(),
-        game_dir: folder,
-        steam_appid: game.appid,
-        occupied: Vec::new(),
-    };
-    for t in tools {
-        if let Some(p) = registry.get(t.key) {
-            match p.detect(&ctx, store) {
-                Ok(st) => {
-                    out.insert(t.key, st);
-                }
-                Err(e) => tracing::debug!(loader = t.key, error = %e, "loader status unavailable"),
+/// Whether normalized `url` is `alias` or a page under it.
+fn url_alias_matches(alias: &str, url: &str) -> bool {
+    !alias.is_empty()
+        && (url == alias || url.strip_prefix(alias).is_some_and(|r| r.starts_with('/')))
+}
+
+/// The declared loader a requirement refers to by its Nexus id (on the
+/// game's domain), an alias URL or an alias name.
+fn declared_loader<'a>(
+    defs: &'a [LoaderDef],
+    name: &str,
+    url: &str,
+    nexus_id: Option<&str>,
+) -> Option<&'a LoaderDef> {
+    let n = norm_url(url);
+    let name = name.trim();
+    defs.iter().find(|l| {
+        l.nexus_mod_id
+            .is_some_and(|id| nexus_id == Some(id.to_string().as_str()))
+            || (!n.is_empty() && l.aliases.urls.iter().any(|a| url_alias_matches(a, &n)))
+            || l.aliases.names.iter().any(|a| a.eq_ignore_ascii_case(name))
+    })
+}
+
+/// The loaders of one game: its definition's `[[loaders]]` (built-in or
+/// from `definitions_dir`) plus the plugins Vessel ships for it.
+struct GameLoaders {
+    registry: Option<LoaderRegistry>,
+    defs: Vec<LoaderDef>,
+}
+
+impl GameLoaders {
+    /// Failures leave the game without loaders.
+    fn load(game: &GameConfig, definitions_dir: Option<&Path>) -> Self {
+        let all = match crate::games::definitions::load_definitions(definitions_dir) {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::debug!(error = %e, "game definitions unavailable for loaders");
+                return Self {
+                    registry: None,
+                    defs: Vec::new(),
+                };
             }
+        };
+        let def = game
+            .definition
+            .as_deref()
+            .and_then(|d| crate::games::definitions::find_definition(&all, d));
+        Self {
+            registry: LoaderRegistry::for_game(def, game.definition.as_deref()).ok(),
+            defs: def.map(|d| d.loaders.clone()).unwrap_or_default(),
         }
     }
-    out
+
+    /// `(key, display name)` of the game loader a requirement refers to:
+    /// declared Nexus id or aliases first, then the tool table.
+    fn resolve(&self, name: &str, url: &str, nexus_id: Option<&str>) -> Option<(String, String)> {
+        let registry = self.registry.as_ref()?;
+        if let Some(l) = declared_loader(&self.defs, name, url, nexus_id) {
+            let shown = tool_by_key(&l.key).map_or(l.name.as_str(), |t| t.name);
+            return Some((l.key.clone(), shown.to_string()));
+        }
+        tool_for(&format!("{name} {url}"))
+            .filter(|t| registry.get(t.key).is_some())
+            .map(|t| (t.key.to_string(), t.name.to_string()))
+    }
+
+    /// State of each loader in `keys` (install records and the plugin's
+    /// drift check). Failures count as unknown.
+    fn states<'a>(
+        &self,
+        store: &Store,
+        game: &GameConfig,
+        keys: impl Iterator<Item = &'a str>,
+    ) -> HashMap<String, LoaderStatus> {
+        let mut out = HashMap::new();
+        let (Some(registry), Some(folder)) = (&self.registry, game.folder.clone()) else {
+            return out;
+        };
+        let ctx = GameCtx {
+            game_id: game.id.clone(),
+            nexus_domain: game.nexus_domain.clone(),
+            game_dir: folder,
+            steam_appid: game.appid,
+            occupied: Vec::new(),
+        };
+        for k in keys {
+            if let Some(p) = registry.get(k) {
+                match p.detect(&ctx, store) {
+                    Ok(st) => {
+                        out.insert(k.to_string(), st);
+                    }
+                    Err(e) => tracing::debug!(loader = k, error = %e, "loader status unavailable"),
+                }
+            }
+        }
+        out
+    }
 }
 
 /// Builds the requirement rows for `scope`, from the requirements cache only
@@ -472,25 +541,31 @@ pub fn analyze(
     // Cached requirements and Nexus links are keyed by the Nexus domain; an
     // unlinked game matches none of them.
     let domain = game.nexus_domain.as_deref().unwrap_or_default();
+    let loaders = GameLoaders::load(game, definitions_dir);
     let mut order: Vec<String> = Vec::new();
     let mut groups: HashMap<String, Group> = HashMap::new();
-    let mut group = |key: String, name: &str, tool: Option<&'static Tool>| -> String {
-        let g = groups.entry(key.clone()).or_insert_with(|| {
-            order.push(key.clone());
-            Group {
-                key: key.clone(),
-                name: name.to_string(),
-                nexus: Vec::new(),
-                urls: Vec::new(),
-                by: Vec::new(),
-                tool: None,
+    let mut group =
+        |key: String, name: &str, tool: Option<&'static Tool>, loader: Option<String>| -> String {
+            let g = groups.entry(key.clone()).or_insert_with(|| {
+                order.push(key.clone());
+                Group {
+                    key: key.clone(),
+                    name: name.to_string(),
+                    nexus: Vec::new(),
+                    urls: Vec::new(),
+                    by: Vec::new(),
+                    tool: None,
+                    loader: None,
+                }
+            });
+            if tool.is_some() {
+                g.tool = tool;
             }
-        });
-        if tool.is_some() {
-            g.tool = tool;
-        }
-        key
-    };
+            if loader.is_some() {
+                g.loader = loader;
+            }
+            key
+        };
     let mut avail_cache: HashMap<String, bool> = HashMap::new();
     // (group key, Nexus id, URL, needed by)
     let mut edits: Vec<Edit> = Vec::new();
@@ -517,34 +592,39 @@ pub fn analyze(
             }
             let real_mod = !rmod.is_empty() && rmod != "0";
             let same_game = !ext && real_mod && (rgame.is_empty() || rgame == "0" || rgame == gid);
-            let key = if let Some(t) = tool_for(&format!("{name} {url}")) {
-                group(format!("tool:{}", t.key), t.name, Some(t))
+            let nexus = if same_game {
+                Some(rmod.clone())
+            } else {
+                nexus_url_id(&url, domain)
+            };
+            let key = if let Some((lk, lname)) = loaders.resolve(&name, &url, nexus.as_deref()) {
+                group(format!("tool:{lk}"), &lname, tool_by_key(&lk), Some(lk))
+            } else if let Some(t) = tool_for(&format!("{name} {url}")) {
+                group(format!("tool:{}", t.key), t.name, Some(t), None)
             } else if same_game {
-                group(format!("nexus:{rmod}"), &name, None)
+                group(format!("nexus:{rmod}"), &name, None, None)
             } else if !ext && real_mod {
-                group(format!("nexus:{rgame}:{rmod}"), &name, None)
+                group(format!("nexus:{rgame}:{rmod}"), &name, None, None)
             } else {
                 let n = norm_url(&url);
                 group(
                     format!("url:{}", if n.is_empty() { name.to_lowercase() } else { n }),
                     &name,
                     None,
+                    None,
                 )
             };
-            let uid = if same_game {
-                None
-            } else {
-                nexus_url_id(&url, domain)
-            };
-            let nexus = if same_game { Some(rmod.clone()) } else { uid };
             let url_add = nexus.is_none().then_some(url);
             edits.push((key, nexus, url_add, Some(m.name.clone())));
         }
     }
     let scope_ids: Vec<i64> = in_scope.iter().map(|m| m.id).collect();
     for e in collection_extras(conn, id, &scope_ids)? {
-        let key = if let Some(t) = tool_for(&format!("{} {}", e.name, e.url)) {
-            group(format!("tool:{}", t.key), t.name, Some(t))
+        let uid = nexus_url_id(&e.url, domain);
+        let key = if let Some((lk, lname)) = loaders.resolve(&e.name, &e.url, uid.as_deref()) {
+            group(format!("tool:{lk}"), &lname, tool_by_key(&lk), Some(lk))
+        } else if let Some(t) = tool_for(&format!("{} {}", e.name, e.url)) {
+            group(format!("tool:{}", t.key), t.name, Some(t), None)
         } else {
             let n = norm_url(&e.url);
             group(
@@ -558,9 +638,9 @@ pub fn analyze(
                 ),
                 &e.name,
                 None,
+                None,
             )
         };
-        let uid = nexus_url_id(&e.url, domain);
         let url_add = uid.is_none().then(|| e.url.clone());
         edits.push((key, uid, url_add, Some(e.by.clone())));
     }
@@ -583,10 +663,16 @@ pub fn analyze(
 
     // Tool files: game folder (minus files vessel deployed), then enabled mods.
     let mut wanted: HashMap<String, String> = HashMap::new();
+    // Files a regular mod ships never satisfy a game loader: only its
+    // install record, detection or the game folder do.
+    let mut wanted_in_mods: HashMap<String, String> = HashMap::new();
     for g in groups.values() {
         if let Some(t) = g.tool {
             for f in t.files {
                 wanted.insert((*f).to_string(), g.key.clone());
+                if g.loader.is_none() {
+                    wanted_in_mods.insert((*f).to_string(), g.key.clone());
+                }
             }
         }
     }
@@ -608,7 +694,7 @@ pub fn analyze(
             if let Some(dir) = &m.staging_dir {
                 scan(
                     dir,
-                    &wanted,
+                    &wanted_in_mods,
                     &BTreeSet::new(),
                     Some(&format!("provided by \"{}\"", m.name)),
                     &mut found,
@@ -619,11 +705,10 @@ pub fn analyze(
 
     // Loaders Vessel manages report their own state (loader_installs and
     // the plugin's drift check); anything else falls back to the file scan.
-    let loader_state = loader_states(
+    let loader_state = loaders.states(
         store,
         game,
-        definitions_dir,
-        groups.values().filter_map(|g| g.tool),
+        groups.values().filter_map(|g| g.loader.as_deref()),
     );
     let acked = acks(conn, id)?;
     let mut available = |id: &str| -> bool {
@@ -638,11 +723,13 @@ pub fn analyze(
     let mut rows = Vec::new();
     for key in order {
         let g = &groups[&key];
-        let have = g.nexus.iter().find_map(|i| enabled.get(i));
-        let off = g.nexus.iter().find_map(|i| disabled.get(i));
+        // A mod row carrying a loader's Nexus id is not the loader install.
+        let mod_ids: &[String] = if g.loader.is_some() { &[] } else { &g.nexus };
+        let have = mod_ids.iter().find_map(|i| enabled.get(i));
+        let off = mod_ids.iter().find_map(|i| disabled.get(i));
         let mut hint = String::new();
         let mut detail = String::new();
-        let loader = g.tool.and_then(|t| loader_state.get(t.key));
+        let loader = g.loader.as_ref().and_then(|k| loader_state.get(k));
         let ver = |v: &Option<String>| v.as_ref().map_or(String::new(), |v| format!(" {v}"));
         let status = if let Some(LoaderStatus::Installed { version, .. }) = loader {
             detail = format!("installed by Vessel:{}", ver(version))
@@ -673,7 +760,9 @@ pub fn analyze(
         } else {
             let live: Vec<&String> = g.nexus.iter().filter(|i| available(i)).collect();
             let gone: Vec<&String> = g.nexus.iter().filter(|i| !available(i)).collect();
-            let st = if let Some(l) = live.first() {
+            let st = if g.loader.is_some() {
+                ReqStatus::Missing
+            } else if let Some(l) = live.first() {
                 hint = format!("install {l}");
                 ReqStatus::Missing
             } else if g.tool.is_some() {
@@ -684,7 +773,11 @@ pub fn analyze(
                 detail = "no longer on Nexus".into();
                 ReqStatus::Gone
             };
-            if let (Some(gid), true, Some(_)) = (gone.first(), live.is_empty(), g.tool) {
+            if let (Some(gid), true, true) = (
+                gone.first(),
+                live.is_empty(),
+                g.tool.is_some() || g.loader.is_some(),
+            ) {
                 detail = format!("its Nexus page (mod {gid}) is no longer available");
             }
             st
@@ -698,6 +791,12 @@ pub fn analyze(
             by: g.by.clone(),
             detail,
             acked: acked.contains(&g.key),
+            action: match (&g.loader, status) {
+                (_, ReqStatus::Ok) | (None, _) => None,
+                (Some(k), _) => Some(ReqAction::InstallLoader {
+                    loader_key: k.clone(),
+                }),
+            },
         });
     }
     rows.sort_by_key(|r| (r.status, r.name.to_lowercase()));
@@ -941,6 +1040,196 @@ mod tests {
         assert_eq!(
             (with_user.status, with_user.detail.as_str()),
             (ReqStatus::Ok, "installed by Vessel: 5.4.23")
+        );
+    }
+
+    const MELON_DEF: &str = r#"
+domain = "melongame"
+name = "Melon Game"
+profile = "melonloader"
+
+[[loaders]]
+key = "melonloader"
+name = "MelonLoader"
+nexus_mod_id = 1196
+required_paths = ["version.dll", "MelonLoader"]
+
+[loaders.aliases]
+urls = ["https://melonwiki.xyz/#", "https://github.com/LavaGang/MelonLoader/releases"]
+names = ["Melon Loader"]
+"#;
+
+    /// A melongame install (user definition in the returned dir) whose
+    /// mod 1 needs the requirements in `reqs`.
+    fn melon_game(reqs: &str) -> (tempfile::TempDir, tempfile::TempDir, Store, GameConfig) {
+        let defs = tempfile::tempdir().unwrap();
+        std::fs::write(defs.path().join("melongame.toml"), MELON_DEF).unwrap();
+        let game_dir = tempfile::tempdir().unwrap();
+        let s = Store::open_in_memory().unwrap();
+        let mut g = GameConfig::custom("melongame");
+        g.nexus_game_id = Some(9999);
+        g.folder = Some(game_dir.path().to_path_buf());
+        g.definition = Some("melongame".into());
+        games::save_game(s.conn(), &g).unwrap();
+        add(&s, "melongame", "Mod-1-1", "Some Mod", Some(1));
+        seed_reqs(&s, "melongame", 1, reqs, Some(true));
+        (defs, game_dir, s, g)
+    }
+
+    fn melon_action() -> Option<ReqAction> {
+        Some(ReqAction::InstallLoader {
+            loader_key: "melonloader".into(),
+        })
+    }
+
+    /// Catches: an alias or declared Nexus id being ignored, so off-site
+    /// and Nexus loader requirements show a dead link instead of Install.
+    #[test]
+    fn loader_requirements_resolve_to_install_loader() {
+        let cases = [
+            // Alias URLs (names chosen so the tool table cannot match).
+            r#"{"modName":"Required framework","externalRequirement":true,"url":"https://melonwiki.xyz/#"}"#,
+            r#"{"modName":"Framework","externalRequirement":true,"url":"https://github.com/LavaGang/MelonLoader/releases"}"#,
+            // Declared Nexus id on the game's domain.
+            r#"{"modId":1196,"modName":"ML","gameId":9999}"#,
+            // Tool table.
+            r#"{"modName":"Melon Loader","externalRequirement":true,"url":"https://example.org/x"}"#,
+        ];
+        for req in cases {
+            let (defs, _gd, s, g) = melon_game(&format!("[{req}]"));
+            let rows = analyze(&s, &g, &Scope::default(), Some(defs.path())).unwrap();
+            let r: Vec<_> = rows
+                .iter()
+                .map(|r| (r.key.as_str(), r.status, r.hint.as_str(), r.action.clone()))
+                .collect();
+            assert_eq!(
+                r,
+                [("tool:melonloader", ReqStatus::Missing, "", melon_action())],
+                "{req}"
+            );
+        }
+    }
+
+    /// Catches: alias matching that relies on the tool table, or matches
+    /// unrelated pages of the same host prefix.
+    #[test]
+    fn declared_loader_matches_aliases_and_nexus_id_only() {
+        let defs = games::definitions::parse_definition(MELON_DEF, "test")
+            .unwrap()
+            .loaders;
+        let k = |name: &str, url: &str, id: Option<&str>| {
+            declared_loader(&defs, name, url, id).map(|l| l.key.as_str())
+        };
+        assert_eq!(
+            k("x", "https://www.melonwiki.xyz/#/", None),
+            Some("melonloader")
+        );
+        assert_eq!(
+            k("x", "https://melonwiki.xyz/guide", None),
+            Some("melonloader")
+        );
+        assert_eq!(k("x", "https://melonwiki.xyz.evil.com", None), None);
+        assert_eq!(
+            k(
+                "x",
+                "https://github.com/LavaGang/MelonLoader/releases/tag/v0.6.6",
+                None
+            ),
+            Some("melonloader")
+        );
+        assert_eq!(k("x", "https://github.com/LavaGang/Other", None), None);
+        assert_eq!(k(" melon loader ", "", None), Some("melonloader"));
+        assert_eq!(k("x", "", Some("1196")), Some("melonloader"));
+        assert_eq!(k("x", "", Some("11960")), None);
+    }
+
+    /// Catches: InstallLoader offered for a tool the game has no loader for.
+    #[test]
+    fn tool_without_a_game_loader_keeps_its_hint() {
+        let (defs, _gd, s, g) =
+            melon_game(r#"[{"modId":55,"modName":"BepInEx Pack","gameId":9999}]"#);
+        let rows = analyze(&s, &g, &Scope::default(), Some(defs.path())).unwrap();
+        let r = rows.iter().find(|r| r.key == "tool:bepinex").unwrap();
+        assert_eq!(
+            (r.status, r.hint.as_str(), &r.action),
+            (ReqStatus::Missing, "install 55", &None)
+        );
+    }
+
+    /// Catches: a regular mod row with the loader's Nexus id (an installer
+    /// download, or a mod shipping the loader's DLL) counting as the
+    /// loader install.
+    #[test]
+    fn loader_counts_installed_only_from_its_install_record() {
+        use crate::loaders::records::{InstallStatus, NewLoaderInstall, Strategy};
+        let (defs, gd, s, g) =
+            melon_game(r#"[{"modId":1196,"modName":"MelonLoader","gameId":9999}]"#);
+        let staged = tempfile::tempdir().unwrap();
+        std::fs::write(staged.path().join("MelonLoader.dll"), "x").unwrap();
+        add(&s, "melongame", "ML-1196-1", "MelonLoader", Some(1196));
+        s.conn()
+            .execute(
+                "UPDATE mods SET staging_dir = ?1 WHERE uid = 'ML-1196-1'",
+                [staged.path().display().to_string()],
+            )
+            .unwrap();
+        let row = || {
+            analyze(&s, &g, &Scope::default(), Some(defs.path()))
+                .unwrap()
+                .into_iter()
+                .find(|r| r.key == "tool:melonloader")
+                .unwrap()
+        };
+        let before = row();
+        assert_eq!(
+            (before.status, before.hint.as_str(), before.action),
+            (ReqStatus::Missing, "", melon_action())
+        );
+        s.insert_loader_install(&NewLoaderInstall {
+            game_id: "melongame".into(),
+            game_dir: gd.path().display().to_string(),
+            loader_key: "melonloader".into(),
+            version: Some("0.6.6".into()),
+            runtime: "proton".into(),
+            strategy: Strategy::Deploy,
+            status: InstallStatus::Installed,
+            nexus_mod_id: None,
+            nexus_file_id: None,
+            origin: "github".into(),
+            archive_sha256: None,
+            archive_path: None,
+            vanilla_sha256: None,
+            game_build: None,
+        })
+        .unwrap();
+        let after = row();
+        assert_eq!(
+            (after.status, after.detail.as_str(), after.action),
+            (ReqStatus::Ok, "installed by Vessel: 0.6.6", None)
+        );
+    }
+
+    /// Catches: the IPC/JSON shape drifting from what the desktop app reads.
+    #[test]
+    fn req_action_serializes_tagged_and_absent_action_as_null() {
+        assert_eq!(
+            serde_json::to_value(melon_action().unwrap()).unwrap(),
+            serde_json::json!({"kind": "install_loader", "loader_key": "melonloader"})
+        );
+        let row = ReqRow {
+            status: ReqStatus::External,
+            key: "url:x".into(),
+            name: "x".into(),
+            hint: String::new(),
+            urls: vec![],
+            by: vec![],
+            detail: String::new(),
+            acked: false,
+            action: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&row).unwrap()["action"],
+            serde_json::Value::Null
         );
     }
 }

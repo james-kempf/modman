@@ -126,8 +126,8 @@ describe("CT1 D03/D04 double activation", () => {
   });
 
   const deps = () => [
-    { status: "missing", key: "skse", name: "SKSE64", hint: "install 30379", urls: [], by: [], detail: "", acked: false },
-    { status: "external", key: "ext", name: "Loader", hint: "", urls: [], by: [], detail: "", acked: false },
+    { status: "missing", key: "skse", name: "SKSE64", hint: "install 30379", urls: [], by: [], detail: "", acked: false, action: null },
+    { status: "external", key: "ext", name: "Loader", hint: "", urls: [], by: [], detail: "", acked: false, action: null },
   ];
 
   // Fails when Requirements ack and Install can be activated twice while the first call runs.
@@ -346,7 +346,7 @@ describe("CT1 D08/D09/D11/D18 layout guards", () => {
   it("unbroken text wraps in requirement rows, config labels and dialog titles", async () => {
     const U = "y".repeat(120);
     await open("requirements", {
-      deps: () => [{ status: "external", key: "k", name: U, hint: "", urls: [], by: [U], detail: U, acked: false }],
+      deps: () => [{ status: "external", key: "k", name: U, hint: "", urls: [], by: [U], detail: U, acked: false, action: null }],
     });
     expect((await screen.findByRole("heading", { level: 3, name: U })).className).toMatch(/wrap-anywhere/);
     expect(screen.getByText(`Needed by ${U}`).className).toMatch(/wrap-anywhere/);
@@ -463,7 +463,7 @@ describe("CT1 D16/D17 job labels and cancellation", () => {
   // D17: fails when a cancelled FOMOD wizard is shown as a failed job / error notice.
   it("a cancelled job shows a neutral Cancelled state, not an error", async () => {
     const { t, user } = await open("requirements", {
-      deps: () => [{ status: "missing", key: "skse", name: "SKSE64", hint: "install 30379", urls: [], by: [], detail: "", acked: false }],
+      deps: () => [{ status: "missing", key: "skse", name: "SKSE64", hint: "install 30379", urls: [], by: [], detail: "", acked: false, action: null }],
       install: () => {
         throw { message: "FOMOD installer cancelled" };
       },

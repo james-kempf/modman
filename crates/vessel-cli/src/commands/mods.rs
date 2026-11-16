@@ -12,7 +12,7 @@ use vessel_core::deploy;
 use vessel_core::fomod::FomodChoices;
 use vessel_core::games::GameConfig;
 use vessel_core::mods;
-use vessel_core::requirements::{self, ReqRow, Scope};
+use vessel_core::requirements::{self, ReqAction, ReqRow, Scope};
 
 use crate::context::Ctx;
 use crate::nexus as nx;
@@ -496,6 +496,17 @@ pub fn conflicts(ctx: &mut Ctx, args: ConflictsArgs) -> Result<()> {
     Ok(())
 }
 
+/// Same shape as `ReqAction`'s serde form.
+fn action_json(a: Option<&ReqAction>) -> String {
+    match a {
+        None => "null".into(),
+        Some(ReqAction::InstallLoader { loader_key }) => format!(
+            "{{\"kind\":\"install_loader\",\"loader_key\":{}}}",
+            json_str(loader_key)
+        ),
+    }
+}
+
 fn rows_json(rows: &[ReqRow]) -> String {
     let arr = |v: &[String]| {
         format!(
@@ -507,7 +518,7 @@ fn rows_json(rows: &[ReqRow]) -> String {
         .iter()
         .map(|r| {
             format!(
-                "{{\"status\":{},\"key\":{},\"name\":{},\"hint\":{},\"urls\":{},\"by\":{},\"detail\":{},\"acked\":{}}}",
+                "{{\"status\":{},\"key\":{},\"name\":{},\"hint\":{},\"urls\":{},\"by\":{},\"detail\":{},\"acked\":{},\"action\":{}}}",
                 json_str(r.status.as_str()),
                 json_str(&r.key),
                 json_str(&r.name),
@@ -515,7 +526,8 @@ fn rows_json(rows: &[ReqRow]) -> String {
                 arr(&r.urls),
                 arr(&r.by),
                 json_str(&r.detail),
-                r.acked
+                r.acked,
+                action_json(r.action.as_ref())
             )
         })
         .collect();
@@ -803,6 +815,36 @@ mod tests {
     fn epoch_formats_as_utc_date() {
         assert_eq!(fmt_time(0), "1970-01-01 00:00 UTC");
         assert_eq!(fmt_time(1_700_000_000), "2023-11-14 22:13 UTC");
+    }
+
+    /// Catches: the hand-written `deps --json` drifting from the serde
+    /// shape of `ReqRow` (pinned in `requirements` tests).
+    #[test]
+    fn rows_json_matches_serde_shape() {
+        let row = |action| ReqRow {
+            status: requirements::ReqStatus::Missing,
+            key: "tool:melonloader".into(),
+            name: "MelonLoader".into(),
+            hint: String::new(),
+            urls: vec!["https://melonwiki.xyz/".into()],
+            by: vec!["Some \"Mod\"".into()],
+            detail: String::new(),
+            acked: false,
+            action,
+        };
+        let rows = [
+            row(Some(ReqAction::InstallLoader {
+                loader_key: "melonloader".into(),
+            })),
+            row(None),
+        ];
+        let base = r#""status":"missing","key":"tool:melonloader","name":"MelonLoader","hint":"","urls":["https://melonwiki.xyz/"],"by":["Some \"Mod\""],"detail":"","acked":false"#;
+        assert_eq!(
+            rows_json(&rows),
+            format!(
+                r#"[{{{base},"action":{{"kind":"install_loader","loader_key":"melonloader"}}}},{{{base},"action":null}}]"#
+            )
+        );
     }
 }
 

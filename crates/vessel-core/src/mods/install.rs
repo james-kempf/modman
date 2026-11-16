@@ -16,6 +16,7 @@ use crate::fomod::{
     self, FomodChoices, FomodMode, FomodResolver, FomodRun, ResolvedMode, Selection,
 };
 use crate::games::GameConfig;
+use crate::loaders::Claim;
 use crate::staging::{
     normalize_layout, sanitize_name, staged_files, LayoutOptions, LayoutOutcome, LayoutProfile,
     StagedFile, VariantChooser,
@@ -98,14 +99,16 @@ pub fn find_fomod(root: &Path) -> Option<PathBuf> {
         .and_then(|e| e.path().parent()?.parent().map(Path::to_path_buf))
 }
 
-/// Key of the loader that claims the extracted archive at `ext`, if any.
-fn loader_match(
+/// The loader claim on the extracted archive at `ext`, if any: a loader
+/// archive, or a loader's installer to redirect (only when no loader
+/// claims the layout).
+fn loader_claim(
     game: &GameConfig,
     ext: &Path,
     meta: &InstallMeta,
     registry: Option<&crate::loaders::LoaderRegistry>,
-) -> Option<String> {
-    use crate::loaders::{ArchiveProbe, GameCtx, LoaderRegistry};
+) -> Option<Claim> {
+    use crate::loaders::{ArchiveProbe, GameCtx, LoaderMatch, LoaderRegistry};
     let built;
     let registry = match registry {
         Some(r) => r,
@@ -144,12 +147,26 @@ fn loader_match(
         steam_appid: game.appid,
         occupied: Vec::new(),
     };
+    let as_loader = |loader_key: String| {
+        Some(Claim::Loader(LoaderMatch {
+            loader_key,
+            version: None,
+        }))
+    };
     match registry.match_archive(&ctx, &probe) {
-        Ok(m) => m.map(|(p, _)| p.key().to_string()),
+        Ok(Some((p, _))) => return as_loader(p.key().to_string()),
         // Two loaders claim it: still not a mod.
-        Err(crate::loaders::LoaderError::AmbiguousMatch(a, _)) => Some(a),
-        Err(_) => None,
+        Err(crate::loaders::LoaderError::AmbiguousMatch(a, _)) => return as_loader(a),
+        Ok(None) | Err(_) => {}
     }
+    let redirect = registry
+        .keys()
+        .filter_map(|k| registry.get(k))
+        .find_map(|p| match p.claim(&ctx, &probe) {
+            Some(c @ Claim::InstallerRedirect { .. }) => Some(c),
+            Some(Claim::Loader(_)) | None => None,
+        });
+    redirect
 }
 
 /// Removes the work folder however the install ends.
@@ -216,8 +233,17 @@ pub fn install_archive(
     archive::extract(archive_path, &ext)?;
     // Loader archives never become mods (staging them under Mods/ is how
     // SMAPI's installer ended up as a broken "mod").
-    if let Some(loader_key) = loader_match(game, &ext, meta, hooks.loaders) {
-        return Err(ModsError::LoaderArchive { loader_key });
+    // A loader's Windows installer is never staged or run either.
+    match loader_claim(game, &ext, meta, hooks.loaders) {
+        Some(Claim::Loader(m)) => {
+            return Err(ModsError::LoaderArchive {
+                loader_key: m.loader_key,
+            })
+        }
+        Some(Claim::InstallerRedirect { loader_key }) => {
+            return Err(ModsError::LoaderInstaller { loader_key })
+        }
+        None => {}
     }
     let froot = find_fomod(&ext);
     let fomod_found = froot.is_some();

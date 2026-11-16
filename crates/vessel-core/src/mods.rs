@@ -57,6 +57,11 @@ pub enum ModsError {
     /// the game folder through the loader flow, never as a mod.
     #[error("this archive is the '{loader_key}' mod loader; install it from Requirements (loaders go into the game folder, not into Mods)")]
     LoaderArchive { loader_key: String },
+    /// The archive is a loader's Windows installer from its Nexus page
+    /// (redirect flag: the caller offers the loader's GitHub install). It
+    /// is never staged, deployed or run.
+    #[error("this archive is the Windows installer of the '{loader_key}' mod loader; Vessel never runs it and installs the loader from its GitHub release instead (Requirements)")]
+    LoaderInstaller { loader_key: String },
     #[error(transparent)]
     Archive(#[from] ArchiveError),
     #[error(transparent)]

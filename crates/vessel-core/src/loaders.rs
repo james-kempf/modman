@@ -10,6 +10,7 @@
 
 mod codes;
 pub mod declarative;
+pub mod github;
 pub mod glob;
 pub mod housekeeping;
 pub mod launch;
@@ -143,6 +144,12 @@ pub trait LoaderPlugin: Send + Sync {
 
     /// Claims an archive, or `None` when it is not this loader's.
     fn matches(&self, game: &GameCtx, probe: &ArchiveProbe) -> Option<LoaderMatch>;
+
+    /// [`Self::matches`] plus any claim a plugin makes on archives that are
+    /// not its layout (see [`Claim::InstallerRedirect`]).
+    fn claim(&self, game: &GameCtx, probe: &ArchiveProbe) -> Option<Claim> {
+        self.matches(game, probe).map(Claim::Loader)
+    }
 
     /// Provenance verdict for a matched archive.
     fn provenance(&self, game: &GameCtx, m: &LoaderMatch, origin: &DownloadOrigin) -> Provenance;

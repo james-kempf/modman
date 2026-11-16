@@ -516,6 +516,7 @@ mod tests {
             by: vec!["A".into()],
             detail: String::new(),
             acked: false,
+            action: None,
         }
     }
 

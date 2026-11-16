@@ -499,13 +499,17 @@ export interface ReqRow {
   /** Ack key. */
   key: string;
   name: string;
-  /** vessel arguments that fix it, e.g. "install 123". */
+  /** vessel arguments that fix it, e.g. "install 123"; empty when `action` is set. */
   hint: string;
   urls: string[];
   by: string[];
   detail: string;
   acked: boolean;
+  /** What the app can do to resolve an unresolved row (null when none). */
+  action: ReqAction | null;
 }
+/** Mirrors requirements::ReqAction (serde tag "kind", snake_case). */
+export type ReqAction = { kind: "install_loader"; loader_key: string };
 
 export interface Update {
   mod: ModRecord;

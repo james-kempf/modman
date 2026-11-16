@@ -35,6 +35,8 @@ use super::R;
 use crate::deploy::confine;
 use crate::deploy::place::{hex, sha256_file};
 use crate::games::{definitions, steam, GameConfig};
+use crate::loaders::declarative::GithubSource;
+use crate::loaders::github::FetchedAsset;
 use crate::loaders::launch::compose;
 use crate::loaders::records::{
     FileChange, InstallStatus, LoaderFile, LoaderInstall, NewLoaderInstall, NewLoaderRun, RunPhase,
@@ -81,6 +83,9 @@ pub struct LoaderEnv {
     /// cleaning up, as a crash would.
     #[doc(hidden)]
     pub crash_at: Option<RunPhase>,
+    /// App paths (Nexus key, settings) for downloading a loader from its
+    /// Nexus page when no archive is given; `None` disables that source.
+    pub paths: Option<Paths>,
 }
 
 impl LoaderEnv {
@@ -99,6 +104,7 @@ impl LoaderEnv {
             preview_ttl: PREVIEW_TTL,
             forced_runtime: None,
             crash_at: None,
+            paths: Some(paths.clone()),
         }
     }
 
@@ -329,6 +335,168 @@ pub fn registry_for(env: &LoaderEnv, game: &GameConfig) -> R<LoaderRegistry> {
         .as_deref()
         .and_then(|d| definitions::find_definition(&defs, d));
     Ok(LoaderRegistry::for_game(def, game.definition.as_deref())?)
+}
+
+/// Where an archive-less install, upgrade or adopt gets the loader.
+enum LoaderSource {
+    /// `[loaders.github]` (preferred: no account needed).
+    Github(GithubSource),
+    /// The loader's Nexus mod on the game's domain.
+    Nexus {
+        domain: String,
+        mod_id: u64,
+    },
+    None,
+}
+
+/// Display name and download source of loader `key`.
+fn loader_source(env: &LoaderEnv, game: &GameConfig, key: &str) -> R<(String, LoaderSource)> {
+    let defs = definitions::load_definitions(env.definitions_dir.as_deref())?;
+    let def = game
+        .definition
+        .as_deref()
+        .and_then(|d| definitions::find_definition(&defs, d));
+    let (name, nexus_mod_id) = loader_identity(def, key);
+    let github = def
+        .and_then(|d| d.loaders.iter().find(|l| l.key == key))
+        .and_then(|l| l.github.clone());
+    let source = match (github, nexus_mod_id, game.nexus_domain.as_deref()) {
+        (Some(gh), _, _) => LoaderSource::Github(gh),
+        (None, Some(mod_id), Some(domain)) => LoaderSource::Nexus {
+            domain: domain.to_string(),
+            mod_id,
+        },
+        _ => LoaderSource::None,
+    };
+    Ok((name, source))
+}
+
+/// Downloads the primary file of the loader's Nexus mod into a private
+/// folder of preview `id` (the same choice `vessel install <id>` makes
+/// without prompting). Needs a Nexus login; direct downloads need Premium.
+fn fetch_nexus(
+    env: &LoaderEnv,
+    store: &Store,
+    id: &str,
+    name: &str,
+    domain: &str,
+    mod_id: u64,
+) -> R<(PathBuf, PathBuf, DownloadOrigin)> {
+    use super::nexus as nx;
+    let paths = env
+        .paths
+        .as_ref()
+        .ok_or_else(|| msg(format!("Cannot reach Nexus Mods to download {name}.")))?;
+    let nexus = nx::require(paths, store)?;
+    let files = nexus.run(nexus.client.mod_files(domain, mod_id))??;
+    let (rows, def) = super::install::file_rows(&files.files);
+    let file = rows.get(def).ok_or_else(|| {
+        msg(format!(
+            "{name}'s Nexus page (mod {mod_id}) has no downloadable files."
+        ))
+    })?;
+    let premium = nx::is_premium(store, &nexus)?;
+    let cdn = crate::config::Config::load(store, paths)?.cdn;
+    let uri = match nexus.run(nexus.client.download_uri(
+        domain,
+        mod_id,
+        file.file_id,
+        premium,
+        None,
+        cdn.as_deref(),
+    ))? {
+        Ok(u) => u,
+        Err(crate::nexus::NexusError::NxmKeyRequired) => {
+            return Err(msg(format!(
+                "{name} is downloaded from Nexus Mods, which allows direct downloads only \
+                 with Premium. Open https://www.nexusmods.com/{domain}/mods/{mod_id}?tab=files \
+                 and use \"Mod Manager Download\"; Vessel then offers to install {name}."
+            )))
+        }
+        Err(e) => return Err(e.into()),
+    };
+    let file_name = file
+        .file_name
+        .as_deref()
+        .map(crate::staging::sanitize_name)
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| format!("{mod_id}-{}.zip", file.file_id));
+    let dir = env.dir("downloads").join(id);
+    mkdir_private(&dir)?;
+    let fetched = (|| -> R<crate::download::Fetched> {
+        let fetcher = crate::download::Fetcher::new()?;
+        Ok(nexus.run(fetcher.fetch(crate::download::FetchRequest {
+            url: &uri,
+            dest: &dir.join(&file_name),
+            md5: None,
+            sha256: None,
+            events: None,
+        }))??)
+    })();
+    match fetched {
+        Ok(f) => Ok((
+            dir,
+            f.path,
+            DownloadOrigin::Nexus {
+                domain: domain.to_string(),
+                mod_id,
+                file_id: file.file_id,
+            },
+        )),
+        Err(e) => {
+            let _ = fs::remove_dir_all(&dir);
+            Err(e)
+        }
+    }
+}
+
+#[cfg(test)]
+type FetchFn =
+    dyn Fn(&str, &Glob, &Path) -> Result<FetchedAsset, crate::loaders::github::GithubError>;
+
+#[cfg(test)]
+thread_local! {
+    /// Per-test-thread stand-in for the GitHub fetcher.
+    pub(super) static TEST_GITHUB_FETCH: std::cell::RefCell<Option<Box<FetchFn>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn fetch_latest_asset(repo: &str, asset: &Glob, dest: &Path) -> R<FetchedAsset> {
+    #[cfg(test)]
+    if let Some(r) = TEST_GITHUB_FETCH.with(|f| f.borrow().as_ref().map(|f| f(repo, asset, dest))) {
+        return r.map_err(|e| msg(format!("Cannot download the loader from GitHub: {e}")));
+    }
+    crate::blocking::block_on(crate::loaders::github::fetch_latest_asset(
+        repo, asset, dest,
+    ))
+    .map_err(|e| msg(format!("cannot start the async runtime: {e}")))?
+    .map_err(|e| msg(format!("Cannot download the loader from GitHub: {e}")))
+}
+
+/// Downloads the latest release asset of `gh` into a private folder of
+/// preview `id`. The caller copies it into the archive cache and removes
+/// the folder; nothing here is extracted or run.
+fn fetch_github(env: &LoaderEnv, id: &str, gh: &GithubSource) -> R<(PathBuf, FetchedAsset)> {
+    let dir = env.dir("downloads").join(id);
+    mkdir_private(&dir)?;
+    match fetch_latest_asset(&gh.repo, &gh.asset, &dir) {
+        Ok(f) => Ok((dir, f)),
+        Err(e) => {
+            let _ = fs::remove_dir_all(&dir);
+            Err(e)
+        }
+    }
+}
+
+/// `op` against whether the loader has an active install.
+fn check_op(op: Op, installed: bool, key: &str) -> R<()> {
+    match (op, installed) {
+        (Op::Install | Op::Adopt, true) => Err(LoaderError::AlreadyInstalled(key.into()).into()),
+        (Op::Upgrade | Op::Repair | Op::Uninstall, false) => {
+            Err(LoaderError::NotInstalled(key.into()).into())
+        }
+        _ => Ok(()),
+    }
 }
 
 fn runtime_override(store: &Store, game_id: &str) -> R<Option<String>> {
@@ -592,16 +760,60 @@ fn preview_expecting(
     let mut origin = req.origin.clone();
     let mut matched: Option<LoaderMatch> = None;
 
+    // No archive to install, upgrade or adopt: download the loader, from
+    // its GitHub release if declared, else from its Nexus mod (the
+    // caller's placeholder origin is ignored). The download then takes
+    // the same cache -> extract -> match path as any archive.
+    let mut src = req.archive.clone().map(|a| (a, req.origin.clone()));
+    let mut download_dir = None;
+    let mut release_tag = None;
+    if let (None, Some(key), Op::Install | Op::Upgrade | Op::Adopt) =
+        (&src, req.loader_key.as_deref(), req.op)
+    {
+        if registry.get(key).is_some() {
+            // Before downloading: a wrong op would only waste the quota.
+            check_op(
+                req.op,
+                store.active_loader_install(&game.id, key)?.is_some(),
+                key,
+            )?;
+            let (dir, path, from) = match loader_source(env, &game, key)? {
+                (_, LoaderSource::Github(gh)) => {
+                    let (dir, f) = fetch_github(env, &id, &gh)?;
+                    release_tag = Some(f.version);
+                    (dir, f.path, f.origin)
+                }
+                (name, LoaderSource::Nexus { domain, mod_id }) => {
+                    fetch_nexus(env, store, &id, &name, &domain, mod_id)?
+                }
+                (name, LoaderSource::None) => {
+                    return Err(msg(format!(
+                        "Vessel has no download source for {name}: its game definition names \
+                         neither a GitHub release nor a Nexus mod. Download {name} yourself \
+                         and choose the archive."
+                    )))
+                }
+            };
+            download_dir = Some(dir);
+            src = Some((path, from));
+        }
+    }
+
     // Which loader, and with which archive.
-    let key = if let Some(src) = &req.archive {
-        let (sha, path) = cache_archive(env, src, &req.origin, expected_sha)?;
+    let key = if let Some((src, src_origin)) = &src {
+        let cached = cache_archive(env, src, src_origin, expected_sha);
+        if let Some(d) = &download_dir {
+            let _ = fs::remove_dir_all(d);
+        }
+        let (sha, path) = cached?;
+        origin = src_origin.clone();
         let s = extract_to_scratch(env, &id, &path)?;
         let file_name = src
             .file_name()
             .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-        let probe = probe_of(&s, &file_name, &req.origin);
+        let probe = probe_of(&s, &file_name, src_origin);
         let ctx0 = game_ctx(store, &game, "")?;
-        let Some((plugin, m)) = registry.match_archive(&ctx0, &probe)? else {
+        let Some((plugin, mut m)) = registry.match_archive(&ctx0, &probe)? else {
             return Err(msg(
                 "This archive is not a loader Vessel knows for this game.",
             ));
@@ -612,6 +824,9 @@ fn preview_expecting(
                 plugin.key(),
                 req.loader_key.as_deref().unwrap_or_default()
             )));
+        }
+        if m.version.is_none() {
+            m.version = release_tag;
         }
         archive = Some((sha, path));
         scratch = Some(s);
@@ -626,13 +841,7 @@ fn preview_expecting(
         .get(&key)
         .ok_or_else(|| LoaderError::UnknownLoader(key.clone()))?;
     let install = store.active_loader_install(&game.id, &key)?;
-    match (req.op, &install) {
-        (Op::Install | Op::Adopt, Some(_)) => return Err(LoaderError::AlreadyInstalled(key).into()),
-        (Op::Upgrade | Op::Repair | Op::Uninstall, None) => {
-            return Err(LoaderError::NotInstalled(key).into())
-        }
-        _ => {}
-    }
+    check_op(req.op, install.is_some(), &key)?;
     let ctx = game_ctx(store, &game, &key)?;
     let warnings = preflight(env, &game, &ctx, &rt)?;
 
@@ -1810,8 +2019,12 @@ pub struct LoaderJunk {
 }
 
 /// Mod rows of `game` whose staged files match a loader's archive
-/// signature. A staged path may sit below extra folders, so every suffix
-/// of each path is offered to the loaders.
+/// signature, or whose Nexus mod id is a loader's AND whose staging folder
+/// holds a top-level installer (`*.exe`/`*.msi`, e.g. MelonLoader's Windows
+/// installer staged as a mod). Other files from a loader's Nexus page are
+/// regular mods and are not reported. A staged path may sit
+/// below extra folders, so every suffix of each path is offered to the
+/// loaders.
 pub fn find_loader_junk(cx: &super::Cx<'_>, game: &GameConfig) -> R<Vec<LoaderJunk>> {
     let defs = definitions::load_definitions(Some(&cx.paths.definitions_dir()))?;
     let def = game
@@ -1819,10 +2032,20 @@ pub fn find_loader_junk(cx: &super::Cx<'_>, game: &GameConfig) -> R<Vec<LoaderJu
         .as_deref()
         .and_then(|d| definitions::find_definition(&defs, d));
     let registry = LoaderRegistry::for_game(def, game.definition.as_deref())?;
-    junk_in(cx.store, &registry, game)
+    let ids: Vec<(String, u64)> = registry
+        .keys()
+        .filter_map(|k| loader_identity(def, k).1.map(|id| (k.to_string(), id)))
+        .collect();
+    junk_in(cx.store, &registry, &ids, game)
 }
 
-fn junk_in(store: &Store, registry: &LoaderRegistry, game: &GameConfig) -> R<Vec<LoaderJunk>> {
+/// `nexus_ids`: (loader key, its Nexus mod id on the game's domain).
+fn junk_in(
+    store: &Store,
+    registry: &LoaderRegistry,
+    nexus_ids: &[(String, u64)],
+    game: &GameConfig,
+) -> R<Vec<LoaderJunk>> {
     let ctx = GameCtx {
         game_id: game.id.clone(),
         nexus_domain: game.nexus_domain.clone(),
@@ -1852,10 +2075,25 @@ fn junk_in(store: &Store, registry: &LoaderRegistry, game: &GameConfig) -> R<Vec
             nexus_file_id: m.nexus_file_id,
             entries,
         };
+        let by_id = || {
+            // Optional files from a loader's Nexus page install as ordinary
+            // mods; only a staged installer binary marks the row as junk.
+            if !staged_installer(m.staging_dir.as_deref()) {
+                return None;
+            }
+            let id = m.nexus_mod_id?;
+            nexus_ids
+                .iter()
+                .find(|(_, n)| *n == id)
+                .map(|(k, _)| k.clone())
+        };
         let key = match registry.match_archive(&ctx, &probe) {
             Ok(Some((p, _))) => p.key().to_string(),
             Err(LoaderError::AmbiguousMatch(a, _)) => a,
-            _ => continue,
+            _ => match by_id() {
+                Some(k) => k,
+                None => continue,
+            },
         };
         out.push(LoaderJunk {
             mod_id: m.id,
@@ -1865,6 +2103,21 @@ fn junk_in(store: &Store, registry: &LoaderRegistry, game: &GameConfig) -> R<Vec
         });
     }
     Ok(out)
+}
+
+/// Whether `dir` (a mod's staging folder) holds a top-level `*.exe` or
+/// `*.msi` file, i.e. a loader installer download staged as a mod. A missing
+/// or unreadable folder is not evidence, so it reports false.
+fn staged_installer(dir: Option<&Path>) -> bool {
+    let Some(Ok(rd)) = dir.map(fs::read_dir) else {
+        return false;
+    };
+    rd.flatten().any(|e| {
+        let name = e.file_name();
+        let lower = name.to_string_lossy().to_ascii_lowercase();
+        (lower.ends_with(".exe") || lower.ends_with(".msi"))
+            && e.file_type().is_ok_and(|t| t.is_file())
+    })
 }
 
 /// Removes loader junk rows through the normal mod-removal path: purge the

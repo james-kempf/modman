@@ -338,8 +338,15 @@ fn game_add_preset_then_list_info_use() {
 #[test]
 fn game_add_experimental_preset_warns() {
     let env = Env::new();
-    let dir = env.game_dir("cp");
-    env.run(&["-y", "game", "add", "cyberpunk2077", dir.to_str().unwrap()])
+    // Whichever built-in is still experimental, so promoting a game to
+    // tested does not break this test.
+    let domain = vessel_core::games::builtin_definitions()
+        .into_iter()
+        .find(|d| d.support == vessel_core::games::Support::Experimental)
+        .expect("at least one builtin game definition is experimental")
+        .domain;
+    let dir = env.game_dir("exp");
+    env.run(&["-y", "game", "add", &domain, dir.to_str().unwrap()])
         .success()
         .stderr(contains("experimental"));
 }

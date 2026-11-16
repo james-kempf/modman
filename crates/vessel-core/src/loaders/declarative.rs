@@ -13,6 +13,12 @@
 //! modes = [{ glob = "run_bepinex.sh", mode = 0o755 }]
 //! [loaders.launch]
 //! dll_overrides = ["winhttp"]
+//! [loaders.github]
+//! repo = "BepInEx/BepInEx"
+//! asset = "BepInEx_win_x64_*.zip"
+//! [loaders.aliases]
+//! urls = ["https://docs.bepinex.dev/"]
+//! names = ["BepInEx 5"]
 //! ```
 
 use std::collections::HashMap;
@@ -55,6 +61,67 @@ pub struct LoaderDef {
     /// Game-root file whose build the loader is tied to (version coupling).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub couples_to: Option<String>,
+    /// GitHub releases the loader is also published on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub github: Option<GithubSource>,
+    /// Other URLs and names requirements may use for this loader.
+    #[serde(default, skip_serializing_if = "Aliases::is_empty")]
+    pub aliases: Aliases,
+}
+
+/// `[loaders.github]`: the latest release asset matching `asset`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GithubSource {
+    /// `owner/repo`.
+    pub repo: String,
+    /// Glob over release asset file names.
+    pub asset: Glob,
+}
+
+/// `[loaders.aliases]`. URLs are stored normalized
+/// ([`crate::requirements::norm_url`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Aliases {
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "norm_urls"
+    )]
+    pub urls: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub names: Vec<String>,
+}
+
+impl Aliases {
+    pub fn is_empty(&self) -> bool {
+        self.urls.is_empty() && self.names.is_empty()
+    }
+}
+
+fn norm_urls<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    let urls = Vec::<String>::deserialize(d)?;
+    Ok(urls
+        .iter()
+        .map(|u| crate::requirements::norm_url(u))
+        .collect())
+}
+
+/// `owner/repo`, each part `[A-Za-z0-9._-]+`, no `..`.
+fn check_repo(repo: &str) -> Result<(), String> {
+    let part = |p: &str| {
+        !p.is_empty()
+            && !p.contains("..")
+            && p.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+    };
+    match repo.split_once('/') {
+        Some((owner, name)) if part(owner) && part(name) => Ok(()),
+        _ => Err(format!(
+            "github.repo '{repo}' must be 'owner/repo' ([A-Za-z0-9._-], no '..')"
+        )),
+    }
 }
 
 fn rel_path(what: &str, v: &str) -> Result<(), String> {
@@ -109,6 +176,18 @@ impl LoaderDef {
         }
         if let Some(c) = &self.couples_to {
             rel_path("couples_to", c).map_err(ctx)?;
+        }
+        if let Some(gh) = &self.github {
+            check_repo(&gh.repo).map_err(ctx)?;
+            gh.asset
+                .check()
+                .map_err(|m| ctx(format!("github.asset: {m}")))?;
+        }
+        if self.aliases.urls.iter().any(String::is_empty) {
+            return Err(ctx("aliases.urls must not contain an empty URL".into()));
+        }
+        if self.aliases.names.iter().any(|n| n.trim().is_empty()) {
+            return Err(ctx("aliases.names must not contain an empty name".into()));
         }
         let l = &self.launch;
         if let Some(e) = &l.exe {
@@ -298,6 +377,32 @@ impl LoaderPlugin for DeclarativeLoader {
         })
     }
 
+    /// Besides [`Self::matches`]: this loader's own Nexus page often ships
+    /// only a Windows installer. Such an archive is redirected to the GitHub
+    /// source, and only when all hold: the archive's Nexus mod id is the
+    /// loader's (the probe's id is on the game's domain, so the game must
+    /// have one), it has a top-level `.exe`/`.msi`, it does not have the
+    /// loader layout, and `github` is declared. Any other file from that
+    /// page installs as usual.
+    fn claim(&self, game: &GameCtx, probe: &ArchiveProbe) -> Option<Claim> {
+        if let Some(m) = self.matches(game, probe) {
+            return Some(Claim::Loader(m));
+        }
+        let same_mod = game.nexus_domain.is_some()
+            && self.def.nexus_mod_id.is_some()
+            && probe.nexus_mod_id == self.def.nexus_mod_id;
+        let installer = probe.entries.iter().any(|e| {
+            let e = e.trim_end_matches('/').to_ascii_lowercase();
+            !e.contains('/') && (e.ends_with(".exe") || e.ends_with(".msi"))
+        });
+        let any = |g: &Glob| probe.entries.iter().any(|e| g.matches_or_contains(e));
+        let layout = self.def.required_paths.iter().all(any);
+        let redirect = same_mod && installer && !layout && self.def.github.is_some();
+        redirect.then(|| Claim::InstallerRedirect {
+            loader_key: self.def.key.clone(),
+        })
+    }
+
     fn provenance(&self, game: &GameCtx, _m: &LoaderMatch, origin: &DownloadOrigin) -> Provenance {
         let unverified = |reason: &str| Provenance::Unverified {
             origin: origin.clone(),
@@ -314,9 +419,18 @@ impl LoaderPlugin for DeclarativeLoader {
                     unverified("Nexus mod is not the one this loader is published as")
                 }
             }
-            DownloadOrigin::GitHub { .. } => {
-                unverified("no GitHub source is declared for this loader")
-            }
+            DownloadOrigin::GitHub { repo, asset, .. } => match &self.def.github {
+                None => unverified("no GitHub source is declared for this loader"),
+                Some(gh) if !gh.repo.eq_ignore_ascii_case(repo) => {
+                    unverified("GitHub repository is not the one this loader is published on")
+                }
+                Some(gh) if !gh.asset.matches(asset) => {
+                    unverified("GitHub release asset is not the one this loader declares")
+                }
+                Some(_) => Provenance::Verified {
+                    origin: origin.clone(),
+                },
+            },
             DownloadOrigin::Local { .. } => unverified("the archive was not downloaded by Vessel"),
         }
     }
@@ -800,5 +914,175 @@ exe = "skse64_loader.exe"
             path: "/a.zip".into(),
         };
         assert!(!l.provenance(&g, &m, &local).is_verified());
+    }
+
+    const MELON_TOML: &str = r#"
+domain = "schedule1"
+name = "Schedule I"
+profile = "melonloader"
+
+[[loaders]]
+key = "melonloader"
+name = "MelonLoader"
+nexus_mod_id = 1196
+required_paths = ["version.dll", "MelonLoader"]
+
+[loaders.github]
+repo = "LavaGang/MelonLoader"
+asset = "MelonLoader.x64.zip"
+
+[loaders.aliases]
+urls = ["https://melonwiki.xyz/#", "https://github.com/LavaGang/MelonLoader/releases"]
+names = ["Melon Loader"]
+"#;
+
+    /// Catches: the new tables not parsing, alias URLs kept raw instead of
+    /// normalized, and typos under them being silently ignored.
+    #[test]
+    fn github_source_and_aliases_parse_and_reject_unknown_keys() {
+        let d = loader(MELON_TOML).def().clone();
+        let gh = d.github.as_ref().unwrap();
+        assert_eq!(gh.repo, "LavaGang/MelonLoader");
+        assert_eq!(gh.asset, Glob::new("MelonLoader.x64.zip"));
+        assert_eq!(
+            d.aliases.urls,
+            ["melonwiki.xyz", "github.com/lavagang/melonloader"]
+        );
+        assert_eq!(d.aliases.names, ["Melon Loader"]);
+        let bad = [
+            MELON_TOML.replace(
+                "nexus_mod_id = 1196",
+                "nexus_mod_id = 1196\ngithub_repo = \"a/b\"",
+            ),
+            MELON_TOML.replace("asset = ", "tag = \"v1\"\nasset = "),
+            MELON_TOML.replace("names = ", "titles = "),
+        ];
+        for text in bad {
+            assert!(parse_definition(&text, "x.toml").is_err(), "{text}");
+        }
+    }
+
+    /// Catches: repo values that could steer the API URL elsewhere, and
+    /// empty globs or aliases, passing validation.
+    #[test]
+    fn invalid_github_repo_asset_and_aliases_are_rejected() {
+        let repo = |r: &str| MELON_TOML.replace("\"LavaGang/MelonLoader\"", &format!("\"{r}\""));
+        let cases = [
+            (repo("LavaGang"), "owner/repo"),
+            (repo("LavaGang/MelonLoader/releases"), "owner/repo"),
+            (
+                repo("https://github.com/LavaGang/MelonLoader"),
+                "owner/repo",
+            ),
+            (repo("../MelonLoader"), "owner/repo"),
+            (repo("LavaGang/.."), "owner/repo"),
+            (repo(""), "owner/repo"),
+            (
+                MELON_TOML.replace("\"MelonLoader.x64.zip\"", "\"\""),
+                "github.asset: empty glob",
+            ),
+            (
+                MELON_TOML.replace("names = [\"Melon Loader\"]", "names = [\" \"]"),
+                "empty name",
+            ),
+            (
+                MELON_TOML.replace("\"https://melonwiki.xyz/#\"", "\"\""),
+                "empty URL",
+            ),
+        ];
+        for (text, want) in cases {
+            let e = parse_definition(&text, "x.toml").unwrap_err().to_string();
+            assert!(e.contains(want), "{e} lacks {want}");
+        }
+    }
+
+    fn github(repo: &str, asset: &str) -> DownloadOrigin {
+        DownloadOrigin::GitHub {
+            repo: repo.into(),
+            tag: "v0.7.0".into(),
+            asset: asset.into(),
+        }
+    }
+
+    const MELON_FILES: &[&str] = &["version.dll", "MelonLoader/net6/MelonLoader.dll"];
+
+    /// Catches: a GitHub download being verified without the declared
+    /// repo, from a different (or case-variant spoof of a different) repo,
+    /// or for an asset outside the declared glob.
+    #[test]
+    fn github_provenance_is_verified_only_for_the_declared_repo_and_asset() {
+        let l = loader(MELON_TOML);
+        let g = ctx("schedule1");
+        let m = l.matches(&g, &probe(MELON_FILES, None)).unwrap();
+        let ok = github("lavagang/melonloader", "MelonLoader.x64.zip");
+        assert!(l.provenance(&g, &m, &ok).is_verified());
+        assert!(!l
+            .provenance(&g, &m, &github("Evil/MelonLoader", "MelonLoader.x64.zip"))
+            .is_verified());
+        assert!(!l
+            .provenance(
+                &g,
+                &m,
+                &github("LavaGang/MelonLoader", "MelonLoader.x86.zip")
+            )
+            .is_verified());
+        let plain = loader(BEPINEX_TOML);
+        assert!(!plain.provenance(&g, &m, &ok).is_verified());
+    }
+
+    /// Catches the id-only claim reaching too far (or not far enough): only
+    /// the loader's own Nexus installer, with no layout and a GitHub source
+    /// to fall back on, is redirected.
+    #[test]
+    fn installer_redirect_is_narrow() {
+        let l = loader(MELON_TOML);
+        let g = ctx("schedule1");
+        let installer = &["MelonLoader.Installer.exe", "README.txt"][..];
+        // (a) the loader's installer, no layout, github declared.
+        assert_eq!(
+            l.claim(&g, &probe(installer, Some(1196))),
+            Some(Claim::InstallerRedirect {
+                loader_key: "melonloader".into()
+            })
+        );
+        // Uppercase .MSI counts too.
+        assert!(l.claim(&g, &probe(&["Setup.MSI"], Some(1196))).is_some());
+        // (b) no github source to redirect to.
+        let no_gh = MELON_TOML.replace(
+            "[loaders.github]\nrepo = \"LavaGang/MelonLoader\"\nasset = \"MelonLoader.x64.zip\"\n",
+            "",
+        );
+        assert!(loader(&no_gh).def().github.is_none());
+        assert_eq!(
+            loader(&no_gh).claim(&g, &probe(installer, Some(1196))),
+            None
+        );
+        // (c) another file on the loader's page: no exe/msi, no layout.
+        assert_eq!(
+            l.claim(&g, &probe(&["Docs/guide.txt", "cfg.ini"], Some(1196))),
+            None
+        );
+        // (d) exe only in a subfolder.
+        assert_eq!(
+            l.claim(&g, &probe(&["Tools/Installer.exe"], Some(1196))),
+            None
+        );
+        // (e) the real layout (even with an exe) is a normal loader match.
+        let mut layout = MELON_FILES.to_vec();
+        layout.push("MelonLoader.Installer.exe");
+        assert_eq!(
+            l.claim(&g, &probe(&layout, Some(1196))),
+            Some(Claim::Loader(LoaderMatch {
+                loader_key: "melonloader".into(),
+                version: None
+            }))
+        );
+        // (f) another mod's installer.
+        assert_eq!(l.claim(&g, &probe(installer, Some(7))), None);
+        assert_eq!(l.claim(&g, &probe(installer, None)), None);
+        // No Nexus domain: the archive's id cannot be on the loader's domain.
+        let mut no_domain = g.clone();
+        no_domain.nexus_domain = None;
+        assert_eq!(l.claim(&no_domain, &probe(installer, Some(1196))), None);
     }
 }

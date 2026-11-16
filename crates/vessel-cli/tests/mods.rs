@@ -429,7 +429,8 @@ fn deps_reports_external_tools_and_ack_unack_persist() {
     env.run(&["deps", "--json"]).success().stdout(
         contains(r#""key":"tool:skse""#)
             .and(contains(r#""status":"ok""#))
-            .and(contains(r#""acked":true"#)),
+            .and(contains(r#""acked":true"#))
+            .and(contains(r#""action":null"#)),
     );
     assert_eq!(
         env.query_i64("SELECT COUNT(*) FROM deps_ack WHERE key = 'tool:skse'"),

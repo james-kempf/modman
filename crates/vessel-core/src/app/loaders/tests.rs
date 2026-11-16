@@ -58,6 +58,7 @@ fn fx(id: &str, definition: &str, runtime: Runtime) -> Fx {
         preview_ttl: PREVIEW_TTL,
         forced_runtime: Some(runtime),
         crash_at: None,
+        paths: None,
     };
     Fx {
         tmp,
@@ -1065,4 +1066,344 @@ fn cache_archive_refuses_bytes_other_than_the_expected_sha() {
     assert_eq!(sha256_file(&dest).unwrap(), real);
     assert!(matches!(cached_origin(&dest), DownloadOrigin::Nexus { .. }));
     assert_eq!(runner.calls(), 0);
+}
+
+/// A MelonLoader-style loader with a GitHub source (`[[loaders]]` of the
+/// `schedule1` test game).
+pub(super) const MELON_TOML: &str = r#"
+domain = "schedule1"
+name = "Schedule I"
+profile = "melonloader"
+
+[[loaders]]
+key = "melonloader"
+name = "MelonLoader"
+nexus_mod_id = 1196
+required_paths = ["version.dll", "MelonLoader"]
+detect = ["version.dll"]
+
+[loaders.github]
+repo = "LavaGang/MelonLoader"
+asset = "MelonLoader.x64.zip"
+"#;
+
+pub(super) const MELON_FILES: &[&str] = &["version.dll", "MelonLoader/net6/MelonLoader.dll"];
+pub(super) const MELON_TAG: &str = "v0.7.3";
+
+/// Zips `files` (contents = their names) as `<dir>/<name>`.
+pub(super) fn zip_files(dir: &Path, name: &str, files: &[&str]) -> PathBuf {
+    let src = dir.join(format!("{name}.src"));
+    for p in files {
+        w(&src.join(p), p.as_bytes());
+    }
+    let out = dir.join(name);
+    zip_dir(&src, &out);
+    out
+}
+
+/// Stands in for the GitHub fetcher on this thread until dropped: every
+/// fetch writes `zip` into the destination as the release asset.
+pub(super) struct FakeGithub {
+    pub calls: Arc<AtomicU64>,
+}
+
+impl FakeGithub {
+    pub(super) fn serve(zip: PathBuf) -> Self {
+        let calls = Arc::new(AtomicU64::new(0));
+        let c = calls.clone();
+        TEST_GITHUB_FETCH.with(|f| {
+            *f.borrow_mut() = Some(Box::new(move |repo, glob, dest| {
+                c.fetch_add(1, Ordering::SeqCst);
+                let asset = "MelonLoader.x64.zip";
+                assert!(glob.matches(asset), "asset glob");
+                let path = dest.join(asset);
+                fs::copy(&zip, &path).unwrap();
+                Ok(FetchedAsset {
+                    path,
+                    origin: DownloadOrigin::GitHub {
+                        repo: repo.into(),
+                        tag: MELON_TAG.into(),
+                        asset: asset.into(),
+                    },
+                    version: MELON_TAG.into(),
+                })
+            }));
+        });
+        Self { calls }
+    }
+
+    pub(super) fn calls(&self) -> u64 {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+impl Drop for FakeGithub {
+    fn drop(&mut self) {
+        TEST_GITHUB_FETCH.with(|f| *f.borrow_mut() = None);
+    }
+}
+
+fn melon_fx() -> Fx {
+    let mut f = fx("schedule1", "schedule1", Runtime::Native);
+    fs::write(base(&f).join("defs/schedule1.toml"), MELON_TOML).unwrap();
+    with_runner(&mut f, FakeRunner::default());
+    f
+}
+
+/// What the Tauri preview command sends without an archive.
+fn melon_req(op: Op) -> PreviewRequest {
+    PreviewRequest {
+        game_id: "schedule1".into(),
+        op,
+        loader_key: Some("melonloader".into()),
+        archive: None,
+        origin: DownloadOrigin::Local {
+            path: PathBuf::new(),
+        },
+        unverified_ack: false,
+    }
+}
+
+fn github_origin() -> DownloadOrigin {
+    DownloadOrigin::GitHub {
+        repo: "LavaGang/MelonLoader".into(),
+        tag: MELON_TAG.into(),
+        asset: "MelonLoader.x64.zip".into(),
+    }
+}
+
+/// Catches: install/upgrade/adopt without an archive failing (or using the
+/// caller's placeholder Local origin) for a loader that declares GitHub,
+/// the download not being verified, cached and recorded, or the download
+/// folder staying behind.
+#[test]
+fn github_source_backs_install_upgrade_and_adopt() {
+    let mut f = melon_fx();
+    let zip = zip_files(&base(&f), "melon.zip", MELON_FILES);
+    let gh = FakeGithub::serve(zip);
+
+    let p = preview(&f.env, &f.store, &melon_req(Op::Install)).unwrap();
+    assert_eq!(gh.calls(), 1);
+    assert!(
+        matches!(&p.provenance, Some(Provenance::Verified { origin }) if *origin == github_origin()),
+        "{:?}",
+        p.provenance
+    );
+    assert!(p.warnings.iter().all(|w| !w.contains("verified")));
+    assert_eq!(p.version.as_deref(), Some(MELON_TAG));
+    let rep = run(&f.env, &mut f.store, &p.preview_id, &p.plan_hash).unwrap();
+    assert_eq!(rep.outcome, RunOutcome::Succeeded, "{:?}", rep.warnings);
+    assert!(f.game.join("version.dll").is_file());
+    assert!(f.game.join("MelonLoader/net6/MelonLoader.dll").is_file());
+    let inst = f
+        .store
+        .active_loader_install("schedule1", "melonloader")
+        .unwrap()
+        .unwrap();
+    assert_eq!(inst.origin, "github");
+    assert_eq!(inst.version.as_deref(), Some(MELON_TAG));
+    // Repair/rollback read the cached archive's origin back.
+    let cached = PathBuf::from(inst.archive_path.unwrap());
+    assert_eq!(cached_origin(&cached), github_origin());
+    let downloads = f.env.dir("downloads");
+    assert!(
+        fs::read_dir(&downloads).map_or(true, |mut d| d.next().is_none()),
+        "download folder left behind"
+    );
+
+    // Install again is refused before anything is downloaded.
+    let e = preview(&f.env, &f.store, &melon_req(Op::Install)).unwrap_err();
+    assert!(matches!(
+        loader_err(&e),
+        Some(LoaderError::AlreadyInstalled(_))
+    ));
+    assert_eq!(gh.calls(), 1);
+
+    let rep = do_op(&mut f, melon_req(Op::Upgrade));
+    assert_eq!(rep.outcome, RunOutcome::Succeeded, "{:?}", rep.warnings);
+    assert_eq!(gh.calls(), 2);
+
+    // Adopt a hand-made install (no record) the same way.
+    let mut f = melon_fx();
+    w(&f.game.join("version.dll"), b"manual");
+    let zip = zip_files(&base(&f), "melon.zip", MELON_FILES);
+    let gh = FakeGithub::serve(zip);
+    let rep = do_op(&mut f, melon_req(Op::Adopt));
+    assert_eq!(rep.outcome, RunOutcome::Succeeded, "{:?}", rep.warnings);
+    assert_eq!(gh.calls(), 1);
+    assert_eq!(
+        f.store
+            .active_loader_install("schedule1", "melonloader")
+            .unwrap()
+            .unwrap()
+            .origin,
+        "github"
+    );
+}
+
+/// Catches: a loader with neither a GitHub release nor a Nexus mod
+/// downloading something anyway, or failing with an unclear error.
+#[test]
+fn no_download_source_is_a_clear_error() {
+    let (f, _zip) = declarative_fx("valheim", BEPINEX_TOML, &["winhttp.dll"]);
+    let gh = FakeGithub::serve(PathBuf::from("/nonexistent"));
+    let mut r = dreq("valheim", Op::Install, None);
+    r.loader_key = Some("bepinex".into());
+    let e = preview(&f.env, &f.store, &r).unwrap_err();
+    let text = e.to_string();
+    assert!(
+        text.contains("no download source for BepInEx") && text.contains("choose the archive"),
+        "{text}"
+    );
+    assert_eq!(gh.calls(), 0);
+    assert!(!f.env.dir("downloads").exists());
+}
+
+/// Mocks the Nexus API for SMAPI (mod 2400, file 1) serving `zip`, logs
+/// in with `premium`, and points this thread's client at the mock.
+fn nexus_mock(
+    f: &mut Fx,
+    zip: &Path,
+    premium: bool,
+) -> (tokio::runtime::Runtime, wiremock::MockServer) {
+    use crate::app::nexus::{AUTH_BACKEND_KEY, PREMIUM_KEY, TEST_BASE_URL};
+    use crate::nexus::{ApiKey, KeyStorage, ProbeOutcome};
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let zip = fs::read(zip).unwrap();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let server = rt.block_on(MockServer::start());
+    let base = server.uri();
+    let api = "/v1/games/stardewvalley/mods/2400";
+    rt.block_on(async {
+        let ok = |body: String| ResponseTemplate::new(200).set_body_raw(body, "application/json");
+        Mock::given(method("GET"))
+            .and(path(format!("{api}/files.json")))
+            .respond_with(ok(format!(
+                r#"{{"files":[{{"file_id":1,"name":"SMAPI","version":"4.5.2","category_name":"MAIN","file_name":"SMAPI-4.5.2-installer.zip","size_in_bytes":{},"uploaded_timestamp":1000,"is_primary":true}}],"file_updates":[]}}"#,
+                zip.len()
+            )))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("{api}/files/1/download_link.json")))
+            .respond_with(ok(format!(
+                r#"[{{"name":"Nexus CDN","short_name":"Nexus","URI":"{base}/cdn/SMAPI-4.5.2-installer.zip"}}]"#
+            )))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/cdn/SMAPI-4.5.2-installer.zip"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(zip))
+            .mount(&server)
+            .await;
+    });
+    TEST_BASE_URL.with(|b| *b.borrow_mut() = Some(base));
+    let paths = Paths::for_home(&f.env.home);
+    KeyStorage::new(&paths, ProbeOutcome::Unavailable("test".into()))
+        .save(&ApiKey::new("TestApiKey123").unwrap())
+        .unwrap();
+    f.store.set_setting(AUTH_BACKEND_KEY, "file").unwrap();
+    f.store
+        .set_setting(PREMIUM_KEY, if premium { "true" } else { "false" })
+        .unwrap();
+    f.env.paths = Some(paths);
+    (rt, server)
+}
+
+/// Catches: a loader without a GitHub source but with a Nexus mod (SMAPI)
+/// not being downloadable without an archive, the download skipping the
+/// verified Nexus provenance, or a non-Premium account getting an opaque
+/// error (and a stray download) instead of the nxm hint.
+#[test]
+fn nexus_source_backs_an_archive_less_install() {
+    let (mut f, runner) = smapi_fx();
+    let zip = smapi_zip(&f);
+    let local = DownloadOrigin::Local {
+        path: PathBuf::new(),
+    };
+
+    let (_rt, server) = nexus_mock(&mut f, &zip, false);
+    let e = preview(&f.env, &f.store, &req(Op::Install, None, local.clone())).unwrap_err();
+    assert!(
+        e.to_string().contains("Premium") && e.to_string().contains("mods/2400"),
+        "{e}"
+    );
+    assert!(fs::read_dir(f.env.dir("downloads")).map_or(true, |mut d| d.next().is_none()));
+    drop(server);
+
+    let (_rt, _server) = nexus_mock(&mut f, &zip, true);
+    let p = preview(&f.env, &f.store, &req(Op::Install, None, local));
+    crate::app::nexus::TEST_BASE_URL.with(|b| *b.borrow_mut() = None);
+    let p = p.unwrap();
+    assert!(
+        matches!(&p.provenance, Some(Provenance::Verified { origin }) if *origin == nexus()),
+        "{:?}",
+        p.provenance
+    );
+    assert_eq!(p.version.as_deref(), Some("4.5.2"));
+    let rep = run(&f.env, &mut f.store, &p.preview_id, &p.plan_hash).unwrap();
+    assert_eq!(rep.outcome, RunOutcome::Succeeded, "{:?}", rep.warnings);
+    assert_eq!(runner.calls(), 1);
+    let inst = f
+        .store
+        .active_loader_install("stardewvalley", "smapi")
+        .unwrap()
+        .unwrap();
+    assert_eq!(inst.origin, "nexus");
+    assert!(fs::read_dir(f.env.dir("downloads")).map_or(true, |mut d| d.next().is_none()));
+}
+
+/// Catches: a GitHub-served archive skipping extraction guards: a
+/// `../` entry must fail with the unsafe-path error and write nothing
+/// outside the scratch folder.
+#[test]
+fn github_archive_with_a_traversal_entry_is_refused() {
+    let f = melon_fx();
+    let zip = base(&f).join("evil.zip");
+    {
+        let mut z = zip::ZipWriter::new(fs::File::create(&zip).unwrap());
+        let opts = zip::write::SimpleFileOptions::default();
+        for (name, body) in [
+            ("version.dll", b"v".as_slice()),
+            ("MelonLoader/net6/MelonLoader.dll", b"m"),
+            ("../escape.txt", b"evil"),
+        ] {
+            z.start_file(name, opts).unwrap();
+            z.write_all(body).unwrap();
+        }
+        z.finish().unwrap();
+    }
+    let gh = FakeGithub::serve(zip);
+    let e = preview(&f.env, &f.store, &melon_req(Op::Install)).unwrap_err();
+    assert_eq!(gh.calls(), 1);
+    assert!(
+        matches!(
+            e,
+            super::super::AppError::Core(crate::Error::Archive(
+                crate::archive::ArchiveError::UnsafePath { .. }
+            ))
+        ),
+        "{e}"
+    );
+    let escaped: Vec<_> = walkdir::WalkDir::new(base(&f))
+        .into_iter()
+        .flatten()
+        .filter(|e| e.file_name() == "escape.txt")
+        .map(|e| e.path().to_path_buf())
+        .collect();
+    assert!(escaped.is_empty(), "{escaped:?}");
+    assert!(!f.game.join("version.dll").exists());
+    assert!(f.store.unfinished_loader_runs().unwrap().is_empty());
+}
+
+/// Catches: a GitHub origin not surviving the archive cache (repair and
+/// rollback would then call the archive Local and unverified).
+#[test]
+fn cached_origin_round_trips_a_github_origin() {
+    let f = melon_fx();
+    let zip = zip_files(&base(&f), "MelonLoader.x64.zip", MELON_FILES);
+    let (_, dest) = cache_archive(&f.env, &zip, &github_origin(), None).unwrap();
+    assert_eq!(cached_origin(&dest), github_origin());
 }

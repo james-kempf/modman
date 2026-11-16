@@ -153,12 +153,13 @@ fn loader_registry(cx: &Cx<'_>, game: &GameConfig) -> Option<crate::loaders::Loa
 
 /// Creates the pending preview for a loader archive: install, or adopt
 /// when a hand-made install exists, or upgrade when Vessel manages one.
-/// Never runs anything.
+/// Without `archive` the loader's GitHub release is fetched (`origin` is
+/// then ignored). Never runs anything.
 fn preview_loader(
     cx: &Cx<'_>,
     game: &GameConfig,
     data_dir: &Path,
-    archive: &Path,
+    archive: Option<&Path>,
     key: &str,
     origin: &DownloadOrigin,
 ) -> R<LoaderPending> {
@@ -168,7 +169,7 @@ fn preview_loader(
         game_id: game.id.clone(),
         op: Op::Install,
         loader_key: Some(key.to_string()),
-        archive: Some(archive.to_path_buf()),
+        archive: archive.map(Path::to_path_buf),
         origin: origin.clone(),
         unverified_ack: false,
     };
@@ -199,6 +200,11 @@ fn preview_loader(
 /// the archive: a Nexus API download, or a local file) it becomes a
 /// pending loader preview; without it (restage, reinstall) the install
 /// fails with [`ModsError::LoaderArchive`].
+///
+/// A loader's Windows installer from its Nexus page is never staged or
+/// run: with `origin` it becomes a pending preview of the loader's GitHub
+/// release instead; without it the install fails with
+/// [`ModsError::LoaderInstaller`].
 pub fn install_archive(
     cx: &mut Cx<'_>,
     game: &GameConfig,
@@ -228,8 +234,17 @@ pub fn install_archive(
     let res = mods::install_archive(cx.store, game, data_dir, archive, meta, hooks);
     drop(resolver);
     let o = match (res, origin) {
+        (Err(ModsError::LoaderInstaller { loader_key }), Some(origin)) => {
+            // Typed loader errors (runtime, game running, ...) keep their codes.
+            let p = preview_loader(cx, game, data_dir, None, &loader_key, origin)?;
+            ui.info(&format!(
+                "This is the {} mod loader's Windows installer: Vessel never runs it. Review and confirm the loader's GitHub release in Requirements instead.",
+                p.loader_key
+            ));
+            return Ok(Installed::Loader(p));
+        }
         (Err(ModsError::LoaderArchive { loader_key }), Some(origin)) => {
-            let p = preview_loader(cx, game, data_dir, archive, &loader_key, origin)?;
+            let p = preview_loader(cx, game, data_dir, Some(archive), &loader_key, origin)?;
             ui.info(&format!(
                 "This is the {} mod loader: it installs into the game folder, not as a mod. Review and confirm it in Requirements.",
                 p.loader_key

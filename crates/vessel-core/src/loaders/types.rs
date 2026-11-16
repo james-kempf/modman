@@ -88,6 +88,20 @@ pub struct LoaderMatch {
     pub version: Option<String>,
 }
 
+/// What a loader makes of an archive (see [`LoaderPlugin::claim`]).
+///
+/// [`LoaderPlugin::claim`]: super::LoaderPlugin::claim
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum Claim {
+    /// The archive is this loader; install it as one.
+    Loader(LoaderMatch),
+    /// The archive is this loader's Nexus installer (a top-level .exe/.msi
+    /// without the loader layout). It must never be staged, deployed or
+    /// run; the loader's GitHub source is used instead.
+    InstallerRedirect { loader_key: String },
+}
+
 /// Where an archive came from. Only `Nexus` and `GitHub` downloads made by
 /// Vessel itself can be verified; anything the user hands over is `Local`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

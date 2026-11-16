@@ -9,6 +9,7 @@ import { game, experimentalGame, mod } from "../mock/fixtures";
 import type { Handler } from "../mock/fake";
 import { setup } from "../test/harness";
 import { installTarget } from "./Requirements";
+import { demoPreview } from "../mock/loaders";
 
 async function open(view: ViewId, handlers: Record<string, Handler> = {}, games = [game()]) {
   const env = await setup(handlers, games);
@@ -59,11 +60,11 @@ describe("Overview", () => {
         changed_since_deploy: true,
       }),
       deps: () => [
-        { status: "missing", key: "a", name: "A", hint: "", urls: [], by: [], detail: "", acked: false },
-        { status: "disabled", key: "b", name: "B", hint: "", urls: [], by: [], detail: "", acked: false },
-        { status: "external", key: "c", name: "C", hint: "", urls: [], by: [], detail: "", acked: true },
-        { status: "external", key: "d", name: "D", hint: "", urls: [], by: [], detail: "", acked: false },
-        { status: "ok", key: "e", name: "E", hint: "", urls: [], by: [], detail: "", acked: false },
+        { status: "missing", key: "a", name: "A", hint: "", urls: [], by: [], detail: "", acked: false, action: null },
+        { status: "disabled", key: "b", name: "B", hint: "", urls: [], by: [], detail: "", acked: false, action: null },
+        { status: "external", key: "c", name: "C", hint: "", urls: [], by: [], detail: "", acked: true, action: null },
+        { status: "external", key: "d", name: "D", hint: "", urls: [], by: [], detail: "", acked: false, action: null },
+        { status: "ok", key: "e", name: "E", hint: "", urls: [], by: [], detail: "", acked: false, action: null },
       ],
       plugins_list: () => [
         { name: "Skyrim.esm", active: true, managed: false },
@@ -359,8 +360,8 @@ describe("Requirements", () => {
   it("groups by status, installs missing ones and acknowledges external tools", async () => {
     const { t, user } = await open("requirements", {
       deps: () => [
-        { status: "missing", key: "skse", name: "SKSE64", hint: "install 30379", urls: [], by: ["SkyUI"], detail: "", acked: false },
-        { status: "external", key: "loader", name: "Loader", hint: "", urls: [], by: [], detail: "", acked: false },
+        { status: "missing", key: "skse", name: "SKSE64", hint: "install 30379", urls: [], by: ["SkyUI"], detail: "", acked: false, action: null },
+        { status: "external", key: "loader", name: "Loader", hint: "", urls: [], by: [], detail: "", acked: false, action: null },
       ],
       deps_ack: () => ({}),
       install: () => ({ game: null, installed: null, collection: null, after: { deployed: null, needs_deploy: false } }),
@@ -370,6 +371,49 @@ describe("Requirements", () => {
     await waitFor(() => expect(t.callsOf("install")[0]).toMatchObject({ target: "30379" }));
     await user.click(screen.getByRole("button", { name: "I have it" }));
     await waitFor(() => expect(t.callsOf("deps_ack")).toEqual([{ game: null, name: "loader" }]));
+  });
+
+  const melon = {
+    status: "missing", key: "tool:melonloader", name: "MelonLoader", hint: "", urls: ["https://melonwiki.xyz"], by: ["Mod A"],
+    detail: "", acked: false, action: { kind: "install_loader", loader_key: "melonloader" },
+  };
+
+  // Fails when the loader action is ignored, sends an archive, or the preview never reaches the consent dialog.
+  it("Install on an install_loader row previews that loader with no archive and opens the consent dialog", async () => {
+    const { t, user } = await open("requirements", {
+      deps: () => [melon],
+      loader_preview: () => demoPreview({ loader_key: "melonloader" }),
+    });
+    const row = (await screen.findByRole("heading", { name: "MelonLoader" })).closest("li")!;
+    // An empty hint must not print a fake CLI fix.
+    expect(within(row).queryByText(/fix: vessel/)).toBeNull();
+    await user.click(within(row).getByRole("button", { name: "Install MelonLoader" }));
+    await waitFor(() => expect(t.callsOf("loader_preview")).toHaveLength(1));
+    expect(t.callsOf("loader_preview")[0]).toMatchObject({ op: "install", loader_key: "melonloader", archive: null, unverified_ack: false });
+    expect(t.callsOf("install")).toHaveLength(0);
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("heading", { name: /^Install/ })).toBeInTheDocument();
+  });
+
+  // Fails when the button is not busy while the preview loads (double runs), or a backend error
+  // (no download source, non-Premium Nexus) is swallowed instead of shown on the row.
+  it("busy while the preview loads; its error shows on the row", async () => {
+    let fail!: (e: unknown) => void;
+    const { t, user } = await open("requirements", {
+      deps: () => [melon],
+      loader_preview: () => new Promise((_, reject) => (fail = reject)),
+    });
+    const row = (await screen.findByRole("heading", { name: "MelonLoader" })).closest("li")!;
+    const btn = within(row).getByRole("button", { name: "Install MelonLoader" });
+    await user.click(btn);
+    await waitFor(() => expect(btn).toHaveAttribute("aria-busy", "true"));
+    await user.click(btn);
+    expect(t.callsOf("loader_preview")).toHaveLength(1);
+    const msg = "Nexus requires Premium for direct downloads: download MelonLoader with Mod Manager Download on its files page";
+    act(() => fail({ message: msg }));
+    expect(await within(row).findByText(msg)).toBeInTheDocument();
+    expect(btn).not.toHaveAttribute("aria-busy");
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("installTarget parses fix hints", () => {

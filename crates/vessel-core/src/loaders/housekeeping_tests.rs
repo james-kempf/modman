@@ -106,6 +106,7 @@ fn fx() -> Fx {
         preview_ttl: PREVIEW_TTL,
         forced_runtime: None,
         crash_at: None,
+        paths: None,
     };
     Fx {
         _tmp: tmp,
