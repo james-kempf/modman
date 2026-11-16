@@ -21,7 +21,7 @@ use vessel_core::app::games::{
 };
 use vessel_core::app::install::{self as appinst, InstallRequest, InstallResult, Reinstalled};
 use vessel_core::app::mods::{
-    self as appmods, ModDetail, ModsView, MoveResult, ProfileLoaded, UninstallResult,
+    self as appmods, ModsView, MoveResult, ProfileLoaded, UninstallResult,
 };
 use vessel_core::app::nexus::{self as appnx, AccountInfo, LoginResult};
 use vessel_core::app::restore::{self, RestoreResult};
@@ -333,36 +333,6 @@ pub async fn mods_list(app: AppHandle, state: St<'_>, game: Option<String>) -> C
     query(app, &state, game, |cx| {
         let g = cx.need_game()?;
         appmods::mods_view(cx, &g)
-    })
-    .await
-}
-
-#[tauri::command(rename_all = "snake_case")]
-pub async fn mod_detail(
-    app: AppHandle,
-    state: St<'_>,
-    game: Option<String>,
-    reference: String,
-) -> CmdResult<ModDetail> {
-    query(app, &state, game, move |cx| {
-        let g = cx.need_game()?;
-        appmods::mod_detail(cx, &g, &reference)
-    })
-    .await
-}
-
-#[tauri::command(rename_all = "snake_case")]
-pub async fn mod_open_page(
-    app: AppHandle,
-    state: St<'_>,
-    game: Option<String>,
-    reference: String,
-) -> CmdResult<String> {
-    query(app, &state, game, move |cx| {
-        let g = cx.need_game()?;
-        appmods::open_mod_page(cx, &g, &reference, |url| {
-            appgames::launch_opener(OsStr::new(url))
-        })
     })
     .await
 }

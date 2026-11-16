@@ -44,6 +44,7 @@ import type {
   InstallResult,
   Launched,
   LoginResult,
+  ModRestoreResult,
   ModsView,
   MoveResult,
   NxmReceived,
@@ -98,8 +99,6 @@ export const COMMANDS = [
   "steam_art",
   "open_folder",
   "mods_list",
-  "mod_detail",
-  "mod_open_page",
   "open_url",
   "mods_set_enabled",
   "mod_move",
@@ -240,6 +239,12 @@ export const modsUninstall = (refs: string[], deleteArchive: boolean, game?: Gam
     refs,
     delete_archive: deleteArchive,
   });
+/**
+ * Job (no prompts). Restores uninstalled mods from `UninstallResult.restore`
+ * tokens; per-mod results. Backend API kept for callers; the UI has no Undo.
+ */
+export const modRestore = (tokens: string[], game?: Game) =>
+  call<ModRestoreResult>("mod_restore", { game: game ?? null, tokens });
 /** Job (FOMOD/variant prompts). fomod: ask | default | none | reuse. */
 export const modReinstall = (
   reference: string,

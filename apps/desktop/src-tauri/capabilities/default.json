@@ -32,8 +32,6 @@
     "allow-steam-art",
     "allow-open-folder",
     "allow-mods-list",
-    "allow-mod-detail",
-    "allow-mod-open-page",
     "allow-open-url",
     "allow-mods-set-enabled",
     "allow-mod-move",

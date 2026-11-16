@@ -29,8 +29,6 @@ pub const COMMANDS: &[&str] = &[
     "steam_art",
     "open_folder",
     "mods_list",
-    "mod_detail",
-    "mod_open_page",
     "open_url",
     "mods_set_enabled",
     "mod_move",

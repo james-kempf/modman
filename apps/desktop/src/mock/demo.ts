@@ -331,10 +331,6 @@ export function createDemoBackend(opts: DemoOptions = {}): FakeTransport {
       const cards = (t.handlers.loader_status?.(a) ?? []) as LoaderCard[];
       return { mods: g.mods.map((m) => ({ ...m })), changed_since_deploy: g.dirty, loaders: installedLoaders(cards) };
     },
-    mod_detail: (a: Args) => {
-      const m = st(a).mods.find((x) => x.uid === a!.reference)!;
-      return { mod: m, collections: [], fomod: [], wins: 0, loses: 0, url: null };
-    },
     mods_set_enabled: (a: Args) =>
       job("enable", async () => {
         const g = st(a);

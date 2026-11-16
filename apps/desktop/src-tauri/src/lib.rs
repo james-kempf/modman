@@ -126,8 +126,6 @@ pub fn run() {
             commands::steam_art,
             commands::open_folder,
             commands::mods_list,
-            commands::mod_detail,
-            commands::mod_open_page,
             commands::open_url,
             commands::mods_set_enabled,
             commands::mod_move,
