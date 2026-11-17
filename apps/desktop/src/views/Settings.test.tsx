@@ -156,6 +156,28 @@ describe("on-screen keyboard (T16 F1/F2b)", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  // Fails when the keyboard has no Space key (values with spaces could not be typed), or it is unreachable by d-pad.
+  it("Space key types a space by gamepad and by click, also with Shift on", async () => {
+    const { renderApp } = await setup();
+    renderApp();
+    act(() => useUi.getState().setView("settings"));
+    const field = (await screen.findByLabelText("Nexus API key")) as HTMLInputElement;
+    const pad = gamepad();
+    act(() => useUi.getState().openOsk({ input: field, label: "Nexus API key" }));
+    const dlg = await screen.findByRole("dialog", { name: /Keyboard: Nexus API key/ });
+    await waitFor(() => expect(document.activeElement?.textContent).toBe("1"));
+    pad.press(BUTTON.A); // "1"
+    pad.downUntil((el) => el?.textContent === "Space");
+    pad.press(BUTTON.A); // " "
+    act(() => within(dlg).getByRole("button", { name: "Shift" }).click());
+    act(() => within(dlg).getByRole("button", { name: "Space" }).click());
+    act(() => within(dlg).getByRole("button", { name: "Shift" }).click());
+    act(() => within(dlg).getByRole("button", { name: "2" }).click());
+    act(() => within(dlg).getByRole("button", { name: "Done" }).click());
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(field).toHaveValue("1  2");
+  });
+
   it("nothing typed: Sign in is disabled and Done does not submit", async () => {
     const { renderApp, t } = await setup({ login });
     renderApp();

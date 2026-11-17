@@ -85,6 +85,11 @@ function Osk() {
             })}
           </div>
         ))}
+        <div className="flex justify-center">
+          <Button className="w-1/2" onClick={() => type(" ")}>
+            Space
+          </Button>
+        </div>
       </div>
       <div className="mt-4 flex flex-wrap justify-center gap-2">
         <Button
