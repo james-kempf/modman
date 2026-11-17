@@ -170,17 +170,60 @@ handle each of them. For every loader, script extender and framework:
      handled by `loaders.nexus_mod_id` + `loaders.required_paths`. A
      mod-page requirement then shows "install <id>", and the download is
      claimed as the loader.
-   - A Nexus page that ships an installer or any archive that does not
-     match `required_paths`: Gap. Declarative loaders never run downloaded
-     code, so the archive is installed as a regular mod.
+   - A Nexus page on `DOMAIN` that is installer-only (a `.exe` or `.msi`
+     at the archive root and no match for `required_paths`): handled by
+     `loaders.nexus_mod_id` + `loaders.github` only when the loader
+     declares `[loaders.github]`. Vessel then redirects the install to the
+     GitHub release (the installer redirect) and never runs or deploys the
+     installer. Without `[loaders.github]` this route is a Gap. Use the
+     word "installer" in the Route cell (for example
+     `Nexus page (installer exe)`); the checker requires `loaders.github`
+     on such rows.
+   - Any other Nexus archive that does not match `required_paths` (an
+     installer only in a subfolder, a different layout): Gap. Declarative
+     loaders never run downloaded code, so the archive is installed as a
+     regular mod.
    - A Nexus page on another domain: Gap (`nexus_mod_id` is for `DOMAIN`
      only; the download is unverified).
-   - An off-site requirement or off-site download (GitHub, official site):
-     Gap. Vessel recognizes known tool names (`requirements.rs` `TOOLS`)
-     but cannot download from a URL, so it never offers the install.
+   - A GitHub release whose asset matches `required_paths`: handled by
+     `loaders.github` (`repo` = `owner/repo`, `asset` = a glob that
+     matches exactly one asset of the latest release). Vessel downloads it
+     and verifies it as that loader.
+   - An off-site requirement (a URL such as a GitHub or wiki link, or only
+     a name): handled by `loaders.aliases` (`urls` and/or `names`), plus
+     the field the install is offered from: `loaders.github` or
+     `loaders.nexus_mod_id`. Alias URLs match the requirement URL itself or
+     any page under it (GitHub URLs are cut to `owner/repo`); alias names
+     match case-insensitively. With aliases but neither install source,
+     the route is a Gap. Without aliases, only known tool names
+     (`requirements.rs` `TOOLS`) are recognized.
+   - An official-site download with no GitHub release: Gap (Vessel cannot
+     download from an arbitrary URL).
    - A loader built into Vessel's Rust code (for example SMAPI for
      `stardewvalley`): name the definition field that selects it, for
      example `domain`, and only for the routes that plugin handles.
+
+   Before you declare `[loaders.github]`, list the asset with
+   `python3 -I <INSPECT_ARCHIVE> github <owner/repo> --asset <GLOB>` and
+   confirm that its contents match `required_paths` and that the glob
+   matches exactly one asset. Never declare it from a README or search
+   result alone. Example (schedule1-style):
+
+   ```toml
+   [[loaders]]
+   key = "melonloader"
+   name = "MelonLoader"
+   nexus_mod_id = 1196
+   required_paths = ["version.dll", "MelonLoader"]
+
+   [loaders.github]
+   repo = "LavaGang/MelonLoader"     # exactly owner/repo
+   asset = "MelonLoader.x64.zip"     # glob over release asset names
+
+   [loaders.aliases]
+   urls = ["melonwiki.xyz", "github.com/LavaGang/MelonLoader"]
+   names = ["MelonLoader", "Melon Loader"]
+   ```
 4. If the schema cannot express a route, that route is a Gap: add a Gaps
    bullet naming the loader, the route and the Rust change needed, and keep
    `support = "experimental"`. Never claim full support while a loader
@@ -235,7 +278,11 @@ Rules for the definition:
   needs, with `required_paths`, `detect`, `payload` and `launch` that match
   your research. Use `couples_to` when the loader is tied to the game build.
   Set `nexus_mod_id` when the loader's Nexus page on `DOMAIN` ships an
-  archive that matches `required_paths` (see "Loader routes").
+  archive that matches `required_paths`, or an installer-only archive and
+  you also declare `[loaders.github]` (see "Loader routes"). Declare
+  `[loaders.github]` only after `INSPECT_ARCHIVE` confirmed the asset, and
+  `[loaders.aliases]` for the off-site requirement URLs and names you saw
+  in mod requirements.
 - Set `support` from the Gaps result (section 5):
   - Gaps is `None` (the game is fully supported by config alone):
     `support = "tested"`.
@@ -297,7 +344,10 @@ Deploy root, layouts, load order, Proton notes.
 | Loader | Route | Identifier | Handled by |
 |---|---|---|---|
 | <loader> | Nexus page | <DOMAIN> <mod id> | `loaders.nexus_mod_id` + `loaders.required_paths` |
-| <loader> | Off-site requirement | <URL> | Gap |
+| <loader> | Nexus page (installer exe) | <DOMAIN> <mod id> | `loaders.nexus_mod_id` + `loaders.github` |
+| <loader> | GitHub release | <owner/repo> <asset> | `loaders.github` |
+| <loader> | Off-site requirement | <URL> | `loaders.aliases` + `loaders.github` |
+| <loader> | Official site | <URL> | Gap |
 
 ## Configuration changes
 Bullet list of every field added or changed, each with its source.
@@ -352,7 +402,10 @@ The body of `## Loader routes` (blank lines ignored) must be exactly one of:
   - `Handled by`: either the word `Gap`, or one or more backticked
     definition fields joined by `+` or `,`. A `loaders.<field>` must be
     set on that loader's `[[loaders]]` entry; any other field (for example
-    `domain`) must be set in the definition.
+    `domain`) must be set in the definition. `loaders.github` and
+    `loaders.aliases` need the `[loaders.github]` / `[loaders.aliases]`
+    table on that entry. A non-Gap row whose Route contains "installer"
+    must cite `loaders.github` (installer redirect).
 
 Each `Gap` row needs a Gaps bullet that names its loader, and any `Gap`
 row means the outcome cannot be full support: Gaps `None` with a `Gap`

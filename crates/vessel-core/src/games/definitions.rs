@@ -379,8 +379,13 @@ mod tests {
     #[test]
     fn every_other_preset_is_experimental() {
         for d in builtin_definitions() {
-            if !["skyrimspecialedition", "cyberpunk2077", "stardewvalley"]
-                .contains(&d.domain.as_str())
+            if ![
+                "skyrimspecialedition",
+                "cyberpunk2077",
+                "stardewvalley",
+                "schedule1",
+            ]
+            .contains(&d.domain.as_str())
             {
                 assert_eq!(d.support, Support::Experimental, "{}", d.domain);
             }
@@ -465,15 +470,16 @@ mod tests {
     }
 
     /// Catches: schedule1.toml losing the MelonLoader entry, its `version`
-    /// DLL override, the experimental level (unhandled loader routes, see
-    /// docs/game-support/schedule1.md) and the loader claiming a mod pack
-    /// or a plain mod DLL.
+    /// DLL override, the tested level, a loader route source (Nexus id 1196,
+    /// the GitHub zip, the off-site aliases; see
+    /// docs/game-support/schedule1.md), the loader claiming a mod pack or a
+    /// plain mod DLL, and the installer-only Nexus file not being redirected.
     #[test]
     fn schedule1_declares_the_melonloader_loader() {
         let defs = builtin_definitions();
         let d = find_definition(&defs, "schedule1").unwrap();
-        assert_eq!(d.support, Support::Experimental);
-        assert_eq!(d.loaders[0].nexus_mod_id, None);
+        assert_eq!(d.support, Support::Tested);
+        assert_eq!(d.loaders[0].nexus_mod_id, Some(1196));
         assert_eq!(d.steam_appid, Some(3164500));
         assert_eq!(
             (d.subdir.as_str(), d.profile.as_str()),
@@ -486,6 +492,16 @@ mod tests {
         assert_eq!(ml.launch.dll_overrides, ["version"]);
         assert_eq!(ml.detect, ["MelonLoader", "dobby.dll"]);
         assert!(crate::requirements::TOOLS.iter().any(|t| t.key == ml.key));
+        let gh = ml.github.as_ref().unwrap();
+        assert_eq!(
+            (gh.repo.as_str(), gh.asset.as_str()),
+            ("LavaGang/MelonLoader", "MelonLoader.x64.zip")
+        );
+        assert_eq!(
+            ml.aliases.urls,
+            ["melonwiki.xyz", "github.com/LavaGang/MelonLoader"].map(crate::requirements::norm_url)
+        );
+        assert_eq!(ml.aliases.names, ["MelonLoader", "Melon Loader"]);
 
         use crate::loaders::LoaderPlugin;
         let claims = |entries: &[&str]| {
@@ -508,6 +524,31 @@ mod tests {
             "MelonLoader/a.dll",
             "Mods/SomeMod.dll"
         ]));
+
+        // The installer-only file of Nexus page 1196 redirects to GitHub.
+        let game = crate::loaders::GameCtx {
+            nexus_domain: Some("schedule1".into()),
+            ..Default::default()
+        };
+        let probe = |id: u64, entries: &[&str]| crate::loaders::ArchiveProbe {
+            nexus_mod_id: Some(id),
+            entries: entries.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        };
+        let loader = crate::loaders::DeclarativeLoader::new(ml.clone());
+        assert_eq!(
+            loader.claim(&game, &probe(1196, &["MelonLoader.Installer.exe"])),
+            Some(crate::loaders::Claim::InstallerRedirect {
+                loader_key: "melonloader".into()
+            })
+        );
+        assert!(matches!(
+            loader.claim(
+                &game,
+                &probe(1196, &["version.dll", "MelonLoader/net6/MelonLoader.dll"])
+            ),
+            Some(crate::loaders::Claim::Loader(_))
+        ));
     }
 
     #[test]

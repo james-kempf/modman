@@ -28,6 +28,15 @@ required_paths = ["version.dll", "MelonLoader"]
 dll_overrides = ["version"]
 """
 
+MELON_SOURCES = MELON + """
+[loaders.github]
+repo = "LavaGang/MelonLoader"
+asset = "MelonLoader.x64.zip"
+[loaders.aliases]
+urls = ["melonwiki.xyz", "github.com/LavaGang/MelonLoader"]
+names = ["MelonLoader", "Melon Loader"]
+"""
+
 HEADER = "| Loader | Route | Identifier | Handled by |\n|---|---|---|---|\n"
 
 
@@ -165,6 +174,35 @@ class LoaderRoutes(unittest.TestCase):
         gaps = "- loaders: Melon Loader needs a GitHub release source (declarative.rs)"
         errors, outcome = self.run_check(definition("experimental", MELON), note(routes, gaps))
         self.assertEqual((errors, outcome), ([], "partial"))
+
+    # Catches: GitHub-sourced, aliased and installer-redirect routes being
+    # rejected once the definition declares [loaders.github]/[loaders.aliases].
+    def test_github_aliases_and_installer_redirect_pass(self):
+        routes = HEADER + (
+            "| MelonLoader | Nexus page (installer exe) | schedule1 1196 | "
+            "`loaders.nexus_mod_id` + `loaders.github` |\n"
+            "| MelonLoader | GitHub release | LavaGang/MelonLoader | `loaders.github` |\n"
+            "| MelonLoader | Off-site requirement | melonwiki.xyz | "
+            "`loaders.aliases` + `loaders.github` |"
+        )
+        errors, outcome = self.run_check(definition("tested", MELON_SOURCES), note(routes))
+        self.assertEqual((errors, outcome), ([], "full"))
+
+    # Catches: a row crediting loaders.github when no [loaders.github] exists.
+    def test_github_without_table_fails(self):
+        routes = HEADER + "| MelonLoader | GitHub release | LavaGang/MelonLoader | `loaders.github` |"
+        errors, _ = self.run_check(definition("tested", MELON), note(routes))
+        self.assert_error(errors, "'loaders.github' is not set on a [[loaders]] entry")
+
+    # Catches: an installer-only Nexus page claimed as handled without the
+    # installer redirect (which needs loaders.github).
+    def test_installer_route_without_github_fails(self):
+        routes = HEADER + (
+            "| MelonLoader | Nexus page (installer exe) | schedule1 1196 | "
+            "`loaders.nexus_mod_id` + `loaders.required_paths` |"
+        )
+        errors, _ = self.run_check(definition("tested", MELON_SOURCES), note(routes))
+        self.assert_error(errors, "installer route needs `loaders.github`")
 
 
 if __name__ == "__main__":

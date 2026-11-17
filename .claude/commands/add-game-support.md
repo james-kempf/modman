@@ -55,7 +55,15 @@ PR), run `scripts/run-game-support.sh` instead.
    with no loaders, otherwise one table row per distribution route of every
    loader (Nexus page, cross-listed Nexus page, off-site requirement,
    GitHub release, ...), each handled by a backticked definition field or
-   `Gap` with a Gaps bullet naming the loader. Any `Gap` row rules out full
+   `Gap` with a Gaps bullet naming the loader. Matching Nexus zip:
+   `loaders.nexus_mod_id` + `loaders.required_paths`; installer-only Nexus
+   page (Route contains "installer"): `loaders.nexus_mod_id` +
+   `loaders.github` (installer redirect), else Gap; GitHub release zip:
+   `loaders.github`; off-site requirement URL or name: `loaders.aliases`
+   plus `loaders.github` or `loaders.nexus_mod_id`. `loaders.github` and
+   `loaders.aliases` must exist as tables on that `[[loaders]]` entry;
+   confirm a GitHub asset with `scripts/inspect_archive.py github` before
+   declaring it. Any `Gap` row rules out full
    support. Fix any error it reports. Promotion to tested here is based on
    research, not hardware testing; the note's Manual test section says so
    only when support is `"tested"`.

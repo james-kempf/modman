@@ -1110,6 +1110,39 @@ names = ["Melon Loader"]
         }
     }
 
+    /// Catches: the shipped schedule1 definition losing an alias or its
+    /// Nexus id, so the requirement styles real schedule1 mods use (see
+    /// docs/game-support/schedule1.md) stop offering the MelonLoader install.
+    #[test]
+    fn schedule1_requirements_resolve_to_install_loader() {
+        let cases = [
+            // Off-site URLs seen on top schedule1 mods (397, 453, 818, 113).
+            r#"{"modName":"Required framework","externalRequirement":true,"url":"https://melonwiki.xyz/#/?id=requirements"}"#,
+            r#"{"modName":"Required framework","externalRequirement":true,"url":"https://melonwiki.xyz/#"}"#,
+            r#"{"modName":"Required framework","externalRequirement":true,"url":"https://melonwiki.xyz/"}"#,
+            r#"{"modName":"Framework","externalRequirement":true,"url":"https://github.com/LavaGang/MelonLoader/releases/download/v0.6.6/MelonLoader.Installer.exe"}"#,
+            // Nexus requirement on the MelonLoader page.
+            r#"{"modId":1196,"modName":"ML","gameId":7381}"#,
+        ];
+        for req in cases {
+            let game_dir = tempfile::tempdir().unwrap();
+            let s = Store::open_in_memory().unwrap();
+            let mut g = GameConfig::custom("schedule1");
+            g.nexus_game_id = Some(7381);
+            g.folder = Some(game_dir.path().to_path_buf());
+            g.definition = Some("schedule1".into());
+            games::save_game(s.conn(), &g).unwrap();
+            add(&s, "schedule1", "Mod-1-1", "Some Mod", Some(1));
+            seed_reqs(&s, "schedule1", 1, &format!("[{req}]"), Some(true));
+            let rows = analyze(&s, &g, &Scope::default(), None).unwrap();
+            let r: Vec<_> = rows
+                .iter()
+                .map(|r| (r.key.as_str(), r.action.clone()))
+                .collect();
+            assert_eq!(r, [("tool:melonloader", melon_action())], "{req}");
+        }
+    }
+
     /// Catches: alias matching that relies on the tool table, or matches
     /// unrelated pages of the same host prefix.
     #[test]

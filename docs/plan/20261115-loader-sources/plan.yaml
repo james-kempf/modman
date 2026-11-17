@@ -167,7 +167,9 @@ tasks:
     wave: 4
     depends_on: [T1, T3, T4]
     agent: gem-implementer
-    status: pending
+    status: completed
+    notes:
+      - "gate: c7f59c3 in git log develop"
     retries_used: 0
     acceptance_criteria:
       - "Gate check recorded: the commit hash of the parallel task, or the orchestrator completion reference. Without it the task returns blocked."
@@ -185,7 +187,11 @@ tasks:
     wave: 5
     depends_on: [T3, T4, T5, T7]
     agent: gem-implementer
-    status: pending
+    status: completed
+    notes:
+      - "gate: PR #5 merged (aa34ac7); T7 completed"
+      - "re-verified 2026-11-15: GitHub v0.7.3 MelonLoader.x64.zip top level [MelonLoader, version.dll], no installer; schedule1 1196 = file 3486 with only MelonLoader.Installer.exe, required by 341 mods; top 10: 8 off-site MelonLoader (7 melonwiki.xyz, mod 113 a github.com/LavaGang/MelonLoader v0.6.6 installer URL), no Thunderstore"
+      - "checker: outcome full, Gaps None -> support = tested; schedule1 back in the tested list"
     retries_used: 0
     acceptance_criteria:
       - "PR #5's commit is in `git log develop` before any edits; otherwise blocked."
@@ -205,7 +211,7 @@ tasks:
     wave: 6
     depends_on: [T5, T6, T7]
     agent: gem-reviewer
-    status: pending
+    status: completed
     retries_used: 0
     acceptance_criteria:
       - "`cd /home/jkempf/Repositories/modman && cargo fmt --all -- --check` passes."

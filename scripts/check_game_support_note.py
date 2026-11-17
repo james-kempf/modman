@@ -24,6 +24,10 @@ Rules:
   needs at least one row (matched by key or name).
 - A `loaders.<field>` reference must be set on the `[[loaders]]` entry the
   row names; any other field must be set in the definition.
+  `loaders.github` and `loaders.aliases` must be TOML tables
+  (`[loaders.github]`, `[loaders.aliases]`) on that entry.
+- A non-Gap row whose Route mentions "installer" (an installer-only Nexus
+  page) must cite `loaders.github`: the installer redirect needs it.
 - A `Gap` row needs a Gaps bullet that names its loader, and makes the
   outcome partial: Gaps `None` with a `Gap` row is an error.
 
@@ -109,7 +113,7 @@ def check_routes(
         if len(c) != 4 or not all(c):
             errors.append(f"{where}: row '{row}' needs 4 non-empty cells")
             continue
-        loader, _route, _ident, handled = c
+        loader, route, _ident, handled = c
         entry = loader_entry(loaders, loader)
         if entry is not None:
             named.add(id(entry))
@@ -124,10 +128,19 @@ def check_routes(
                 f"{where}: handled-by '{handled}' must be 'Gap' or backticked definition fields"
             )
             continue
+        # The installer redirect (top-level .exe/.msi on the loader's Nexus
+        # page) only exists when the loader declares a GitHub source.
+        if "installer" in route.lower() and "loaders.github" not in fields:
+            errors.append(
+                f"{where}: '{loader}' installer route needs `loaders.github` "
+                "(installer redirect) or 'Gap'"
+            )
         for f in fields:
             path = f.split(".")
             if path[0] == "loaders":
                 ok = entry is not None and field_set(entry, path[1:]) and len(path) > 1
+                if ok and path[1:] in (["github"], ["aliases"]):
+                    ok = isinstance(entry[path[1]], dict)
                 if not ok:
                     errors.append(
                         f"{where}: '{f}' is not set on a [[loaders]] entry for '{loader}'"

@@ -29,6 +29,20 @@ The interactive equivalent is `/add-game-support <domain> --rerun`.
 
 Tests: `python3 -B -m unittest scripts/test_*.py`.
 
+`check_game_support_note.py` checks each `## Loader routes` row's
+`Handled by` fields against the definition. Routes the schema handles:
+
+| Route | Handled by |
+|---|---|
+| Nexus page, archive matches `required_paths` | `loaders.nexus_mod_id` + `loaders.required_paths` |
+| Nexus page, installer-only (`.exe`/`.msi` at the root) | `loaders.nexus_mod_id` + `loaders.github` (installer redirect); Gap without `[loaders.github]` |
+| GitHub release zip | `loaders.github` |
+| Off-site requirement (URL or name) | `loaders.aliases` + `loaders.github` or `loaders.nexus_mod_id` |
+
+A `loaders.<field>` must be set on the named `[[loaders]]` entry, and
+`loaders.github` / `loaders.aliases` must be tables there. A non-Gap row
+whose Route contains "installer" must cite `loaders.github`.
+
 ## Research helpers: Nexus data and archive listings
 
 The research agent gets two read-only helpers (stdlib only, always run as
