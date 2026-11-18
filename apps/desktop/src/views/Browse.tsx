@@ -15,10 +15,6 @@ import { RemoveButton } from "../components/browse/ModActions";
 import {
   ArrowClockwiseIcon,
   CalendarBlankIcon,
-  CaretDoubleLeftIcon,
-  CaretDoubleRightIcon,
-  CaretLeftIcon,
-  CaretRightIcon,
   DownloadSimpleIcon,
   FunnelIcon,
   HardDrivesIcon,
@@ -35,6 +31,7 @@ import {
   CardSection,
   Empty,
   ErrorNote,
+  Pagination,
   Picture,
   Segmented,
   Select,
@@ -444,80 +441,23 @@ function BrowseCard({ game }: { game: string }) {
                   : visible.collections.map((c) => <CollectionTile key={c.slug} game={game} c={c} />)}
               </ul>
             )}
-            {/* role=navigation, not <nav> (landmarks inside <main> share its spatial-nav region, nav/spatial.ts).
-                A toolbar stuck to the bottom of <main>: the last child of the
-                results section, so it pins while the grid is on screen and rests below the last row (in flow, it
-                never covers it). -mx-section: edge to edge across the card. While scrolled up it pins flush to
-                <main>'s bottom edge: WebKit insets sticky by <main>'s padding-bottom, so bottom is minus that
-                padding (--main-pb, set by App). At the end it rests here with <main>'s usual bottom padding below. Nothing of the card shows under it:
-                the section has no bottom padding (pb-0) and -mb-px covers the card's bottom border. */}
+            {/* Pagination pins to the bottom of <main> by default: the last child of the results section, so it
+                pins while the grid is on screen and rests below the last row (in flow, it never covers it).
+                -mx-section: edge to edge across the card. Nothing of the card shows under it: the section has no
+                bottom padding (pb-0) and -mb-px covers the card's bottom border. */}
             {hasPager && (
-              <div
-                role="navigation"
-                className="sticky bottom-[calc(var(--main-pb,0px)*-1)] z-10 -mx-section mt-5 -mb-px flex flex-wrap items-center gap-4 rounded-b-card border-t border-hairline bg-ink-2 px-section py-3"
-                aria-label={`${kind === "mods" ? "Mods" : "Collections"} pages`}
-              >
-                {/* inactive, not disabled: focus stays on the button at the first/last page. */}
-                {paged && (
-                  <span className="flex gap-2">
-                    <Button
-                      size="sm"
-                      {...{ [FOCUS_ATTR]: "page:first" }}
-                      inactive={page === 0}
-                      busy={loading}
-                      icon={<CaretDoubleLeftIcon aria-hidden size={16} />}
-                      onClick={() => goTo(0, "first")}
-                    >
-                      First
-                    </Button>
-                    <Button
-                      size="sm"
-                      {...{ [FOCUS_ATTR]: "page:prev" }}
-                      inactive={page === 0}
-                      busy={loading}
-                      icon={<CaretLeftIcon aria-hidden size={16} />}
-                      onClick={() => goPage(-1)}
-                    >
-                      Previous
-                    </Button>
-                  </span>
-                )}
-                <span className="font-mono text-caption text-dim tabular-nums">
-                  {loading ? (
-                    // The target page; the total may belong to the previous query.
-                    <>Page {page + 1} · loading…</>
-                  ) : (
-                    <>
-                      Page {page + 1} of {pages.toLocaleString()} · {(first + 1).toLocaleString()}–
-                      {(first + shown).toLocaleString()} of {total.toLocaleString()}
-                    </>
-                  )}
-                </span>
-                {paged && (
-                  <span className="ml-auto flex gap-2">
-                    <Button
-                      size="sm"
-                      {...{ [FOCUS_ATTR]: "page:next" }}
-                      inactive={page + 1 >= pages}
-                      busy={loading}
-                      onClick={() => goPage(1)}
-                    >
-                      Next
-                      <CaretRightIcon aria-hidden size={16} />
-                    </Button>
-                    <Button
-                      size="sm"
-                      {...{ [FOCUS_ATTR]: "page:last" }}
-                      inactive={page + 1 >= pages}
-                      busy={loading}
-                      onClick={() => goTo(pages - 1, "last")}
-                    >
-                      Last
-                      <CaretDoubleRightIcon aria-hidden size={16} />
-                    </Button>
-                  </span>
-                )}
-              </div>
+              <Pagination
+                label={`${kind === "mods" ? "Mods" : "Collections"} pages`}
+                className="-mx-section mt-5 -mb-px"
+                page={page}
+                pages={pages}
+                size={PAGE_SIZE}
+                total={total}
+                shown={shown}
+                loading={loading}
+                buttonAttrs={(step) => ({ [FOCUS_ATTR]: `page:${step}` })}
+                onPage={goTo}
+              />
             )}
           </>
         )}

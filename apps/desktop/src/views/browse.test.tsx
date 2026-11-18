@@ -832,7 +832,8 @@ describe("Browse LT/RT paging", () => {
     await screen.findByText("Mod 1");
     const pager = screen.getByRole("navigation", { name: "Mods pages" });
     expect(pager.className).toMatch(/(^|\s)-mx-section(\s|$)/);
-    expect(within(pager).getByRole("button", { name: /Next/ }).parentElement!.className).toMatch(/\bml-auto\b/);
+    // The last grid column, pushed to its end (Pagination's 1fr|label|1fr grid).
+    expect(within(pager).getByRole("button", { name: /Next/ }).parentElement!).toHaveClass("col-start-3", "justify-self-end");
   });
 });
 

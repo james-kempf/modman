@@ -15,6 +15,7 @@ export { IconButton } from "./controls/IconButton";
 export { ListToggle } from "./controls/ListToggle";
 export { MsgLine } from "./display/MsgLine";
 export { Notice, type NoticeTone } from "./feedback/Notice";
+export { Pagination, type PageStep } from "./controls/Pagination";
 export { PadGlyph } from "./display/PadGlyph";
 export { Picture } from "./display/Picture";
 export { Row } from "./layout/Row";

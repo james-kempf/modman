@@ -239,7 +239,7 @@ Depth comes from surface steps plus a hairline border. Shadows are used only for
 
 | Value | Layer | Where |
 |---|---|---|
-| 10 | sticky in-flow toolbars | Browse pager (`views/Browse.tsx`) |
+| 10 | sticky in-flow toolbars | `Pagination` (Browse, Mods), Mods bulk bar + pager footer |
 | 30 | dropdown/listbox | `Select` list |
 | 50 | modal + scrim | `Dialog` (portal on `<body>`) |
 | 60 | film grain (non-interactive) | `body::after` |
@@ -478,6 +478,10 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 - Yes uses the `danger` Button tone; No is `default`. Focus starts on No ("Keep mod"), whatever `default_yes` says (that stays the CLI and Headless default), so a stray A or Enter keeps the mod.
 - Option: "Delete archive too", a pad-focusable checkbox, unchecked by default (opt-in). Unticked keeps the downloaded archive (the mod can be reinstalled from Downloads); ticked deletes it.
 - While the answer is sent every button is `busy` (`aria-busy` + `aria-disabled`, focus stays on the pressed one), never native `disabled`.
+
+### Pagination (`controls/Pagination.tsx`)
+
+- The app's one paging UI: use `Pagination` for any paged list instead of ad-hoc paging controls. A `role=navigation` toolbar (`bg-ink-2 border-t border-hairline px-section py-3 rounded-b-card`): First / Previous, the count ("Page 2 of 7 · 25–48 of 160", `font-mono text-caption text-dim tabular-nums`), Next / Last (`Button size="sm"`), on a `grid-cols-[1fr_minmax(0,auto)_1fr]` grid: the button groups hug the edges and the count is centred in the full width (it wraps rather than overlap the buttons when narrow). One page: the count only, still centred. Ends are `inactive` (still focusable); `loading` makes the buttons busy and shows "Page n · loading…". By default it pins to the bottom of its parent card while `<main>` scrolls (`sticky bottom-[calc(var(--main-pb,0px)*-1)] z-10`; place it last in the card, with no overflow-hidden/auto ancestor up to `<main>`); `className` is appended for placement tweaks (Browse adds `-mx-section mt-5 -mb-px`). Used by Browse and the Mods load order; on Mods it shares one sticky footer with the bulk selection bar so the two stack instead of overlapping.
 
 ### Bulk selection bar (Mods load order, `views/mods/BulkBar.tsx`, `useSelection.ts`)
 

@@ -39,6 +39,7 @@ import {
   ErrorNote,
   IconButton,
   LIST_ROW,
+  Pagination,
   SKELETON_DELAY_MS,
   SearchRow,
   Select,
@@ -66,7 +67,6 @@ import type {
 import { NoGame } from "../components/shell/NoGame";
 import { BulkBar, type BulkAction } from "./mods/BulkBar";
 import { useSelection } from "./mods/useSelection";
-import { Pager } from "./mods/Pager";
 import { MODS_PAGE_SIZE, clampPage, pageCount, pageSlice } from "./mods/paginate";
 
 // "Load order", not "Mods": the app's view bar already has a tab named Mods.
@@ -554,23 +554,33 @@ function ModList({ game }: { game: string }) {
             );
           })}
         </ol>
-        <BulkBar
-          count={sel.count}
-          busy={bulkBusy}
-          onEnable={() => void bulkEnable(true)}
-          onDisable={() => void bulkEnable(false)}
-          onUninstall={() => void bulkUninstall()}
-          onClear={sel.clear}
-          className={pages > 1 ? undefined : "rounded-b-card"}
-        />
-        <Pager
-          label="Load order pages"
-          page={page}
-          pages={pages}
-          size={MODS_PAGE_SIZE}
-          total={shown.length}
-          onPage={(to) => setPage(to)}
-        />
+        {/* The bulk bar and the pager both pin to the bottom of <main>: one sticky footer holds them so they
+            stack (the bar above the pager) instead of pinning on top of each other. Their own sticky is inert
+            inside it (each already sits within the pinned footer). Rendered only with content: an empty child
+            would still draw the card's divider. */}
+        {(sel.count > 0 || pages > 1) && (
+          <div className="sticky bottom-[calc(var(--main-pb,0px)*-1)] z-10 rounded-b-card">
+            <BulkBar
+              count={sel.count}
+              busy={bulkBusy}
+              onEnable={() => void bulkEnable(true)}
+              onDisable={() => void bulkEnable(false)}
+              onUninstall={() => void bulkUninstall()}
+              onClear={sel.clear}
+              className={pages > 1 ? undefined : "rounded-b-card"}
+            />
+            {pages > 1 && (
+              <Pagination
+                label="Load order pages"
+                page={page}
+                pages={pages}
+                size={MODS_PAGE_SIZE}
+                total={shown.length}
+                onPage={(to) => setPage(to)}
+              />
+            )}
+          </div>
+        )}
       </Card>
       )}
       {detail && (

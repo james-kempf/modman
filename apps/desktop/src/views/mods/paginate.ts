@@ -15,25 +15,3 @@ export function pageSlice<T>(items: readonly T[], page: number, size: number): T
   const start = clampPage(page, pageCount(items.length, size)) * size;
   return items.slice(start, start + size);
 }
-
-/** 1-based first and last row numbers of `page`, for "51–100 of 312" (0–0 when empty). */
-export function pageRange(page: number, size: number, total: number) {
-  if (!total) return { first: 0, last: 0 };
-  const first = page * size + 1;
-  return { first, last: Math.min(total, first + size - 1) };
-}
-
-const SLOTS = 7;
-
-/**
- * The page buttons to show: all of them up to 7 pages, else always 7 slots
- * (first, last, current ±1, "gap" for the skipped runs), so the pager keeps
- * its width while paging.
- */
-export function pageList(page: number, pages: number): (number | "gap")[] {
-  const range = (from: number, n: number) => Array.from({ length: n }, (_, i) => from + i);
-  if (pages <= SLOTS) return range(0, pages);
-  if (page < 4) return [...range(0, 5), "gap", pages - 1];
-  if (page > pages - 5) return [0, "gap", ...range(pages - 5, 5)];
-  return [0, "gap", page - 1, page, page + 1, "gap", pages - 1];
-}

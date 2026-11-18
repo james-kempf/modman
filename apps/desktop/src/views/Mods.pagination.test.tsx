@@ -22,15 +22,26 @@ const rows = () => within(screen.getByRole("list", { name: "Load order" })).getA
 const pager = () => screen.getByRole("navigation", { name: "Load order pages" });
 
 describe("load order paging", () => {
-  // Fails when the whole list renders at once, the range label is wrong, or the current page is marked by colour only.
-  it("shows one page with a range label and the current page marked by aria-current", async () => {
+  // Fails when the whole list renders at once, the range label is wrong, or Mods stops using the shared pager
+  // (First/Previous/Next/Last with "Page n of m").
+  it("shows one page in the shared pager with a page and range label", async () => {
     await open({ mods_list: () => ({ mods: many(60), changed_since_deploy: false }) });
     await screen.findByTitle("Row 1");
     expect(rows()).toHaveLength(MODS_PAGE_SIZE);
-    expect(pager()).toHaveTextContent("1–50 of 60");
-    expect(within(pager()).getByRole("button", { name: "Page 1" })).toHaveAttribute("aria-current", "page");
-    expect(within(pager()).getByRole("button", { name: "Page 2" })).not.toHaveAttribute("aria-current");
+    expect(pager()).toHaveTextContent("Page 1 of 2 · 1–50 of 60");
+    expect(within(pager()).getByRole("button", { name: "First" })).toHaveAttribute("aria-disabled", "true");
     expect(within(pager()).getByRole("button", { name: "Previous" })).toHaveAttribute("aria-disabled", "true");
+    expect(within(pager()).getByRole("button", { name: "Last" })).not.toHaveAttribute("aria-disabled");
+  });
+
+  // Fails when the pager scrolls away with the list, or the bulk bar and pager pin separately and overlap.
+  it("pins the bulk bar and pager together in one sticky footer", async () => {
+    const { user } = await open({ mods_list: () => ({ mods: many(60), changed_since_deploy: false }) });
+    await screen.findByTitle("Row 1");
+    await user.click(screen.getByRole("checkbox", { name: "Select Row 1" }));
+    const footer = pager().parentElement!;
+    expect(footer).toHaveClass("sticky", "z-10");
+    expect(footer).toContainElement(screen.getByRole("region", { name: "Selected mods" }));
   });
 
   // Fails when Next does not page, or focus is left on a pager button far below the new rows.
@@ -39,8 +50,7 @@ describe("load order paging", () => {
     await screen.findByTitle("Row 1");
     await user.click(within(pager()).getByRole("button", { name: "Next" }));
     expect(rows()).toHaveLength(10);
-    expect(pager()).toHaveTextContent("51–60 of 60");
-    expect(within(pager()).getByRole("button", { name: "Page 2" })).toHaveAttribute("aria-current", "page");
+    expect(pager()).toHaveTextContent("Page 2 of 2 · 51–60 of 60");
     expect(within(pager()).getByRole("button", { name: "Next" })).toHaveAttribute("aria-disabled", "true");
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("checkbox", { name: "Select Row 51" })));
   });
@@ -57,11 +67,11 @@ describe("load order paging", () => {
   it("goes back to page 1 when the search changes", async () => {
     const { user } = await open({ mods_list: () => ({ mods: many(120), changed_since_deploy: false }) });
     await screen.findByTitle("Row 1");
-    await user.click(within(pager()).getByRole("button", { name: "Page 3" }));
+    await user.click(within(pager()).getByRole("button", { name: "Last" }));
     expect(screen.getByTitle("Row 101")).toBeInTheDocument();
     await user.type(screen.getByRole("searchbox", { name: "Search mods" }), "Row");
     expect(screen.getByTitle("Row 1")).toBeInTheDocument();
-    expect(within(pager()).getByRole("button", { name: "Page 1" })).toHaveAttribute("aria-current", "page");
+    expect(pager()).toHaveTextContent("Page 1 of 3");
   });
 
   // Fails when moving a page's edge row onto the previous page drops focus to <body>.
@@ -78,7 +88,7 @@ describe("load order paging", () => {
     await user.click(within(pager()).getByRole("button", { name: "Next" }));
     await user.click(screen.getByRole("button", { name: "Move Row 51 up" }));
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Move Row 51 up" })));
-    expect(within(pager()).getByRole("button", { name: "Page 1" })).toHaveAttribute("aria-current", "page");
+    expect(pager()).toHaveTextContent("Page 1 of 2");
   });
 
   // Fails when the list shrinks under the last page and an empty page (or the no-match state) is shown.
