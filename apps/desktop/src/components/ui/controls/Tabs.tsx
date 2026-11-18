@@ -9,6 +9,7 @@
 // a tab strip there is one more press between the header and the content. Start/end adornments (e.g. LB/RB glyphs) are siblings
 // of the tablist, never children, so the tablist owns only role=tab elements.
 
+import type { Icon } from "@phosphor-icons/react";
 import { useEffect, useId, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
 import { TAB_EVENT, type TabEventDetail } from "../../../nav/actions";
 import { isPad, subscribePad } from "../../../nav/modality";
@@ -18,8 +19,11 @@ import { cx } from "../styles";
 export interface TabItem<T extends string> {
   value: T;
   label: string;
-  /** Leading glyph (decorative; give it aria-hidden). */
-  icon?: ReactNode;
+  /**
+   * Leading icon, as a component (e.g. `StackIcon`). Tabs renders it decorative (aria-hidden) at 20px duotone
+   * and owns its colour (TAB_ICON); callers pass no classes.
+   */
+  icon?: Icon;
 }
 
 // One line over the full width of the bar, every tab the same width: one grid column per tab, each `1fr`.
@@ -40,6 +44,11 @@ const TAB =
 // The selected tab's pill: scale + opacity only, spring easing, none under reduced motion.
 const HIGHLIGHT =
   "pointer-events-none absolute inset-0 scale-95 rounded-pill bg-accent-400/15 opacity-0 transition-[transform,opacity] duration-[250ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-aria-selected:scale-100 group-aria-selected:opacity-100 motion-reduce:transition-none in-highlight:ring-2 in-highlight:ring-accent-600 in-highlight:ring-inset";
+// Tab icon: zinc-400 like the label at rest (currentColor), accent-300 when selected (the tab is the `group`).
+// On the white highlight (hover or nav focus) it takes the tab's own text colour (text-current): focus ink when
+// unselected, the selected tab's --focus-text accent when selected. A fixed accent there would leave an
+// unselected hovered tab's icon green.
+const TAB_ICON = "shrink-0 transition-colors duration-150 group-aria-selected:text-accent-300 in-highlight:text-current";
 // Positioned so it paints above the (absolute) pill.
 const CONTENT = "relative inline-flex items-center gap-2";
 
@@ -51,7 +60,8 @@ function usePad(): boolean {
 }
 
 /**
- * Tabs, and the selected tab's panel when `children` is given. LB/RB (the enclosing dialog's TAB_EVENT)
+ * Tabs, and the selected tab's panel when `children` is given. A tab's `icon` (a component) is rendered and
+ * styled here: 20px duotone, aria-hidden, coloured with the label (accent when selected). LB/RB (the enclosing dialog's TAB_EVENT)
  * switch tabs with wrap-around; the listener attaches only inside a `data-nav-scope` (never document/body).
  * Focus inside the old panel moves into the new one.
  *
@@ -179,6 +189,7 @@ export function Tabs<T extends string>({
         {tabs.map((t) => {
           const selected = t.value === value;
           const panelId = hasPanel ? `${id}-panel-${t.value}` : controls;
+          const TabIcon = t.icon;
           return (
             <button
               key={t.value}
@@ -197,7 +208,7 @@ export function Tabs<T extends string>({
             >
               <span aria-hidden="true" data-tab-highlight className={HIGHLIGHT} />
               <span className={CONTENT}>
-                {t.icon}
+                {TabIcon && <TabIcon aria-hidden size={20} weight="duotone" className={TAB_ICON} />}
                 <span>{t.label}</span>
               </span>
             </button>

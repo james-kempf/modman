@@ -14,9 +14,10 @@ import {
   SquaresFourIcon,
   StackIcon,
   TerminalWindowIcon,
+  type Icon,
 } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState, type JSX, type ReactNode } from "react";
+import { useEffect, useState, type JSX } from "react";
 import vesselLogo from "../assets/vessel-logo.svg";
 import { AddGameHost } from "../components/dialogs/AddGameDialog";
 import { ViewBoundary } from "../components/shell/ErrorBoundary";
@@ -52,17 +53,16 @@ const VIEW: Record<ViewId, () => JSX.Element> = {
   settings: Settings,
 };
 
-// The selected tab's icon takes the accent (the tab is the Tabs `group`); dark on the white focus highlight.
-const ICON_CLASS = "shrink-0 transition-colors duration-150 group-aria-selected:text-accent-300 in-highlight:text-accent-700";
-const ICON: Record<ViewId, ReactNode> = {
-  games: <GameControllerIcon aria-hidden size={20} weight="duotone" className={ICON_CLASS} />,
-  overview: <SquaresFourIcon aria-hidden size={20} weight="duotone" className={ICON_CLASS} />,
-  mods: <StackIcon aria-hidden size={20} weight="duotone" className={ICON_CLASS} />,
-  browse: <CompassIcon aria-hidden size={20} weight="duotone" className={ICON_CLASS} />,
-  collections: <BooksIcon aria-hidden size={20} weight="duotone" className={ICON_CLASS} />,
-  requirements: <PuzzlePieceIcon aria-hidden size={20} weight="duotone" className={ICON_CLASS} />,
-  activity: <TerminalWindowIcon aria-hidden size={20} weight="duotone" className={ICON_CLASS} />,
-  settings: <GearSixIcon aria-hidden size={20} weight="duotone" className={ICON_CLASS} />,
+// View tab icons; Tabs sizes and colours them.
+const ICON: Record<ViewId, Icon> = {
+  games: GameControllerIcon,
+  overview: SquaresFourIcon,
+  mods: StackIcon,
+  browse: CompassIcon,
+  collections: BooksIcon,
+  requirements: PuzzlePieceIcon,
+  activity: TerminalWindowIcon,
+  settings: GearSixIcon,
 };
 
 /** id of <main>, the element the view tabs control. */

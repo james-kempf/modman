@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Tabs: one shared look (view bar and dialogs), slots, roving tabindex (APG manual activation), dialog LB/RB scoping.
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StackIcon } from "@phosphor-icons/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { PadGlyph, Tabs, type TabItem } from "..";
@@ -11,7 +12,7 @@ import { findNext, focusables } from "../../../nav/spatial";
 
 type V = "a" | "b" | "c";
 const TABS: readonly TabItem<V>[] = [
-  { value: "a", label: "Alpha", icon: <svg data-testid="icon-a" aria-hidden /> },
+  { value: "a", label: "Alpha", icon: StackIcon },
   { value: "b", label: "Beta" },
   { value: "c", label: "Gamma" },
 ];
@@ -77,7 +78,8 @@ describe("Tabs", () => {
     render(<Harness />);
     const [a, b] = screen.getAllByRole("tab");
     expect(a).toHaveAttribute("data-tab", "a");
-    expect(within(a).getByTestId("icon-a")).toBeInTheDocument();
+    expect(a.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+    expect(b.querySelector("svg")).toBeNull();
     expect(b).toHaveTextContent("Beta");
     expect(screen.queryByRole("tabpanel")).toBeNull();
   });
@@ -289,5 +291,19 @@ describe("Tabs in controller mode (html[data-pad])", () => {
     act(() => setPad(false));
     await waitFor(() => expect(tabindexes()).toEqual(["0", "-1", "-1"]));
     expect(tabStops()).toHaveLength(3);
+  });
+});
+
+describe("Tabs icons", () => {
+  // Fails when a highlighted (hovered / nav-focused) unselected tab's icon keeps a fixed colour instead of its
+  // text colour (it used to stay accent-700 on the focus ink), or loses the selected accent / 20px size.
+  it("Tabs styles the icon: label colour on the highlight, accent only via selection", () => {
+    render(<Harness />);
+    const svg = screen.getByRole("tab", { name: "Alpha" }).querySelector("svg")!;
+    const cls = svg.getAttribute("class")!.split(/\s+/);
+    expect(cls).toContain("in-highlight:text-current");
+    expect(cls.filter((c) => c.startsWith("in-highlight:text-") && c !== "in-highlight:text-current")).toEqual([]);
+    expect(cls).toContain("group-aria-selected:text-accent-300");
+    expect(svg).toHaveAttribute("width", "20");
   });
 });
