@@ -202,24 +202,25 @@ describe("game library", () => {
 });
 
 describe("add-game dialog", () => {
-  const detected = [
-    { domain: "fallout4", name: "Fallout 4", appid: 377160, install_dir: "/s/Fallout 4", support: "experimental", configured: false },
-    { domain: "skyrimspecialedition", name: "Skyrim Special Edition", appid: 489830, install_dir: "/s/SSE", support: "tested", configured: true },
-    // No preset: offered in the Games grid, not as a one-click add here.
-    { domain: "steam-632360", name: "Risk of Rain 2", appid: 632360, install_dir: "/s/RoR2", support: null, configured: false },
-  ];
-
-  // Fails when detected games are not offered, or Add does not pass the Steam folder / close the dialog.
-  it("adds a game found in Steam from the Add game button and returns focus to it", async () => {
-    const { t, user } = await library({ games_detect: () => detected, game_add: () => game({ id: "fallout4" }) });
+  // Fails when the dialog brings back the Steam-detected list, or a manual add does not close it / return focus.
+  it("is manual-only: no detected-games list; a successful add closes and returns focus", async () => {
+    const { t, user } = await library({ game_add: () => game({ id: "fallout4" }) });
     const open = within(screen.getByRole("main")).getByRole("button", { name: "Add game" });
     open.focus();
     await user.keyboard("{Enter}");
     const dlg = await screen.findByRole("dialog", { name: "Add a game" });
-    // Configured games are not offered again.
-    const found = await within(dlg).findByRole("list", { name: "Detected games" });
-    expect(within(found).getAllByRole("listitem")).toHaveLength(1);
-    await user.click(within(found).getByRole("button", { name: "Add Fallout 4" }));
+    expect(within(dlg).getByText(/not detected automatically/)).toBeInTheDocument();
+    expect(within(dlg).queryByRole("list", { name: "Detected games" })).toBeNull();
+    expect(within(dlg).queryByRole("button", { name: "Detect again" })).toBeNull();
+    expect(within(dlg).queryByText(/Add by Nexus domain/i)).toBeNull();
+    expect(within(dlg).queryByText(/The part after nexusmods.com/)).toBeNull();
+    expect(within(dlg).getByLabelText("Nexus game domain")).toHaveAttribute(
+      "placeholder",
+      expect.stringContaining("nexusmods.com/"),
+    );
+    await user.type(within(dlg).getByLabelText("Nexus game domain"), "fallout4");
+    await user.type(within(dlg).getByLabelText("Game folder"), "/s/Fallout 4");
+    await user.click(within(dlg).getByRole("button", { name: "Add game" }));
     await waitFor(() =>
       expect(t.callsOf("game_add")).toEqual([{ domain: "fallout4", path: "/s/Fallout 4", subdir: null, profile: null }]),
     );
@@ -227,14 +228,30 @@ describe("add-game dialog", () => {
     await waitFor(() => expect(document.activeElement).toBe(open));
   });
 
+  // Fails when game_add can be called without a folder (path null), or the folder is not marked required.
+  it("blocks submit without a game folder and shows an inline error", async () => {
+    const { t, user } = await library({ game_add: () => game() });
+    await user.click(within(screen.getByRole("main")).getByRole("button", { name: "Add game" }));
+    const dlg = await screen.findByRole("dialog", { name: "Add a game" });
+    const folder = within(dlg).getByLabelText("Game folder");
+    expect(folder).toBeRequired();
+    await user.type(within(dlg).getByLabelText("Nexus game domain"), "stardewvalley");
+    await user.type(folder, "   ");
+    await user.click(within(dlg).getByRole("button", { name: "Add game" }));
+    expect(folder).toHaveAttribute("aria-invalid", "true");
+    expect(folder).toHaveAccessibleDescription(/game's folder/);
+    expect(document.activeElement).toBe(folder);
+    expect(t.callsOf("game_add")).toEqual([]);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
   // Fails when the manual form drops the domain or folder, or Escape does not close.
   it("adds any game by Nexus domain; Escape closes", async () => {
     const { t, user } = await library({ game_add: () => undefined });
     await user.click(within(screen.getByRole("main")).getByRole("button", { name: "Add game" }));
     const dlg = await screen.findByRole("dialog", { name: "Add a game" });
-    await within(dlg).findByText(/No other supported games/);
     await user.type(within(dlg).getByLabelText("Nexus game domain"), "stardewvalley");
-    await user.type(within(dlg).getByLabelText("Game folder (optional)"), "/games/sv");
+    await user.type(within(dlg).getByLabelText("Game folder"), "/games/sv");
     await user.click(within(dlg).getByRole("button", { name: "Add game" }));
     await waitFor(() =>
       expect(t.callsOf("game_add")).toEqual([{ domain: "stardewvalley", path: "/games/sv", subdir: null, profile: null }]),

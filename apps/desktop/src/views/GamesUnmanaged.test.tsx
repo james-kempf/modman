@@ -156,7 +156,7 @@ describe("unmanaged games grid", () => {
     expect(within(list).getByRole("button", { name: "Add Fallout 4" })).not.toHaveAccessibleDescription(/Unsupported/);
     await user.click(ror);
     const dlg = await screen.findByRole("dialog", { name: "Add a game" });
-    expect(within(dlg).getByLabelText("Game folder (optional)")).toHaveValue("/s/RoR2");
+    expect(within(dlg).getByLabelText("Game folder")).toHaveValue("/s/RoR2");
     expect(within(dlg).getByText(/no preset for Risk of Rain 2/)).toBeInTheDocument();
     expect(within(dlg).queryByRole("button", { name: "Add Risk of Rain 2" })).toBeNull();
     expect(t.callsOf("game_add")).toEqual([]);

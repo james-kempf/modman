@@ -108,7 +108,7 @@ Quick way: run `packaging/add-to-steam.sh`. It asks how Vessel is installed (App
 1. Download `Vessel_<version>_amd64.AppImage` to e.g. `~/Applications/` and make it executable (Dolphin: Properties, Permissions, "Is executable"; or `chmod +x`).
 2. Start it once in Desktop Mode. Then run `~/Applications/Vessel_<version>_amd64.AppImage nxm register` in Konsole, so browser "Mod manager download" buttons open Vessel.
 3. In Steam (Desktop Mode): **Games, Add a Non-Steam Game to My Library, Browse**. Pick the AppImage (set the file type filter to "All files"), then **Add Selected Programs**.
-4. Optionally, in the shortcut's **Properties**, rename it to `Vessel` and set artwork. Leave the launch options empty: arguments switch the AppImage to CLI mode.
+4. Optionally, in the shortcut's **Properties**, rename it to `Vessel` and set artwork. Ready-made artwork is in `packaging/steam/`. Leave the launch options empty: arguments switch the AppImage to CLI mode.
 5. Flatpak: add **Vessel** from the list (it appears as an installed application), or Browse to `/var/lib/flatpak/exports/bin/org.vessel.app`.
 
 The window opens at 1280x800, the Deck's native resolution.
