@@ -48,7 +48,7 @@ export function Select<T extends string>({
     if (!open) return;
     const el = list.current;
     (el?.querySelector<HTMLElement>("[aria-selected=true]") ?? el?.querySelector<HTMLElement>("[role=option]"))?.focus();
-    // Escape / gamepad B arrive as "back" on the topmost nav scope: this list.
+    // Escape / gamepad B arrive as BACK_EVENT on the topmost nav scope: this list.
     const onBack = () => close();
     el?.addEventListener(BACK_EVENT, onBack);
     return () => el?.removeEventListener(BACK_EVENT, onBack);

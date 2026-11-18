@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TOAST_CLOSE_MS } from "../components/ui";
 import { afterChange, deployReport, experimentalGame, game, mod } from "../mock/fixtures";
+import { performNav } from "../nav/actions";
+import { setPad } from "../nav/modality";
+import { focusables } from "../nav/spatial";
 import { setup } from "../test/harness";
 import { TOAST_MIN_DWELL_MS, VIEWS, useUi } from "./store";
 
@@ -502,5 +505,42 @@ describe("toast slot in the app bar", () => {
     act(() => useUi.getState().closeToast(useUi.getState().toast!.id));
     expect(liveText(pill)).toContain("2 / 10 files");
     expect(pill.querySelector("[data-toast-out]")).toHaveTextContent("Saved");
+  });
+});
+
+describe("controller mode (html[data-pad])", () => {
+  afterEach(() => setPad(false));
+  const tabStops = (list: HTMLElement) => focusables(document.body).filter((el) => list.contains(el));
+
+  // Fails when the view bar stays a D-pad stop in controller mode, or LB/RB leave focus on a tab / nowhere.
+  it("the view tabs leave focus and spatial nav; LB/RB put focus in the new view; B does nothing", async () => {
+    const { renderApp } = await setup();
+    renderApp();
+    await heading("Games");
+    expect(document.activeElement).toHaveAttribute("data-tab", "games");
+    act(() => setPad(true));
+    expect(tabStops(viewTabs())).toEqual([]);
+    await waitFor(() => within(viewTabs()).getAllByRole("tab").forEach((t) => expect(t.tabIndex).toBe(-1)));
+    act(() => performNav({ type: "tab", delta: -1 }));
+    await heading("Settings");
+    await waitFor(() => expect(screen.getByRole("main")).toContainElement(document.activeElement as HTMLElement));
+    expect(document.activeElement).not.toHaveAttribute("role", "tab");
+    // B without a dialog does nothing: focus and view stay.
+    const before = document.activeElement;
+    act(() => performNav({ type: "close" }));
+    expect(document.activeElement).toBe(before);
+    expect(useUi.getState().view).toBe("settings");
+  });
+
+  // Fails when the Mods sub-tabs (controllerFocusable) drop out with the view bar in controller mode.
+  it("the Mods sub-tabs stay a roving stop", async () => {
+    const { renderApp } = await setup();
+    renderApp();
+    act(() => useUi.getState().setView("mods"));
+    const list = await screen.findByRole("tablist", { name: "Mods sections" });
+    act(() => setPad(true));
+    await act(async () => {});
+    expect(tabStops(list)).toHaveLength(4);
+    expect(within(list).getAllByRole("tab").filter((t) => t.tabIndex === 0)).toHaveLength(1);
   });
 });

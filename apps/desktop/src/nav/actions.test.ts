@@ -2,6 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetUi, useUi } from "../app/store";
 import { BACK_EVENT, PAGE_EVENT, TAB_EVENT, keyToNav, openView, performNav } from "./actions";
+import { setPad } from "./modality";
+import { PAD_SKIP_ATTR, recoverFocus } from "./spatial";
 
 const key = (k: string, target: Element = document.body, mods: Partial<KeyboardEventInit> = {}) => {
   const e = new KeyboardEvent("keydown", { key: k, bubbles: true, ...mods });
@@ -12,6 +14,7 @@ const key = (k: string, target: Element = document.body, mods: Partial<KeyboardE
 beforeEach(() => resetUi());
 afterEach(() => {
   document.body.innerHTML = "";
+  setPad(false);
 });
 
 describe("keyboard mapping", () => {
@@ -132,7 +135,7 @@ describe("performNav", () => {
     expect(document.activeElement).toBe(tabs.games);
   });
 
-  // Fails when Escape/B from a view does not return to the SELECTED top tab.
+  // Fails when Escape from a view does not return to the SELECTED top tab.
   it("back without a dialog focuses the selected view tab", () => {
     const { tabs } = shellTabs("browse");
     const inView = document.createElement("button");
@@ -140,6 +143,70 @@ describe("performNav", () => {
     inView.focus();
     performNav({ type: "back" });
     expect(document.activeElement).toBe(tabs.browse);
+  });
+
+  /** The view bar as Tabs renders it without controllerFocusable, controlling a <main> with one control. */
+  function padShell(selected = "browse") {
+    const { tabs } = shellTabs(selected);
+    const list = document.querySelector("[data-view-tabs]")!;
+    list.setAttribute(PAD_SKIP_ATTR, "");
+    const main = document.createElement("main");
+    main.id = "view";
+    const first = document.createElement("button");
+    main.appendChild(first);
+    document.body.appendChild(main);
+    for (const t of Object.values(tabs)) t.setAttribute("aria-controls", "view");
+    return { tabs, first };
+  }
+
+  // Fails when Escape arrives before the keyboard clears controller mode and parks focus on a skipped view tab.
+  it("back without a dialog in controller mode focuses the view's first control, not the tab", () => {
+    const { first } = padShell();
+    setPad(true);
+    performNav({ type: "back" });
+    expect(document.activeElement).toBe(first);
+  });
+
+  // Fails when gamepad B does anything without a dialog (focus change or view switch).
+  it("close without a dialog changes nothing", () => {
+    const { first } = padShell("browse");
+    setPad(true);
+    first.focus();
+    performNav({ type: "close" });
+    expect(document.activeElement).toBe(first);
+    expect(useUi.getState().view).toBe("games");
+  });
+
+  // Fails when gamepad B stops closing the topmost dialog.
+  it("close inside a dialog scope notifies that dialog", () => {
+    const dlg = document.createElement("div");
+    dlg.setAttribute("data-nav-scope", "");
+    document.body.appendChild(dlg);
+    const back = vi.fn();
+    dlg.addEventListener(BACK_EVENT, back);
+    performNav({ type: "close" });
+    expect(back).toHaveBeenCalledOnce();
+  });
+
+  // Fails when LB/RB or openView focus a view tab in controller mode (App focuses the new view instead).
+  it("tab / openView in controller mode switch views without focusing a tab", () => {
+    const { tabs, first } = padShell("games");
+    setPad(true);
+    first.focus();
+    performNav({ type: "tab", delta: 1 });
+    expect(useUi.getState().view).toBe("overview");
+    expect(document.activeElement).toBe(first);
+    openView("mods");
+    expect(useUi.getState().view).toBe("mods");
+    expect(document.activeElement).not.toBe(tabs.mods);
+  });
+
+  // Fails when focus recovery falls back to a view tab in controller mode.
+  it("recoverFocus in controller mode skips the view tabs", () => {
+    const { first } = padShell();
+    setPad(true);
+    recoverFocus();
+    expect(document.activeElement).toBe(first);
   });
 
   // Fails when LT/RT switch views (LB/RB's job) instead of only paging the view.

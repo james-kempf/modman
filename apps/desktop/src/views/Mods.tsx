@@ -86,10 +86,12 @@ export function Mods() {
   return (
     <ViewFrame>
       {/* Focusable roving tabs, not LB/RB-bound: Tabs listens for LB/RB only inside a
-          data-nav-scope (a dialog), so in a view LB/RB keep switching the app's views. */}
+          data-nav-scope (a dialog), so in a view LB/RB keep switching the app's views. Hence
+          controllerFocusable: the D-pad is the only way a controller reaches these tabs. */}
       <Tabs
         label="Mods sections"
         focusable
+        controllerFocusable
         tabs={TABS}
         value={tab}
         onChange={setTab}

@@ -31,6 +31,18 @@ export function setPad(on: boolean, doc: Document = document): void {
   else delete el.dataset.pad;
 }
 
+/** True while controller mode is on (<html data-pad>). */
+export function isPad(doc: Document = document): boolean {
+  return doc.documentElement.dataset.pad !== undefined;
+}
+
+/** Calls `cb` whenever controller mode turns on or off; returns the unsubscribe. */
+export function subscribePad(cb: () => void, doc: Document = document): () => void {
+  const obs = new MutationObserver(cb);
+  obs.observe(doc.documentElement, { attributes: true, attributeFilter: ["data-pad"] });
+  return () => obs.disconnect();
+}
+
 export function installModalityTracking(doc: Document = document): () => void {
   if (!doc.documentElement.dataset.input) setModality("nav", doc);
   const toPointer = () => {

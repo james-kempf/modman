@@ -27,8 +27,8 @@ import { Notice, PadGlyph, TOAST_CLOSE_MS, Tabs, cx, type TabItem } from "../com
 import * as ipc from "../ipc/commands";
 import { focusCurrentTab, installKeyboardNav, performNav } from "../nav/actions";
 import { startGamepadLoop } from "../nav/gamepad";
-import { installModalityTracking } from "../nav/modality";
-import { installFocusRecovery } from "../nav/spatial";
+import { installModalityTracking, isPad } from "../nav/modality";
+import { focusables, installFocusRecovery, navScope, padSkipped } from "../nav/spatial";
 import { Activity } from "../views/Activity";
 import { Collections } from "../views/Collections";
 import { Games } from "../views/Games";
@@ -94,6 +94,16 @@ export function App() {
       stopModality();
     };
   }, []);
+
+  // Controller mode: LB/RB (or openView) cannot park focus on the view tabs (not focusable there), so
+  // focus lost with the old view enters the new one. A dialog keeps its own focus.
+  useEffect(() => {
+    if (!isPad() || navScope() !== document.body) return;
+    const a = document.activeElement;
+    if (a && a !== document.body && a.isConnected && !padSkipped(a)) return;
+    const main = document.getElementById(VIEW_ID);
+    (main && focusables(main)[0])?.focus();
+  }, [view]);
 
   const View = VIEW[view];
   return (

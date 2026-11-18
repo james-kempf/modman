@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BUTTON, GamepadNav, startGamepadLoop } from "./gamepad";
+import { setPad } from "./modality";
+import { PAD_SKIP_ATTR } from "./spatial";
 
 type Pad = { connected: boolean; buttons: { pressed: boolean }[]; axes: number[] };
 const pad = (pressed: number[] = [], axes: number[] = [0, 0]): Pad => ({
@@ -21,10 +23,14 @@ function mockPads() {
 
 afterEach(() => {
   delete (navigator as { getGamepads?: unknown }).getGamepads;
+  setPad(false);
+  document.body.innerHTML = "";
+  vi.restoreAllMocks();
 });
 
 describe("gamepad mapping (mocked navigator.getGamepads)", () => {
-  it("A selects, B goes back, once per press", () => {
+  // Fails when B maps to "back" again (Escape's action, which focuses the view tab outside a dialog).
+  it("A selects, B closes, once per press", () => {
     const s = mockPads();
     const nav = new GamepadNav();
     s.pads = [pad([BUTTON.A])];
@@ -32,7 +38,7 @@ describe("gamepad mapping (mocked navigator.getGamepads)", () => {
     // Held: no repeat.
     expect(nav.poll(16)).toEqual([]);
     s.pads = [pad([BUTTON.B])];
-    expect(nav.poll(32)).toEqual([{ type: "back" }]);
+    expect(nav.poll(32)).toEqual([{ type: "close" }]);
     s.pads = [pad()];
     expect(nav.poll(48)).toEqual([]);
     s.pads = [pad([BUTTON.A])];
@@ -127,6 +133,25 @@ describe("gamepad mapping (mocked navigator.getGamepads)", () => {
     window.dispatchEvent(new Event("gamepadconnected"));
     frames.shift()!(0);
     expect(got).toEqual([{ type: "select" }]);
+    stop();
+  });
+
+  // Fails when focus stays stranded on a tab controller mode just took out of navigation, or when the
+  // waking D-pad press also moves on (skipping the panel's first control).
+  it("the first pad press moves focus off a pad-skipped tab into its panel", () => {
+    const s = mockPads();
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => frames.push(cb));
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+    document.body.innerHTML = `<div role="tablist" data-nav-roving ${PAD_SKIP_ATTR}><button role="tab" tabindex="0" aria-controls="p">T</button></div><div id="p"><button>first</button><button>second</button></div>`;
+    document.querySelector<HTMLElement>("[role=tab]")!.focus();
+    const got: unknown[] = [];
+    const stop = startGamepadLoop((a) => got.push(a));
+    s.pads = [pad([BUTTON.DOWN])];
+    window.dispatchEvent(new Event("gamepadconnected"));
+    frames.shift()!(0);
+    expect(document.activeElement?.textContent).toBe("first");
+    expect(got).toEqual([]);
     stop();
   });
 });

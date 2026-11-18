@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Tabs: one shared look (view bar and dialogs), slots, roving tabindex (APG manual activation), dialog LB/RB scoping.
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { PadGlyph, Tabs, type TabItem } from "..";
 import { TAB_EVENT } from "../../../nav/actions";
-import { focusables } from "../../../nav/spatial";
+import { setPad } from "../../../nav/modality";
+import { findNext, focusables } from "../../../nav/spatial";
 
 type V = "a" | "b" | "c";
 const TABS: readonly TabItem<V>[] = [
@@ -15,7 +16,7 @@ const TABS: readonly TabItem<V>[] = [
   { value: "c", label: "Gamma" },
 ];
 
-function Harness(props: { focusable?: boolean; panel?: boolean; start?: string; end?: string }) {
+function Harness(props: { focusable?: boolean; controllerFocusable?: boolean; panel?: boolean; start?: string; end?: string }) {
   const [v, setV] = useState<V>("a");
   return (
     <Tabs
@@ -24,6 +25,7 @@ function Harness(props: { focusable?: boolean; panel?: boolean; start?: string; 
       value={v}
       onChange={setV}
       focusable={props.focusable}
+      controllerFocusable={props.controllerFocusable}
       start={props.start && <PadGlyph>{props.start}</PadGlyph>}
       end={props.end && <PadGlyph>{props.end}</PadGlyph>}
     >
@@ -242,5 +244,50 @@ describe("Tabs", () => {
       scope.dispatchEvent(new CustomEvent(TAB_EVENT, { detail: { delta: -1 } }));
     });
     expect(screen.getByRole("tab", { name: "Gamma" })).toHaveAttribute("aria-selected", "true");
+  });
+});
+
+describe("Tabs in controller mode (html[data-pad])", () => {
+  afterEach(() => setPad(false));
+  const tabStops = () => focusables(document.body).filter((el) => el.getAttribute("role") === "tab");
+
+  // Fails when focusable tabs stay reachable by focus or D-pad once a gamepad turns controller mode on.
+  it("focusable tabs without controllerFocusable leave the focus order and spatial nav", async () => {
+    render(
+      <>
+        <Harness focusable />
+        <button type="button">content</button>
+      </>,
+    );
+    expect(tabStops()).toHaveLength(3);
+    act(() => setPad(true));
+    // Spatial nav drops them at once, before React re-renders (the gamepad acts in the same frame).
+    expect(tabStops()).toEqual([]);
+    expect(findNext(screen.getByRole("button", { name: "content" }), "up")).toBeNull();
+    // Then tabindex follows: no Tab-key stop either.
+    await waitFor(() => expect(tabindexes()).toEqual(["-1", "-1", "-1"]));
+    // Clicking still switches.
+    await userEvent.click(screen.getByRole("tab", { name: "Beta" }));
+    expect(screen.getByRole("tab", { name: "Beta" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  // Fails when controllerFocusable does not keep in-view tabs (Mods) reachable with a controller.
+  it("controllerFocusable keeps them a roving stop", async () => {
+    render(<Harness focusable controllerFocusable />);
+    act(() => setPad(true));
+    await act(async () => {});
+    expect(tabindexes()).toEqual(["0", "-1", "-1"]);
+    expect(tabStops()).toHaveLength(3);
+    expect(screen.getByRole("tablist")).not.toHaveAttribute("data-nav-pad-skip");
+  });
+
+  // Fails when leaving controller mode does not give keyboard users their tab stop back.
+  it("keyboard mode is unchanged after controller mode ends", async () => {
+    render(<Harness focusable />);
+    act(() => setPad(true));
+    await waitFor(() => expect(tabindexes()).toEqual(["-1", "-1", "-1"]));
+    act(() => setPad(false));
+    await waitFor(() => expect(tabindexes()).toEqual(["0", "-1", "-1"]));
+    expect(tabStops()).toHaveLength(3);
   });
 });

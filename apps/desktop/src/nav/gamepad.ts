@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Gamepad API polling -> navigation actions (standard mapping):
-// A select, B back, Y focus the view's search, LB/RB previous/next tab
+// A select, B closes the topmost dialog (nothing without one), Y focus the view's search, LB/RB previous/next tab
 // (a dialog's tabs while one is open), LT/RT previous/next page of the
 // view's listing (Browse), D-pad or left stick move, right stick
 // scrolls (smoothly, every frame, in proportion to the deflection).
@@ -8,8 +8,8 @@
 
 import type { NavAction } from "./actions";
 import { navArbiter, type NavArbiter, type NavInput } from "./arbiter";
-import { setModality, setPad } from "./modality";
-import type { Dir } from "./spatial";
+import { isPad, setModality, setPad } from "./modality";
+import { leavePadSkipped, type Dir } from "./spatial";
 
 export const BUTTON = { A: 0, B: 1, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 } as const;
 
@@ -104,7 +104,7 @@ export class GamepadNav {
       out.push(a);
     };
     if (edge("A")) emit("A", { type: "select" });
-    if (edge("B")) emit("B", { type: "back" });
+    if (edge("B")) emit("B", { type: "close" });
     if (edge("Y")) emit("Y", { type: "search" });
     if (edge("LB")) emit("LB", { type: "tab", delta: -1 });
     if (edge("RB")) emit("RB", { type: "tab", delta: 1 });
@@ -191,11 +191,16 @@ export function startGamepadLoop(
   const tick = () => {
     const actions = nav.poll(win.performance.now());
     // Gamepad input fires no key event: switch the focus ring on here (scrolling alone does not).
+    let woke = false;
     if (actions.some((a) => a.type !== "scroll")) {
       setModality("nav", win.document);
+      const was = isPad(win.document);
       setPad(true, win.document);
+      // Controller mode hides most tabs from focus: focus left on one moves into its panel, and that
+      // counts as this press's move (a D-pad press then would skip past the panel's first control).
+      woke = !was && leavePadSkipped(win.document);
     }
-    actions.forEach(dispatch);
+    for (const a of actions) if (!(woke && a.type === "move")) dispatch(a);
     frame = win.requestAnimationFrame(tick);
   };
   const start = () => {

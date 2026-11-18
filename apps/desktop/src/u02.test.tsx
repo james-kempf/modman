@@ -229,7 +229,7 @@ describe("Settings controls per kind", () => {
     btn.focus();
     act(() => performNav({ type: "select" }));
     await screen.findByRole("listbox");
-    act(() => performNav({ type: "back" }));
+    act(() => performNav({ type: "close" }));
     await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
     expect(document.activeElement).toBe(btn);
     act(() => performNav({ type: "select" }));

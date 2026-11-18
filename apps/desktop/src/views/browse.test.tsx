@@ -679,7 +679,7 @@ describe("Browse toolbar and collection details layout (T3)", () => {
     act(() => performNav({ type: "tab", delta: 1 }));
     expect(within(mod).getByRole("tab", { name: "About" })).toHaveAttribute("aria-selected", "true");
     expect(within(dlg).getByRole("tab", { name: "Mods (1)" })).toHaveAttribute("aria-selected", "true");
-    act(() => performNav({ type: "back" }));
+    act(() => performNav({ type: "close" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "SkyUI" })).toBeNull());
     dlg = screen.getByRole("dialog", { name: "Coll abc" });
     expect(within(dlg).getByRole("tab", { name: "Mods (1)" })).toHaveAttribute("aria-selected", "true");

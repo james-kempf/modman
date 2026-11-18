@@ -12,6 +12,18 @@ export const VIEW_TABS_ATTR = "data-view-tabs";
 /** The selected top view tab. */
 export const CURRENT_TAB = `[${VIEW_TABS_ATTR}] [role='tab'][aria-selected='true']`;
 
+/**
+ * Marks a tablist whose tabs leave the nav order in controller mode (html[data-pad]): Tabs without
+ * `controllerFocusable`. Checked here at query time, so it applies the moment the gamepad turns
+ * controller mode on, before React re-renders the tabs with tabindex=-1.
+ */
+export const PAD_SKIP_ATTR = "data-nav-pad-skip";
+
+/** True when `el` is a tab that controller mode takes out of focus and spatial nav right now. */
+export function padSkipped(el: Element): boolean {
+  return el.ownerDocument.documentElement.dataset.pad !== undefined && el.closest(`[${PAD_SKIP_ATTR}]`) !== null;
+}
+
 /** A roving-tabindex group (focusable Tabs): its tabindex=-1 members stay spatial-nav stops. */
 const ROVING = "[data-nav-roving]";
 
@@ -42,7 +54,31 @@ function visible(el: HTMLElement): boolean {
 }
 
 export function focusables(scope: HTMLElement = navScope()): HTMLElement[] {
-  return Array.from(scope.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(visible);
+  return Array.from(scope.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => visible(el) && !padSkipped(el));
+}
+
+/**
+ * Where focus goes instead of a pad-skipped tab: the first control of the panel the tab controls
+ * (its aria-controls: the view for the view bar), else the first control in the nav scope.
+ */
+export function tabFallback(tab: HTMLElement, doc: Document = tab.ownerDocument): HTMLElement | null {
+  const id = tab.getAttribute("aria-controls");
+  const panel = id ? doc.getElementById(id) : null;
+  return (panel && focusables(panel)[0]) ?? focusables(navScope(doc))[0] ?? null;
+}
+
+/**
+ * Controller mode just turned on: focus sitting on a pad-skipped tab moves to its fallback, so it is
+ * never stranded on a control D-pad navigation cannot leave from or return to. Returns true if it moved.
+ */
+export function leavePadSkipped(doc: Document = document): boolean {
+  const a = doc.activeElement;
+  if (!(a instanceof HTMLElement) || !padSkipped(a)) return false;
+  const to = tabFallback(a, doc);
+  if (!to) return false;
+  to.focus();
+  to.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  return true;
 }
 
 interface Box {
@@ -228,7 +264,9 @@ export function recoverFocus(doc: Document = document): void {
       }
     }
   }
-  const target = best ?? doc.querySelector<HTMLElement>(CURRENT_TAB) ?? all[0];
+  const tab = doc.querySelector<HTMLElement>(CURRENT_TAB);
+  // In controller mode the view tabs are not a landing spot (padSkipped): the view's first control instead.
+  const target = best ?? (tab && (padSkipped(tab) ? tabFallback(tab, doc) : tab)) ?? all[0];
   if (!target) return;
   // A plain focus() scrolls the target into view (often far): pointer users must keep their scroll position.
   target.focus({ preventScroll: true });

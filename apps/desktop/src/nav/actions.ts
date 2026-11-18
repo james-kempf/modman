@@ -11,13 +11,18 @@ import {
   isTextInput,
   moveFocus,
   navScope,
+  padSkipped,
+  tabFallback,
   type Dir,
 } from "./spatial";
 
 export type NavAction =
   | { type: "move"; dir: Dir }
   | { type: "select" }
+  /** Escape: close the topmost dialog, else focus the selected view tab. */
   | { type: "back" }
+  /** Gamepad B: close the topmost dialog (same BACK_EVENT as Escape); nothing without one. */
+  | { type: "close" }
   | { type: "tab"; delta: 1 | -1 }
   | { type: "search" }
   /** LT/RT: previous/next page of the view's listing (only Browse listens). */
@@ -25,7 +30,7 @@ export type NavAction =
   /** Right stick: scroll the open dialog, else the view, by `dy` pixels (negative = up). */
   | { type: "scroll"; dy: number };
 
-/** Dispatched on the topmost nav scope (a dialog) for "back"; dialogs close on it. */
+/** Dispatched on the topmost nav scope (a dialog) for "back" and "close"; dialogs close on it. */
 export const BACK_EVENT = "vessel:back";
 /** Dispatched on the topmost nav scope (a dialog) for "tab" (detail: { delta }); a dialog's own tabs switch on it. */
 export const TAB_EVENT = "vessel:tab";
@@ -37,17 +42,29 @@ export type PageEventDetail = { delta: 1 | -1 };
 /** The top tab of `view` (scoped: a dialog's tabs may use the same value, e.g. "mods"). */
 const viewTab = (view: ViewId, doc: Document) => doc.querySelector<HTMLElement>(`[${VIEW_TABS_ATTR}] [data-tab='${view}']`);
 
-/** Focus the selected top tab (Escape/B from a view, the app's first focus). */
+/**
+ * Focus the selected top tab (Escape from a view, the app's first focus). Escape can arrive before the
+ * keyboard clears controller mode, when the view tabs are not focusable (padSkipped): the view's first
+ * control takes focus instead.
+ */
 export function focusCurrentTab(doc: Document = document): void {
-  doc.querySelector<HTMLElement>(CURRENT_TAB)?.focus();
+  const tab = doc.querySelector<HTMLElement>(CURRENT_TAB);
+  if (!tab) return;
+  (padSkipped(tab) ? tabFallback(tab, doc) : tab)?.focus();
 }
 
 /**
- * Switch to `view` from a control inside the current view: its tab takes
- * focus first, since the control unmounts with the old view.
+ * Focus `view`'s top tab ahead of a view switch, since the focused control unmounts with the old view.
+ * Not in controller mode, where the tab is not focusable: App moves focus into the new view once it renders.
  */
+function focusViewTab(view: ViewId, doc: Document): void {
+  const tab = viewTab(view, doc);
+  if (tab && !padSkipped(tab)) tab.focus();
+}
+
+/** Switch to `view` from a control inside the current view. */
 export function openView(view: ViewId, doc: Document = document): void {
-  viewTab(view, doc)?.focus();
+  focusViewTab(view, doc);
   useUi.getState().setView(view);
 }
 
@@ -94,6 +111,11 @@ export function performNav(action: NavAction, doc: Document = document): void {
       focusCurrentTab(doc);
       return;
     }
+    case "close": {
+      const scope = navScope(doc);
+      if (scope !== doc.body) scope.dispatchEvent(new CustomEvent(BACK_EVENT));
+      return;
+    }
     case "tab": {
       // While a dialog is open it owns the input: its tabs (if any) switch, never the app's views.
       const scope = navScope(doc);
@@ -103,7 +125,7 @@ export function performNav(action: NavAction, doc: Document = document): void {
       }
       const view = useUi.getState().cycleView(action.delta);
       // The tabs are always rendered, so focus follows the selection now (before React re-renders).
-      viewTab(view, doc)?.focus();
+      focusViewTab(view, doc);
       return;
     }
     case "page":

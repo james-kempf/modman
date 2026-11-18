@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Modal dialog: a spatial-navigation scope that takes focus on open, traps
-// Tab, closes on "back" (Escape / gamepad B) and restores focus on close.
+// Tab, closes on BACK_EVENT (Escape "back" / gamepad B "close") and restores focus on close.
 // Rendered in a portal on <body>: a transformed ancestor (the view's entry
 // animation) would otherwise be the containing block of its fixed backdrop.
 // While open, everything else on <body> (the app, lower dialogs) is inert.

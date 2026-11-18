@@ -4,12 +4,15 @@
 // (horizontal scroll when narrow), icons. Tabs are pills; the selected one sits on an accent-tinted pill
 // that animates scale + opacity only, driven by aria-selected classes (no inline styles: CSP).
 // Tabs are not focus stops by default (tabindex -1); `focusable` makes them a roving-tabindex group
-// following the APG manual-activation pattern. Start/end adornments (e.g. LB/RB glyphs) are siblings
+// following the APG manual-activation pattern. In controller mode (html[data-pad]) focusable tabs leave the
+// focus order and D-pad navigation unless `controllerFocusable`: LB/RB switch the view bar, and a stop on
+// a tab strip there is one more press between the header and the content. Start/end adornments (e.g. LB/RB glyphs) are siblings
 // of the tablist, never children, so the tablist owns only role=tab elements.
 
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
 import { TAB_EVENT, type TabEventDetail } from "../../../nav/actions";
-import { focusables } from "../../../nav/spatial";
+import { isPad, subscribePad } from "../../../nav/modality";
+import { PAD_SKIP_ATTR, focusables } from "../../../nav/spatial";
 import { cx } from "../styles";
 
 export interface TabItem<T extends string> {
@@ -40,10 +43,22 @@ const HIGHLIGHT =
 // Positioned so it paints above the (absolute) pill.
 const CONTENT = "relative inline-flex items-center gap-2";
 
+const padSnapshot = () => isPad();
+const padServer = () => false;
+/** Controller mode (html[data-pad]), re-rendering when it changes. */
+function usePad(): boolean {
+  return useSyncExternalStore(subscribePad, padSnapshot, padServer);
+}
+
 /**
  * Tabs, and the selected tab's panel when `children` is given. LB/RB (the enclosing dialog's TAB_EVENT)
  * switch tabs with wrap-around; the listener attaches only inside a `data-nav-scope` (never document/body).
  * Focus inside the old panel moves into the new one.
+ *
+ * Focus: by default tabs are not focus stops. `focusable` makes them a roving stop for keyboard and mouse.
+ * In controller mode (html[data-pad]) `focusable` tabs drop out again (tabindex -1, skipped by spatial nav
+ * via PAD_SKIP_ATTR) unless `controllerFocusable` is set; LB/RB and clicks still switch them. Set
+ * `controllerFocusable` only on in-view content tabs that LB/RB do not reach (the Mods sub-tabs).
  */
 export function Tabs<T extends string>({
   label,
@@ -51,6 +66,7 @@ export function Tabs<T extends string>({
   value,
   onChange,
   focusable = false,
+  controllerFocusable = false,
   start,
   end,
   controls,
@@ -62,6 +78,11 @@ export function Tabs<T extends string>({
   onChange: (t: T) => void;
   /** Roving tabindex (selected tab 0, others -1; APG manual activation) with the spatial-nav marker. */
   focusable?: boolean;
+  /**
+   * With `focusable`: keep the tabs focusable and D-pad-reachable in controller mode too. Off by default,
+   * so in controller mode tabs are tabindex -1 and skipped by spatial nav (keyboard/mouse unchanged).
+   */
+  controllerFocusable?: boolean;
   /** Decorative adornments before/after the tablist (aria-hidden, not focusable). */
   start?: ReactNode;
   end?: ReactNode;
@@ -84,6 +105,10 @@ export function Tabs<T extends string>({
     cur.onChange(t);
   });
   const hasPanel = children !== undefined;
+  const pad = usePad();
+  const padSkip = focusable && !controllerFocusable;
+  // Tab-key stops only while focusable in the current mode.
+  const stops = focusable && !(pad && padSkip);
 
   useEffect(() => {
     const scope = list.current?.closest<HTMLElement>("[data-nav-scope]");
@@ -147,6 +172,7 @@ export function Tabs<T extends string>({
         role="tablist"
         aria-label={label}
         data-nav-roving={focusable || undefined}
+        {...{ [PAD_SKIP_ATTR]: padSkip || undefined }}
         onKeyDown={focusable ? onKeyDown : undefined}
         className={LIST}
       >
@@ -159,7 +185,7 @@ export function Tabs<T extends string>({
               type="button"
               role="tab"
               data-tab={t.value}
-              tabIndex={focusable && selected ? 0 : -1}
+              tabIndex={stops && selected ? 0 : -1}
               id={`${id}-tab-${t.value}`}
               aria-selected={selected}
               aria-controls={panelId}
