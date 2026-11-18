@@ -18,7 +18,7 @@ import { useState, type ReactNode } from "react";
 import { useBusy } from "../../app/run";
 import { installKey } from "../../views/Requirements";
 import { ModActions } from "../browse/ModActions";
-import { InstalledBadge, MOD_GRID, MOD_PICTURE, Stat, Tile, WorkingBadge, compact, useDetails } from "../browse/Tile";
+import { InstalledBadge, MOD_GRID, MOD_PICTURE, Stat, Tile, WorkingBadge, compact, modInstalled, useDetails } from "../browse/Tile";
 import { About } from "../rich/About";
 import { Badge, Button, ErrorNote, Fact, PadGlyph, Picture, Tabs, bytes } from "../ui";
 import { Dialog } from "./Dialog";
@@ -88,7 +88,7 @@ export function ModTile({
   const details = useDetails();
   const name = m.name ?? `Mod ${m.modId ?? "?"}`;
   const busy = useBusy(installKey(String(m.modId)));
-  const installed = m.installed && m.modId !== null;
+  const installed = modInstalled(m);
   return (
     <Tile
       picture={<Picture url={m.thumbnailUrl} name={name} className={MOD_PICTURE} />}

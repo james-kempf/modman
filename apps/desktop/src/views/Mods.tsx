@@ -16,7 +16,7 @@ import {
   type StateFilter,
 } from "../app/store";
 import { ModDetailsDialog } from "../components/dialogs/BrowseDetails";
-import { openView } from "../nav/actions";
+import { PAGE_EVENT, openView, type PageEventDetail } from "../nav/actions";
 import {
   ArrowDownIcon,
   ArrowRightIcon,
@@ -66,6 +66,8 @@ import type {
 import { NoGame } from "../components/shell/NoGame";
 import { BulkBar, type BulkAction } from "./mods/BulkBar";
 import { useSelection } from "./mods/useSelection";
+import { Pager } from "./mods/Pager";
+import { MODS_PAGE_SIZE, clampPage, pageCount, pageSlice } from "./mods/paginate";
 
 // "Load order", not "Mods": the app's view bar already has a tab named Mods.
 const TABS = [
@@ -250,6 +252,38 @@ function ModList({ game }: { game: string }) {
   const shownKey = shown.map((m) => m.uid).join("\n");
   const shownUids = useMemo(() => (shownKey ? shownKey.split("\n") : []), [shownKey]);
   const sel = useSelection(shownUids);
+  // Client-side paging: mods_list returns the whole load order. A changed search or filter starts at page 1
+  // (the page is stored with the filter it was chosen under), and the page is clamped on every render so a
+  // list that shrank (uninstall, refetch) never shows an empty page.
+  const filterKey = [game, filter.query, filter.state, filter.collection].join("\n");
+  const [paging, setPaging] = useState({ key: filterKey, page: 0 });
+  const pages = pageCount(shown.length, MODS_PAGE_SIZE);
+  const page = clampPage(paging.key === filterKey ? paging.page : 0, pages);
+  const pageRows = pageSlice(shown, page, MODS_PAGE_SIZE);
+  const pageStart = page * MODS_PAGE_SIZE;
+  // What takes focus once a page change has rendered (the new page's first row, or a moved row's arrow).
+  const pageFocus = useRef<(() => HTMLElement | null) | null>(null);
+  const setPage = (to: number, focus?: () => HTMLElement | null) => {
+    if (to === page) return;
+    pageFocus.current = focus ?? (() => document.querySelector<HTMLElement>("[data-mod-select]"));
+    setPaging({ key: filterKey, page: to });
+  };
+  useEffect(() => {
+    const pick = pageFocus.current;
+    pageFocus.current = null;
+    pick?.()?.focus();
+  }, [page]);
+  // LT/RT page, as on Browse (the latest closure: the page and list change every render).
+  const stepPage = useRef((_: 1 | -1) => {});
+  stepPage.current = (delta) => {
+    const to = page + delta;
+    if (to >= 0 && to < pages) setPage(to);
+  };
+  useEffect(() => {
+    const onPage = (e: Event) => stepPage.current((e as CustomEvent<PageEventDetail>).detail.delta);
+    document.addEventListener(PAGE_EVENT, onPage);
+    return () => document.removeEventListener(PAGE_EVENT, onPage);
+  }, []);
   const [bulkBusy, setBulkBusy] = useState<BulkAction | null>(null);
   // Polite announcements (moves, selection counts) inside the list's status line.
   const [said, say] = useState("");
@@ -272,14 +306,24 @@ function ModList({ game }: { game: string }) {
   }, [sel.count]);
   // A moved row's control keeps focus: if the reorder dropped it to <body>, focus it again.
   const keep = useRef<HTMLElement | null>(null);
+  const keepUid = useRef<string | null>(null);
   useEffect(() => {
     const el = keep.current;
     if (!el) return;
     const lost = !document.activeElement || document.activeElement === document.body;
-    if (lost && el.isConnected) el.focus();
+    if (!lost) return;
+    if (el.isConnected) return el.focus();
+    // The move carried the row onto another page: follow it there and focus the same arrow.
+    const i = shown.findIndex((m) => m.uid === keepUid.current);
+    const name = el.getAttribute("aria-label");
+    if (i < 0 || !name) return;
+    setPage(Math.floor(i / MODS_PAGE_SIZE), () =>
+      [...document.querySelectorAll<HTMLElement>("[aria-label]")].find((b) => b.getAttribute("aria-label") === name) ?? null,
+    );
   }, [mods.data]);
   const move = async (m: ModView, spec: "before" | "after", arg: string) => {
     keep.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    keepUid.current = m.uid;
     const r = await run("Move", () => ipc.modMove(m.uid, spec, arg, game), { key: MOVE });
     if (r) say(`${m.name} moved to position ${r.to} of ${r.of}`);
   };
@@ -355,7 +399,7 @@ function ModList({ game }: { game: string }) {
         hasUpdates={!!updates}
       />
       {mods.data?.changed_since_deploy && (
-        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2 rounded-card border border-amber-400/15 bg-amber-400/10 py-2 pr-2 pl-4 text-body text-amber-300">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-card border border-amber-400/15 bg-amber-400/10 py-2 pr-2 pl-4 text-body text-amber-300">
           <StatusDot tone="amber" live />
           <span className="min-w-0 flex-1">
             The mod set changed since the last deploy.
@@ -409,9 +453,11 @@ function ModList({ game }: { game: string }) {
       {shown.length > 0 && (
       <Card title="Load order" intro="Lower in the list wins when two mods ship the same file.">
         <ol aria-label="Load order" className="rows stagger min-w-0">
-          {shown.map((m, i) => {
+          {pageRows.map((m, j) => {
             // Arrows follow the visible list (screen direction); under a filter
-            // a move lands next to the visible neighbor, past hidden mods.
+            // a move lands next to the visible neighbor, past hidden mods. Neighbors
+            // come from the whole filtered list, so the edge rows of a page move across pages.
+            const i = pageStart + j;
             const prev = shown[i - 1];
             const next = shown[i + 1];
             const enabled = optimistic[m.id] ?? m.enabled;
@@ -431,7 +477,7 @@ function ModList({ game }: { game: string }) {
                   modId={m.nexus_mod_id}
                   name={m.name}
                   className={cx(
-                    "transition-opacity",
+                    "transition-opacity duration-base ease-out",
                     !enabled && "opacity-stale grayscale",
                   )}
                 />
@@ -454,7 +500,7 @@ function ModList({ game }: { game: string }) {
               <span className="ml-auto flex shrink-0 items-center gap-1">
                 <span className="hidden items-center gap-2 lg:flex">
                   {m.collections.length > 0 && (
-                    <Badge tone="accent">collection</Badge>
+                    <Badge>collection</Badge>
                   )}
                   <span className="w-16 text-right font-mono text-caption text-dim tabular-nums">
                     {bytes(m.size)}
@@ -515,7 +561,15 @@ function ModList({ game }: { game: string }) {
           onDisable={() => void bulkEnable(false)}
           onUninstall={() => void bulkUninstall()}
           onClear={sel.clear}
-          className="rounded-b-card"
+          className={pages > 1 ? undefined : "rounded-b-card"}
+        />
+        <Pager
+          label="Load order pages"
+          page={page}
+          pages={pages}
+          size={MODS_PAGE_SIZE}
+          total={shown.length}
+          onPage={(to) => setPage(to)}
         />
       </Card>
       )}
@@ -553,7 +607,7 @@ function LoaderList({
         <Button
           size="sm"
           tone="ghost"
-          icon={<ArrowRightIcon aria-hidden size={15} />}
+          icon={<ArrowRightIcon aria-hidden size={16} />}
           onClick={() => openView("requirements")}
         >
           Manage in Requirements
@@ -740,7 +794,7 @@ function SelectBox({
       <span
         aria-hidden
         className={cx(
-          "grid size-icon place-items-center rounded-inset border-2 transition-colors duration-base",
+          "grid size-icon place-items-center rounded-inset border-2",
           checked
             ? "border-accent-400 bg-accent-400 text-accent-950 in-highlight:border-accent-700 in-highlight:bg-accent-700 in-highlight:text-white"
             : "border-zinc-500",
@@ -821,8 +875,8 @@ function ReadError({
         </Button>
       }
     >
-      Couldn't read {what}.{" "}
-      <span className="font-mono text-label">{errMsg(error)}</span>
+      Couldn't read {what}.
+      <span className="mt-1 block font-mono text-caption text-rose-300">{errMsg(error)}</span>
     </ErrorNote>
   );
 }
@@ -988,7 +1042,7 @@ function Updates({ game }: { game: string }) {
           <Button
             size="sm"
             busy={checking}
-            icon={<ArrowsClockwiseIcon aria-hidden size={15} />}
+            icon={<ArrowsClockwiseIcon aria-hidden size={16} />}
             onClick={async () =>
               setReport(
                 (await run("Check updates", () => ipc.updatesCheck(true))) ??
@@ -1002,7 +1056,7 @@ function Updates({ game }: { game: string }) {
             size="sm"
             tone="primary"
             busy={installing}
-            icon={<DownloadSimpleIcon aria-hidden size={15} />}
+            icon={<DownloadSimpleIcon aria-hidden size={16} />}
             inactive={nothingToInstall}
             aria-describedby={nothingToInstall ? reasonId : undefined}
             onClick={async () => {
@@ -1143,7 +1197,7 @@ function Profiles({ game }: { game: string }) {
             tone="primary"
             busy={saving}
             inactive={!name.trim()}
-            icon={<FloppyDiskIcon aria-hidden size={15} />}
+            icon={<FloppyDiskIcon aria-hidden size={16} />}
           >
             Save profile
           </Button>

@@ -98,11 +98,14 @@ export interface OskTarget {
  * Browse's listing state for this session (in memory): restored when the view
  * is entered again. Belongs to one game; another game starts from the defaults.
  */
+/** Browse's installed-status filter: applied client-side to the loaded page (Nexus cannot filter by it). */
+export type InstalledFilter = "all" | "installed" | "not";
 export interface BrowseSession {
   game: string;
   kind: BrowseKind;
   period: BrowsePeriod;
   sort: BrowseSort;
+  installed: InstalledFilter;
   /** The search field's text (not submitted yet). */
   draft: string;
   /** The submitted search words. */
@@ -119,6 +122,7 @@ export const browseDefaults = (game: string): BrowseSession => ({
   kind: "mods",
   period: "all",
   sort: "endorsements",
+  installed: "all",
   draft: "",
   text: "",
   page: 0,

@@ -1381,3 +1381,86 @@ describe("Browse UX audit fixes", () => {
     expect(stats).not.toHaveTextContent(/endorsements|downloads|size|mods|\?/);
   });
 });
+
+describe("Browse installed-status filter", () => {
+  /** Pick a Status option through the dropdown by keyboard (Enter opens, arrows move, Enter picks). */
+  const pickStatus = async (user: ReturnType<typeof userEvent.setup>, label: "All" | "Installed" | "Not installed") => {
+    const box = await screen.findByRole("button", { name: /^Status/ });
+    act(() => box.focus());
+    await user.keyboard("{Enter}");
+    const opt = await screen.findByRole("option", { name: label });
+    while (document.activeElement !== opt) await user.keyboard(opt.compareDocumentPosition(document.activeElement!) & Node.DOCUMENT_POSITION_PRECEDING ? "{ArrowDown}" : "{ArrowUp}");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.queryByRole("option")).toBeNull());
+  };
+  const mixed: Handler = (a) =>
+    reqOf(a).kind === "mods"
+      ? // 9: installed flag but no Nexus id -> no Installed badge, so it counts as not installed.
+        { kind: "mods", total: 3, mods: [hit(7), hit(8, { installed: true }), hit(9, { modId: null, name: "Mod 9", installed: true })] }
+      : { kind: "collections", total: 2, collections: [coll("cur", { installed_revision: 3 }), coll("new")] };
+  const names = (list: string) => within(screen.getByRole("list", { name: list })).getAllByRole("listitem").map((li) => li.textContent);
+
+  // Fails when the filter disagrees with the Installed badge (e.g. counts a mod with no Nexus id as installed),
+  // misses collections, is not keyboard operable, or is sent to Nexus (the request must stay unchanged).
+  it("keeps only items with (or without) the Installed badge, for mods and collections, by keyboard", async () => {
+    const { t, user } = await open("browse", { browse: mixed });
+    await screen.findByText("Mod 7");
+    const before = t.callsOf("browse").length;
+    await pickStatus(user, "Installed");
+    await waitFor(() => expect(names("Mods")).toHaveLength(1));
+    expect(names("Mods")[0]).toMatch(/Mod 8/);
+    expect(screen.getByText(/3 mods · 1 installed on this page/)).toBeInTheDocument();
+    await pickStatus(user, "Not installed");
+    await waitFor(() => expect(names("Mods")).toHaveLength(2));
+    expect(names("Mods").join()).toMatch(/Mod 7.*Mod 9/);
+    for (const c of t.callsOf("browse").slice(before)) expect(Object.keys(reqOf(c))).not.toContain("installed");
+
+    await showCollections(user);
+    await waitFor(() => expect(names("Collections")).toHaveLength(1));
+    expect(names("Collections")[0]).toMatch(/Coll new/);
+    await pickStatus(user, "All");
+    await waitFor(() => expect(names("Collections")).toHaveLength(2));
+  });
+
+  // Fails when changing the status keeps a stale page instead of starting again at the first one, like the other filters.
+  it("a status change goes back to the first page", async () => {
+    const { t, user } = await open("browse", { browse: paged });
+    await screen.findByText("Mod 1");
+    await user.click(screen.getByRole("button", { name: /^Next/ }));
+    await screen.findByText(/Page 2 of 2/);
+    await pickStatus(user, "Not installed");
+    await screen.findByText(/Page 1 of 2/);
+    expect(useUi.getState().browse?.page).toBe(0);
+    // Page 1 came from the cache (offset 0 was asked first); nothing asked for page 2 again.
+    expect(t.callsOf("browse").map((c) => reqOf(c).offset)).toEqual([0, 24]);
+    expect(screen.getByText("Mod 1")).toBeInTheDocument();
+  });
+
+  // Fails when a page the filter empties shows a blank grid (or the generic Nexus empty state) instead of an empty
+  // state naming the filter, drops the pager (no way on to other pages), or Show all statuses does not clear it.
+  it("a page the filter empties names the filter, keeps the pager, and Show all statuses clears it", async () => {
+    const { user } = await open("browse", { browse: paged });
+    await screen.findByText("Mod 1");
+    await pickStatus(user, "Installed");
+    expect(await screen.findByRole("heading", { name: "No installed mods on this page" })).toBeInTheDocument();
+    expect(screen.getByText(/Status filter \(Installed\) hides all 24 mods on page 1/)).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Mods" })).toBeNull();
+    expect(screen.getByRole("navigation", { name: "Mods pages" })).toBeInTheDocument();
+    await user.click(screen.getAllByRole("button", { name: "Show all statuses" }).at(-1)!);
+    expect(await screen.findByText("Mod 1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Status/ })).toHaveTextContent("All");
+  });
+
+  // Fails when the status is not part of the per-game Browse session (forgotten on leaving Browse).
+  it("is kept in the Browse session across view switches", async () => {
+    const { user } = await open("browse", { browse: mixed });
+    await screen.findByText("Mod 7");
+    await pickStatus(user, "Installed");
+    await waitFor(() => expect(screen.queryByText("Mod 7")).toBeNull());
+    act(() => useUi.getState().setView("mods"));
+    act(() => useUi.getState().setView("browse"));
+    await screen.findByText("Mod 8");
+    expect(screen.queryByText("Mod 7")).toBeNull();
+    expect(useUi.getState().browse?.installed).toBe("installed");
+  });
+});

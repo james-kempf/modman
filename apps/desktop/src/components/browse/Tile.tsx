@@ -4,7 +4,13 @@
 
 import { CheckIcon } from "@phosphor-icons/react";
 import { useId, useRef, useState, type ReactNode, type Ref } from "react";
+import type { CollectionHit, SearchHit } from "../../ipc/types";
 import { Badge, CARD_TILE, cx } from "../ui";
+
+/** A mod result shows the Installed badge (one without a Nexus id never does). Browse's status filter uses it too. */
+export const modInstalled = (m: SearchHit) => m.installed && m.modId !== null;
+/** A collection result shows the Installed badge: some revision of it is installed. */
+export const collectionInstalled = (c: CollectionHit) => c.installed_revision !== null;
 
 /** Installed status badge (accent). */
 export function InstalledBadge() {

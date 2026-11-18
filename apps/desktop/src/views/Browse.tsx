@@ -9,7 +9,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent } from "r
 import { errMsg } from "../app/bridge";
 import { useActiveGame } from "../app/queries";
 import { useRun } from "../app/run";
-import { browseDefaults, useUi, type BrowseSession } from "../app/store";
+import { browseDefaults, useUi, type BrowseSession, type InstalledFilter } from "../app/store";
 import { CollectionDetailsDialog, ModTile } from "../components/dialogs/BrowseDetails";
 import { RemoveButton } from "../components/browse/ModActions";
 import {
@@ -20,6 +20,7 @@ import {
   CaretLeftIcon,
   CaretRightIcon,
   DownloadSimpleIcon,
+  FunnelIcon,
   HardDrivesIcon,
   LinkBreakIcon,
   MagnifyingGlassIcon,
@@ -60,7 +61,9 @@ import {
   Tile,
   TileSkeleton,
   WorkingBadge,
+  collectionInstalled,
   compact,
+  modInstalled,
   useDetails,
 } from "../components/browse/Tile";
 
@@ -82,6 +85,25 @@ const SORTS = [
   { value: "downloads", label: "Most downloaded" },
   { value: "newest", label: "Newest" },
 ] as const satisfies readonly { value: BrowseSort; label: string }[];
+
+const STATUSES = [
+  { value: "all", label: "All" },
+  { value: "installed", label: "Installed" },
+  { value: "not", label: "Not installed" },
+] as const satisfies readonly { value: InstalledFilter; label: string }[];
+
+/**
+ * The loaded page's items that pass the installed-status filter, by the same test as the Installed badge.
+ * Client-side: Nexus pages the listing and cannot filter by what this game has installed, so the filter only
+ * narrows the 24 results of the current page (the pager still pages the unfiltered listing).
+ */
+export function byStatus(p: BrowseView, status: InstalledFilter): BrowseView {
+  if (status === "all") return p;
+  const keep = (installed: boolean) => installed === (status === "installed");
+  return p.kind === "mods"
+    ? { ...p, mods: p.mods.filter((m) => keep(modInstalled(m))) }
+    : { ...p, collections: p.collections.filter((c) => keep(collectionInstalled(c))) };
+}
 
 /** "in the past month", ... for the empty state of a recent window (all time has its own sentence). */
 const PERIOD_PHRASE: Record<Exclude<BrowsePeriod, "all">, string> = {
@@ -203,7 +225,7 @@ function BrowseSearch({ game }: { game: string }) {
 
 function BrowseCard({ game }: { game: string }) {
   const [s, save] = useBrowseSession(game);
-  const { kind, period, sort, text, page } = s;
+  const { kind, period, sort, text, page, installed } = s;
   const qc = useQueryClient();
   // Set by a page change: once the new page is rendered, go to the top and focus its first result.
   const toFirst = useRef(false);
@@ -244,6 +266,9 @@ function BrowseCard({ game }: { game: string }) {
   const first = page * PAGE_SIZE;
   // Nothing on screen belongs to this query yet (first load, or the previous query's placeholder data).
   const loading = !q.isError && (q.isPending || q.isPlaceholderData);
+  const visible = data && byStatus(data, installed);
+  // The status filter hides every result of a loaded page: its empty state stands in for the grid (pager kept).
+  const filteredOut = !loading && installed !== "all" && !!visible && shown > 0 && pageItems(visible) === 0;
   // A load that outlasts SKELETON_DELAY_MS swaps in skeleton tiles; until then the previous listing stays up,
   // dimmed and inert (or nothing, on a first load). A cached query has its data at once and never shows them.
   const [late, setLate] = useState(false);
@@ -288,7 +313,14 @@ function BrowseCard({ game }: { game: string }) {
   }, []);
   const count = (n: number) => `${n.toLocaleString()} ${n === 1 ? noun.slice(0, -1) : noun}`;
   // The one live result summary (screen readers hear each new listing); shown above the grid while results are.
-  const summary = q.isError ? "" : loading ? `Loading ${noun}…` : `${text ? `Results for “${text}” · ` : ""}${count(total)}`;
+  const statusPhrase = installed === "installed" ? "installed" : "not installed";
+  const summary = q.isError
+    ? ""
+    : loading
+      ? `Loading ${noun}…`
+      : `${text ? `Results for “${text}” · ` : ""}${count(total)}${
+          installed !== "all" && visible ? ` · ${pageItems(visible).toLocaleString()} ${statusPhrase} on this page` : ""
+        }`;
   const emptyActions = (text || period !== "all") && (
     <>
       {text && (
@@ -311,6 +343,8 @@ function BrowseCard({ game }: { game: string }) {
           <Segmented label="Show" value={kind} options={KINDS} onChange={(v) => refine({ kind: v })} />
           <Segmented label="Created" value={period} options={PERIODS} onChange={(v) => refine({ period: v })} />
           <Select label="Sort" inline value={sort} options={SORTS} onChange={(v) => refine({ sort: v })} />
+          {/* A dropdown like Sort: a fourth Segmented would not fit the row (DESIGN.md). */}
+          <Select label="Status" inline value={installed} options={STATUSES} onChange={(v) => refine({ installed: v })} />
         </div>
       </CardSection>
       <CardSection className={hasPager ? "pb-0" : undefined}>
@@ -323,6 +357,11 @@ function BrowseCard({ game }: { game: string }) {
           {listed && text && (
             <Button size="sm" tone="ghost" icon={<XIcon aria-hidden size={16} />} onClick={clearSearch}>
               Clear search
+            </Button>
+          )}
+          {listed && installed !== "all" && (
+            <Button size="sm" tone="ghost" icon={<XIcon aria-hidden size={16} />} onClick={() => refine({ installed: "all" })}>
+              Show all statuses
             </Button>
           )}
         </div>
@@ -363,34 +402,48 @@ function BrowseCard({ game }: { game: string }) {
           </Empty>
         ) : (
           <>
-            <ul
-              ref={results}
-              className={cx(kind === "mods" ? MOD_GRID : RESULTS_GRID, "stagger", dim && "opacity-stale transition-opacity duration-base")}
-              aria-label={kind === "mods" ? "Mods" : "Collections"}
-              aria-busy={loading || undefined}
-              // The previous page, kept up while the next loads, cannot be opened.
-              inert={dim || undefined}
-            >
-              {skeleton
-                ? Array.from({ length: skeletons }, (_, i) => (
-                    <TileSkeleton key={`sk${i}`} horizontal={kind === "collections"} picture={kind === "mods" ? MOD_PICTURE : COLLECTION_PICTURE} />
-                  ))
-                : !data
-                ? null
-                : data.kind === "mods"
-                ? data.mods.map((m, i) => (
-                    <ModTile
-                      key={m.modId !== null ? `m${m.modId}` : `i${i}`}
-                      game={game}
-                      m={m}
-                      focusKey={`m${m.modId ?? m.name}`}
-                      // No Nexus id: nothing to download or describe; a dimmed card that says why (as a collection's mods).
-                      inert={m.modId === null}
-                      extraBadges={m.modId === null && <Badge>Not downloadable: no Nexus id</Badge>}
-                    />
-                  ))
-                : data.collections.map((c) => <CollectionTile key={c.slug} game={game} c={c} />)}
-            </ul>
+            {filteredOut ? (
+              <Empty
+                icon={<FunnelIcon size={28} weight="duotone" />}
+                title={`No ${statusPhrase} ${noun} on this page`}
+                action={
+                  <Button tone="primary" icon={<XIcon aria-hidden size={16} />} onClick={() => refine({ installed: "all" })}>
+                    Show all statuses
+                  </Button>
+                }
+              >
+                {`The Status filter (${statusPhrase === "installed" ? "Installed" : "Not installed"}) hides all ${count(shown)} on page ${page + 1}. It applies to one loaded page at a time${paged ? ": try another page, or" : ";"} show all statuses.`}
+              </Empty>
+            ) : (
+              <ul
+                ref={results}
+                className={cx(kind === "mods" ? MOD_GRID : RESULTS_GRID, "stagger", dim && "opacity-stale transition-opacity duration-base")}
+                aria-label={kind === "mods" ? "Mods" : "Collections"}
+                aria-busy={loading || undefined}
+                // The previous page, kept up while the next loads, cannot be opened.
+                inert={dim || undefined}
+              >
+                {skeleton
+                  ? Array.from({ length: skeletons }, (_, i) => (
+                      <TileSkeleton key={`sk${i}`} horizontal={kind === "collections"} picture={kind === "mods" ? MOD_PICTURE : COLLECTION_PICTURE} />
+                    ))
+                  : !visible
+                  ? null
+                  : visible.kind === "mods"
+                  ? visible.mods.map((m, i) => (
+                      <ModTile
+                        key={m.modId !== null ? `m${m.modId}` : `i${i}`}
+                        game={game}
+                        m={m}
+                        focusKey={`m${m.modId ?? m.name}`}
+                        // No Nexus id: nothing to download or describe; a dimmed card that says why (as a collection's mods).
+                        inert={m.modId === null}
+                        extraBadges={m.modId === null && <Badge>Not downloadable: no Nexus id</Badge>}
+                      />
+                    ))
+                  : visible.collections.map((c) => <CollectionTile key={c.slug} game={game} c={c} />)}
+              </ul>
+            )}
             {/* role=navigation, not <nav> (landmarks inside <main> share its spatial-nav region, nav/spatial.ts).
                 A toolbar stuck to the bottom of <main>: the last child of the
                 results section, so it pins while the grid is on screen and rests below the last row (in flow, it
@@ -496,7 +549,7 @@ function CollectionTile({ game, c }: { game: string; c: CollectionHit }) {
   // The same key as the Collections view's actions on this collection.
   const key = `Collection ${c.slug}`;
   const busy = (installing[key] ?? 0) > 0;
-  const installed = c.installed_revision !== null;
+  const installed = collectionInstalled(c);
   const behind = installed && c.revision !== null && c.installed_revision! < c.revision;
   const act = async (update: boolean) => {
     // Accepted: the dialog closes at once (focus back on the card); progress shows in the job island.

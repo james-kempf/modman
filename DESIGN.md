@@ -413,7 +413,7 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 
 - `h-badge rounded-pill border px-2 font-mono text-micro`.
 - Tones: `zinc` (fill-2), `accent`, `amber`, `rose` (each `{hue}-400/10` fill, `/15` border, `-300` text).
-- Not interactive. `SupportBadge` is an amber badge with `FlaskIcon` 12 bold and the text "Experimental".
+- Not interactive. Accent is for a state (installed, on), never a category: the Mods row's "collection" badge is `zinc`. `SupportBadge` is an amber badge with `FlaskIcon` 12 bold and the text "Experimental".
 
 ### StatusDot (`display/StatusDot.tsx`)
 
@@ -503,6 +503,18 @@ Props: `busy` (spinner, `aria-busy`), `inactive` (`aria-disabled`, keeps focus; 
 - Count: `font-mono text-caption text-dim tabular-nums`, e.g. "Page 3 of 120 · 41–60 of 2,384" or "Page 4 · loading…". Not a live region.
 - Result summary: one always-mounted `aria-live=polite` line above the grid (`font-mono text-caption text-dim`), e.g. "2,384 mods" or "Results for “lore” · 30 mods", with a ghost "Clear search" button while a search is active. Visually hidden while the empty state or the error says it instead.
 - Paging is by offset for every sort, Newest included (backend contract).
+
+### Load order pager (Mods, `views/mods/Pager.tsx`, `views/mods/paginate.ts`)
+
+- Client-side: `mods_list` already returns the whole load order, so the filtered list (`filterMods`) is sliced in the view. Page size `MODS_PAGE_SIZE` = 50 rows (about 6 screens of 64px rows at 800px; a 200-mod load order is 4 pages). No backend contract change.
+- Placement: the last section of the Load order card, below the bulk bar, in flow (not sticky: the bulk bar already sticks to the bottom). `role=navigation`, `aria-label="Load order pages"`, `flex flex-wrap items-center gap-4 rounded-b-card bg-ink-2 px-section py-3`; the card's divider gives the hairline. The bulk bar drops its `rounded-b-card` while the pager is below it. Hidden with one page (the status line above the list already gives the count).
+- Range label: `font-mono text-caption text-dim tabular-nums`, "51–100 of 312" (`toLocaleString`, en dash). Not a live region; the page change moves focus instead.
+- Controls (`ml-auto`, `gap-2`): Previous (`CaretLeftIcon` 16), page numbers, Next (`CaretRightIcon` 16), all `Button size="sm"` (44px tall, at least `min-w-control` wide). Previous/Next are `default` tone and `inactive` at the ends (focus stays). Page numbers are `ghost`, named "Page N", always 7 slots once there are more than 7 pages (first, last, current ±1, `…` gaps, `aria-hidden`), so the row does not change width while paging.
+- Current page: `aria-current="page"` plus the Segmented thumb (`bg-accent-400 text-accent-950`, 10.3:1 against the card, an outline rim that turns accent-700 under the highlight) and `font-semibold`: fill and weight, not hue alone. Pressing it does nothing.
+- Keys: every control is a button (Tab, Enter/Space, gamepad A). LT/RT (`PAGE_EVENT`) page back and forward as on Browse.
+- Focus: a page change focuses the new page's first row (its select control), as Browse focuses its first result. A move arrow that carries a row onto another page follows it there and keeps focus on the same arrow.
+- Reset and clamp: the page goes back to 1 when the search, the state filter or the collection filter changes (the list has no sort: it is always load order). The page is clamped to the last page on every render, so a list that shrinks (an uninstall, a bulk uninstall, a refetch) never shows an empty page.
+- Selection spans pages: the bulk bar acts on every selected row, shown or not, and its count says so.
 
 ### Skeleton (`browse/Tile.tsx`, `TileSkeleton`)
 
