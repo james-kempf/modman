@@ -45,6 +45,20 @@ describe("gamepad mapping (mocked navigator.getGamepads)", () => {
     expect(nav.poll(64)).toEqual([{ type: "select" }]);
   });
 
+  // Fails when Start is unmapped, fires again while held, or reuses B's close action.
+  it("Start toggles the menu, once per press", () => {
+    const s = mockPads();
+    const nav = new GamepadNav();
+    s.pads = [pad([BUTTON.START])];
+    expect(BUTTON.START).toBe(9);
+    expect(nav.poll(0)).toEqual([{ type: "menu" }]);
+    expect(nav.poll(16)).toEqual([]);
+    s.pads = [pad()];
+    expect(nav.poll(32)).toEqual([]);
+    s.pads = [pad([BUTTON.START])];
+    expect(nav.poll(48)).toEqual([{ type: "menu" }]);
+  });
+
   it("shoulders switch tabs (LB previous, RB next)", () => {
     const s = mockPads();
     const nav = new GamepadNav();

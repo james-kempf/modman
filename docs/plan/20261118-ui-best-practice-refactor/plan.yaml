@@ -1,0 +1,122 @@
+plan_id: 20261118-ui-best-practice-refactor
+status: pending
+tldr: |
+  Audit of the Vessel desktop UI (apps/desktop: Tauri 2 + React 19 + Vite 6 + Tailwind v4, WebKitGTK webview)
+  against modern-web-guidance (skill 2026_11_09-5bcc021b) found no HIGH or CRITICAL issues. Rich text is rendered
+  through allow-list components, the CSP is strict, and focus and dialog behavior work and are covered by tests.
+  The baseline is green: tsc passes, and vitest passes 714/714. This plan has zero tasks by design. Every finding
+  is MEDIUM or LOW and is listed under out_of_scope_findings with its guide ids, so a later replan can opt into
+  them without a new audit.
+created_at: 2026-11-18
+created_by: gem-planner
+revision: 1
+replan_count: 0
+planner_revision_used: false
+
+objective: "Audit the UI app in /home/jkempf/Repositories/modman (branch develop) for modern web best-practice issues; refactor only HIGH/CRITICAL severity issues."
+
+stack:
+  app: apps/desktop
+  shell: "Tauri 2 (src-tauri), webview WebKitGTK on Linux; withGlobalTauri=false, freezePrototype=true, capability allow-list of app commands only"
+  ui: "React 19.3, TypeScript 5.9, Vite 6.4, Tailwind CSS 4.3 (@tailwindcss/vite), zustand 5, @tanstack/react-query 5, react-markdown 10 + remark-gfm, @phosphor-icons/react"
+  tests: "vitest 5 + jsdom + @testing-library/react (src/**/*.test.ts[x])"
+  verification_commands:
+    - "cd /home/jkempf/Repositories/modman/apps/desktop && npm run typecheck   # tsc --noEmit; passes 2026-11-18"
+    - "cd /home/jkempf/Repositories/modman/apps/desktop && npx vitest run      # 714/714 pass 2026-11-18"
+    - "cd /home/jkempf/Repositories/modman/apps/desktop && npm run build       # tsc && vite build"
+  no_lint_script: "package.json has no eslint/lint script; typecheck + tests + build are the gates."
+
+severity_scale:
+  CRITICAL: "Exploitable security flaw (XSS, script injection, unsafe navigation) or data loss."
+  HIGH: "Blocks a user group: keyboard/gamepad/AT users cannot reach or operate a control, focus is lost or invisible, required info is not perceivable, or CWV/perf is broken in normal use."
+  MEDIUM: "Works and is accessible, but diverges from the current platform-native pattern, or AT feedback is degraded but still recoverable."
+  LOW: "Polish or consistency."
+
+audit_evidence:
+  security:
+    - "No dangerouslySetInnerHTML/innerHTML anywhere in src (grep)."
+    - "components/rich/bbcode.tsx: allow-list parser; unknown or raw HTML stays literal text; no <img>/<iframe>; MAX_INPUT/MAX_DEPTH bounds."
+    - "components/rich/markdown.tsx: remark step turns raw HTML into text; allowedElements + components pass no attributes through."
+    - "components/rich/ExternalLink.tsx: webUrl() allows only http/https; the webview never navigates (backend open_url); auxclick cancelled."
+    - "src-tauri/tauri.conf.json CSP: script-src 'self', object-src 'none', form-action 'none', frame-ancestors 'none'; img only self/data:. Pictures come in as backend data: URLs and are checked with startsWith('data:image/')."
+  accessibility:
+    - "Dialog.tsx: role=dialog + aria-modal + aria-labelledby, background made inert, Tab trap, Esc/B via BACK_EVENT, focus return chain for stacked dialogs; covered by Dialog.test.tsx."
+    - "Focus: html[data-input=nav] is set by Tab/arrows/gamepad (nav/modality.ts NAV_KEYS includes Tab), so keyboard focus always gets the white highlight; outline is 2px transparent, which stays visible in forced-colors mode."
+    - "Busy/inactive controls use aria-disabled and stay focusable (Button, Toggle, Pagination)."
+    - "TextField: label for/id, aria-invalid, aria-describedby error/helper; AddGameDialog focuses the first invalid field."
+    - "Tabs: APG manual activation, roving tabindex, tablist owns only tabs."
+    - "Toast slot is an always-mounted aria-live=polite region; prefers-reduced-motion override is global (index.css)."
+    - "Form-control contrast is asserted in style.test.ts."
+  performance:
+    - "Thumbnails reserve their box (aspect-video, h-thumb) with a monogram placeholder, so there is no CLS. Images are local data: URLs. Desktop webview with no network LCP path."
+
+decisions:
+  - "Zero tasks: no finding meets HIGH/CRITICAL. Per the objective, MEDIUM/LOW are out of scope, so inventing tasks would be improvisation."
+  - "Do not migrate Dialog to native <dialog>.showModal() (guide 'dialog'): the custom modal meets the same a11y contract, and is tied to gamepad spatial nav (data-nav-scope, BACK_EVENT, stacked-dialog focus chains). A migration is MEDIUM value with a HIGH regression risk."
+  - "Do not adopt the customizable <select> (appearance: base-select): WebKitGTK does not support it, so the custom listbox stays."
+
+assumptions:
+  - "Target runtime is the Tauri WebKitGTK webview only (no public web deployment), so platform-feature advice is weighed against WebKit support."
+  - "Severity follows severity_scale above. If the user wants MEDIUM included, the orchestrator replans from out_of_scope_findings."
+
+tasks: []
+
+out_of_scope_findings:
+  - id: M1
+    severity: MEDIUM
+    title: "Modal is a custom role=dialog div, not native <dialog> + showModal()"
+    files: [apps/desktop/src/components/dialogs/Dialog.tsx]
+    detail: "It rebuilds inert, the focus trap, Esc and focus return by hand, all of which the browser provides. It works and is tested. Migrating it would touch every dialog and the gamepad nav integration."
+    guides: [dialog, prevent-page-scroll-under-modal-dialog, html]
+  - id: M2
+    severity: MEDIUM
+    title: "FOMOD step: the validation message is not announced or tied to the inactive Next button"
+    files: [apps/desktop/src/components/dialogs/PromptDialog.tsx]
+    detail: "The `problem` <p> has no live region and no aria-describedby from Next (aria-disabled). An AT user who presses Next gets no feedback."
+    guides: [accessible-error-announcement, forms, accessibility]
+  - id: M3
+    severity: MEDIUM
+    title: "Error toasts are announced politely"
+    files: [apps/desktop/src/app/App.tsx, apps/desktop/src/app/toast.ts]
+    detail: "The one aria-live=polite region carries the error tone too. Error/failure toasts would suit an assertive/alert announcement."
+    guides: [persistent-toast-notifications, accessibility]
+  - id: M4
+    severity: MEDIUM
+    title: "ChooseOptional multi-select Choice rows have no labelled group"
+    files: [apps/desktop/src/components/dialogs/PromptDialog.tsx]
+    detail: "role=checkbox buttons sit in a bare <div>. ChooseFile and FomodGroup wrap theirs in a labelled radiogroup/group."
+    guides: [forms, checkbox]
+  - id: L1
+    severity: LOW
+    title: "Custom ARIA widgets on <button> (switch, checkbox, radio) instead of native inputs"
+    files: [apps/desktop/src/components/ui/controls/Toggle.tsx, apps/desktop/src/components/dialogs/PromptDialog.tsx, apps/desktop/src/views/Mods.tsx]
+    detail: "Roles and states are correct. Native <input type=checkbox switch> / styled checkboxes would be the platform default. Kept because aria-disabled must stay focusable for gamepad nav."
+    guides: [switch, checkbox, brand-consistent-forms]
+  - id: L2
+    severity: LOW
+    title: "Custom Select listbox instead of customizable <select>"
+    files: [apps/desktop/src/components/ui/controls/Select.tsx]
+    detail: "base-select is not available in WebKitGTK. The listbox has full keyboard and Esc support."
+    guides: [branded-select-styling, viewport-aware-dropdowns]
+  - id: L3
+    severity: LOW
+    title: "Osk submit button uses native disabled"
+    files: [apps/desktop/src/components/shell/Osk.tsx]
+    detail: "This goes against the project rule (inactive/aria-disabled keeps focus). Focus is only lost if the value is cleared while the button has focus."
+    guides: [accessibility]
+  - id: L4
+    severity: LOW
+    title: "Pagination 'loading' status change is not announced"
+    files: [apps/desktop/src/components/ui/controls/Pagination.tsx]
+    detail: "The page label text changes without a live region (buttons carry aria-busy)."
+    guides: [accessibility]
+  - id: L5
+    severity: LOW
+    title: "Mods tabpanel named by aria-label rather than aria-labelledby to its tab; version label at text-[10.5px]"
+    files: [apps/desktop/src/views/Mods.tsx, apps/desktop/src/app/App.tsx]
+    guides: [tabs, accessibility]
+  - id: L6
+    severity: LOW
+    title: "ManualDownload 'Use this file' is inactive with no stated reason"
+    files: [apps/desktop/src/components/dialogs/PromptDialog.tsx]
+    guides: [forms, required-field-feedback]

@@ -17,7 +17,7 @@ import {
   TrashIcon,
 } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
-import type { ReactNode } from "react";
+import { useCallback, type ReactNode } from "react";
 import { errMsg } from "../app/bridge";
 import { useActiveGame, useMods } from "../app/queries";
 import { useBusy, useDeploy, useDeployDue, useRun } from "../app/run";
@@ -246,8 +246,9 @@ function DeploymentCard({
   game: GameView;
   outOfSync: boolean;
 }) {
-  const run = useRun();
   const deploy = useDeploy();
+  const verify = useVerify();
+  const purge = usePurge();
   const deploying = useBusy("Deploy");
   const purging = useBusy("Purge");
   const verifying = useBusy("Verify");
@@ -289,10 +290,7 @@ function DeploymentCard({
             <Button
               busy={verifying}
               icon={<ShieldCheckIcon aria-hidden size={16} />}
-              onClick={async () => {
-                const r = await run("Verify", () => ipc.verify(), { key: "Verify" });
-                if (r) reportVerify(r);
-              }}
+              onClick={() => void verify()}
             >
               Verify
             </Button>
@@ -301,13 +299,7 @@ function DeploymentCard({
               tone="danger"
               busy={purging}
               icon={<BroomIcon aria-hidden size={16} />}
-              onClick={async () => {
-                const r = await run("Purge", () => ipc.purge(), {
-                  key: "Purge",
-                });
-                // null: declined at the confirmation.
-                if (r) showMsg(r.nothing_deployed ? "info" : "success", purgedMsg(r));
-              }}
+              onClick={() => void purge()}
             >
               Purge
             </Button>
@@ -363,6 +355,27 @@ function DeployTracker({
       </p>
     </div>
   );
+}
+
+/** Verify the active game's deployment and report it (the Deployment card and the Start menu). */
+export function useVerify(): () => Promise<VerifyReport | undefined> {
+  const run = useRun();
+  return useCallback(async () => {
+    const r = await run("Verify", () => ipc.verify(), { key: "Verify" });
+    if (r) reportVerify(r);
+    return r;
+  }, [run]);
+}
+
+/** Purge the active game's deployment (the backend asks for confirmation through a prompt) and report it. */
+export function usePurge(): () => Promise<PurgeReport | null | undefined> {
+  const run = useRun();
+  return useCallback(async () => {
+    const r = await run("Purge", () => ipc.purge(), { key: "Purge" });
+    // null: declined at the confirmation.
+    if (r) showMsg(r.nothing_deployed ? "info" : "success", purgedMsg(r));
+    return r;
+  }, [run]);
 }
 
 export function purgedMsg(r: PurgeReport): ToastMsg {

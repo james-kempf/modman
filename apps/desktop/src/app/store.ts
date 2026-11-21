@@ -251,6 +251,10 @@ export interface UiState {
   addGamePrefill: AddGamePrefill | null;
   setAddGame(open: boolean, prefill?: AddGamePrefill): void;
 
+  /** The controller Start menu (Deploy, Verify, Purge, Quit) is open. */
+  startMenu: boolean;
+  setStartMenu(open: boolean): void;
+
   browse: BrowseSession | null;
   /** Merge into the game's Browse session (a session of another game is replaced). */
   saveBrowse(game: string, patch: Partial<Omit<BrowseSession, "game">>): void;
@@ -284,6 +288,7 @@ const initial = {
   osk: null,
   addGame: false,
   addGamePrefill: null as AddGamePrefill | null,
+  startMenu: false,
   browse: null as BrowseSession | null,
   modsUi: modsUiDefaults(),
 };
@@ -454,6 +459,7 @@ export const useUi = create<UiState>()((set, get) => ({
   closeOsk: () => set({ osk: null }),
 
   setAddGame: (open, prefill) => set({ addGame: open, addGamePrefill: (open && prefill) || null }),
+  setStartMenu: (open) => set({ startMenu: open }),
 
   saveBrowse: (game, patch) =>
     set((s) => ({ browse: { ...(s.browse?.game === game ? s.browse : browseDefaults(game)), ...patch } })),

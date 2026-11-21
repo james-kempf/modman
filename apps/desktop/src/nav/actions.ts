@@ -3,6 +3,7 @@
 
 import { useUi, type ViewId } from "../app/store";
 import { navArbiter, type NavArbiter, type NavInput } from "./arbiter";
+import { isPad } from "./modality";
 import {
   CURRENT_TAB,
   SEARCH_ATTR,
@@ -28,7 +29,9 @@ export type NavAction =
   /** LT/RT: previous/next page of the view's listing (only Browse listens). */
   | { type: "page"; delta: 1 | -1 }
   /** Right stick: scroll the open dialog, else the view, by `dy` pixels (negative = up). */
-  | { type: "scroll"; dy: number };
+  | { type: "scroll"; dy: number }
+  /** Gamepad Start: open the Start menu (controller mode, no dialog open), or close it when it is the top dialog. */
+  | { type: "menu" };
 
 /** Dispatched on the topmost nav scope (a dialog) for "back" and "close"; dialogs close on it. */
 export const BACK_EVENT = "vessel:back";
@@ -38,6 +41,8 @@ export type TabEventDetail = { delta: 1 | -1 };
 /** Dispatched on the document for "page" (detail: { delta }); a view with a pager pages on it. */
 export const PAGE_EVENT = "vessel:page";
 export type PageEventDetail = { delta: 1 | -1 };
+/** Marks the Start menu's content, so Start can tell that dialog apart from any other one on top. */
+export const START_MENU_ATTR = "data-start-menu";
 
 /** The top tab of `view` (scoped: a dialog's tabs may use the same value, e.g. "mods"). */
 const viewTab = (view: ViewId, doc: Document) => doc.querySelector<HTMLElement>(`[${VIEW_TABS_ATTR}] [data-tab='${view}']`);
@@ -133,6 +138,16 @@ export function performNav(action: NavAction, doc: Document = document): void {
       if (navScope(doc) !== doc.body) return;
       doc.dispatchEvent(new CustomEvent<PageEventDetail>(PAGE_EVENT, { detail: { delta: action.delta } }));
       return;
+    case "menu": {
+      const scope = navScope(doc);
+      // Start closes its own menu like B; any other dialog owns the input, so Start does nothing there.
+      if (scope !== doc.body) {
+        if (scope.querySelector(`[${START_MENU_ATTR}]`)) scope.dispatchEvent(new CustomEvent(BACK_EVENT));
+        return;
+      }
+      if (isPad(doc)) useUi.getState().setStartMenu(true);
+      return;
+    }
     case "search":
       // The view's search field; not while a dialog is open (the field is behind it, inert).
       if (navScope(doc) !== doc.body) return;

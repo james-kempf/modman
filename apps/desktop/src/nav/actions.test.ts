@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetUi, useUi } from "../app/store";
-import { BACK_EVENT, PAGE_EVENT, TAB_EVENT, keyToNav, openView, performNav } from "./actions";
+import { BACK_EVENT, PAGE_EVENT, START_MENU_ATTR, TAB_EVENT, keyToNav, openView, performNav } from "./actions";
 import { setPad } from "./modality";
 import { PAD_SKIP_ATTR, recoverFocus } from "./spatial";
 
@@ -185,6 +185,33 @@ describe("performNav", () => {
     const back = vi.fn();
     dlg.addEventListener(BACK_EVENT, back);
     performNav({ type: "close" });
+    expect(back).toHaveBeenCalledOnce();
+  });
+
+  // Fails when Start opens the menu outside controller mode, or not in it.
+  it("menu opens the Start menu only in controller mode", () => {
+    performNav({ type: "menu" });
+    expect(useUi.getState().startMenu).toBe(false);
+    setPad(true);
+    performNav({ type: "menu" });
+    expect(useUi.getState().startMenu).toBe(true);
+  });
+
+  // Fails when Start stops closing its own menu, or closes / stacks over another dialog.
+  it("menu closes the Start menu when it is the top dialog, and leaves other dialogs alone", () => {
+    setPad(true);
+    const dlg = document.createElement("div");
+    dlg.setAttribute("data-nav-scope", "");
+    document.body.appendChild(dlg);
+    const back = vi.fn();
+    dlg.addEventListener(BACK_EVENT, back);
+    performNav({ type: "menu" });
+    expect(back).not.toHaveBeenCalled();
+    expect(useUi.getState().startMenu).toBe(false);
+    const marker = document.createElement("div");
+    marker.setAttribute(START_MENU_ATTR, "");
+    dlg.appendChild(marker);
+    performNav({ type: "menu" });
     expect(back).toHaveBeenCalledOnce();
   });
 

@@ -32,8 +32,8 @@ export const LIST_ROW = "rounded-inner px-3 py-2.5 transition-colors duration-ba
 export const SETTING_CONTROL = "min-w-0 flex-[1_1_14rem]";
 /**
  * The one toast shape, used unchanged by every toast (results and running jobs alike, in the app bar's toast slot):
- * the job-island pill, fitted to the bar. It is exactly as tall as the bar's tallest control (h-control, the
- * same class as Quit), so a toast never grows the bar; py-1 leaves the two text lines 40px, and pl-1.5 keeps the
+ * the job-island pill, fitted to the bar. It is exactly as tall as the bar's row floor (h-control, the
+ * row's auto-rows minimum), so a toast never grows the bar; py-1 leaves the two text lines 40px, and pl-1.5 keeps the
  * 36px disc concentric in the 48px pill ((48 - 36) / 2). Inside a slot narrower than @3xs (16rem) the text goes
  * sr-only and the pill closes to a disc-only circle (pr-1.5); the slot is an @container.
  */

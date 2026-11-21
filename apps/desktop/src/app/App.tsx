@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Shell: a two-row top header (row 1: brand, active game, toast slot, account, Quit; row 2: the
+// Shell: a two-row top header (row 1: brand, active game, toast slot, account, the Start-menu hint in
+// controller mode; row 2: the
 // view tabs, LB/RB glyphs at their ends in controller mode), the current view (the Games library
 // first) scrolling in <main> below it; the one toast (results and job progress) in row 1's toast slot. Prompt
-// dialogs and the on-screen keyboard sit on top. Installs keyboard + gamepad nav.
+// dialogs, the controller Start menu and the on-screen keyboard sit on top. Installs keyboard + gamepad nav.
 
 import {
   BooksIcon,
   CompassIcon,
   GameControllerIcon,
   GearSixIcon,
-  PowerIcon,
   PuzzlePieceIcon,
   SquaresFourIcon,
   StackIcon,
@@ -23,6 +23,7 @@ import { AddGameHost } from "../components/dialogs/AddGameDialog";
 import { ViewBoundary } from "../components/shell/ErrorBoundary";
 import { OskHost } from "../components/shell/Osk";
 import { PromptHost } from "../components/dialogs/PromptDialog";
+import { StartMenuHost } from "../components/dialogs/StartMenu";
 import { LoaderConsentHost } from "../components/loaders/LoaderConsent";
 import { Notice, PadGlyph, TOAST_CLOSE_MS, Tabs, cx, type TabItem } from "../components/ui";
 import * as ipc from "../ipc/commands";
@@ -125,6 +126,7 @@ export function App() {
           </main>
         </div>
         <AddGameHost />
+        <StartMenuHost />
       </div>
       <PromptHost />
       <LoaderConsentHost />
@@ -149,35 +151,32 @@ function Brand() {
 /**
  * The app header, above (not in) the scrolling <main>, so it never scrolls away. Row 1: brand, the
  * active game (picked in the Games view; plain text, the Games tab is the way to switch), the toast slot
- * (the only progress indicator: running jobs show there live), the Nexus account, Quit. Row 2: the view tabs. Deploying is done from the
- * Overview's Deployment card.
+ * (the only progress indicator: running jobs show there live), the Nexus account, and in controller mode the hint that Start opens the menu (Deploy, Verify, Purge,
+ * Quit; keyboard/mouse users close the window instead). Row 2: the view tabs. Deploying is done from the
+ * Overview's Deployment card or the Start menu.
  */
 function TopBar() {
   return (
     // The side padding is on the header, so row 1 and the view tabs share one inset.
     // Row 1 is a grid so nothing overlaps: the game column shrinks (truncating the name) and the toast slot
     // takes the free space between it and the account (its 1fr column stays even when the slot is empty), never
-    // less than one control width (48px: a disc-only toast). Toasts are h-control like Quit, so row 1 has one
-    // height with or without a toast, at every width.
+    // less than one control width (48px: a disc-only toast). Toasts are h-control and the row is at least
+    // h-control tall (auto-rows), so row 1 has one height with or without a toast, at every width.
     <header aria-label="App" className="shrink-0 border-b border-white/5 bg-ink px-6 lg:px-10">
-      <div className="grid grid-cols-[auto_auto_minmax(0,max-content)_minmax(var(--spacing-control),1fr)_auto_auto] items-center gap-x-4 gap-y-2 pt-4 pb-2 lg:gap-x-6">
+      <div className="grid grid-cols-[auto_auto_minmax(0,max-content)_minmax(var(--spacing-control),1fr)_auto_auto] auto-rows-[minmax(var(--spacing-control),auto)] items-center gap-x-4 gap-y-2 pt-4 pb-2 lg:gap-x-6">
         <Brand />
         <span aria-hidden className="h-8 w-px shrink-0 bg-hairline" />
         <GameContext />
         <ToastSlot />
-        {/* Fixed columns: account and Quit always end the row. */}
+        {/* Fixed columns: the account and the Start hint always end the row. */}
         <div className="col-start-5 flex min-w-0 justify-end">
           <AccountChip />
         </div>
-        <button
-          type="button"
-          onClick={() => void ipc.quitApp()}
-          // h-control: the bar's one height token, shared with the toast pill (TOAST_SHELL), so their edges match.
-          className="col-start-6 inline-flex h-control shrink-0 items-center gap-2 rounded-pill px-4 text-body text-zinc-400 transition-colors duration-150"
-        >
-          <PowerIcon aria-hidden size={20} />
-          <span>Quit</span>
-        </button>
+        {/* Controller mode only (pad:), like the LB/RB glyphs: not a control, gamepad Start opens the menu. */}
+        <p data-start-hint className="col-start-6 hidden h-control shrink-0 items-center gap-2 text-label text-zinc-400 pad:inline-flex">
+          <PadGlyph>Start</PadGlyph>
+          <span>Menu</span>
+        </p>
       </div>
       <ViewTabs />
     </header>

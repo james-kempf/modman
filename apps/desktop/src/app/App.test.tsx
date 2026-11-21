@@ -86,7 +86,8 @@ describe("keyboard-only navigation", () => {
     const { renderApp } = await setup();
     renderApp();
     const list = viewTabs();
-    const glyphs = Array.from(screen.getByRole("banner", { name: "App" }).querySelectorAll("kbd"));
+    // The tab bar's glyphs (the Start hint in row 1 has its own test).
+    const glyphs = Array.from(list.closest("[data-view-tabs]")!.querySelectorAll("kbd"));
     expect(glyphs.map((g) => g.textContent)).toEqual(["LB", "RB"]);
     const [lb, rb] = glyphs;
     expect(lb.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -273,10 +274,10 @@ describe("toast slot in the app bar", () => {
     const toast = within(slot()).getByRole("status");
     expect(toast).toHaveTextContent("Deployed3 mods");
     expect(slot()).toHaveAttribute("aria-live", "polite");
-    const quit = within(bar()).getByRole("button", { name: "Quit" });
-    // Document order = grid order at md and up: game, slot, account, Quit.
+    const hint = bar().querySelector<HTMLElement>("[data-start-hint]")!;
+    // Document order = grid order at md and up: game, slot, account, Start hint.
     expect(name.compareDocumentPosition(slot()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(slot().compareDocumentPosition(quit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(slot().compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(slot().parentElement!.className).toMatch(/\bjustify-center\b/);
   });
 
@@ -379,8 +380,8 @@ describe("toast slot in the app bar", () => {
     expect(withJob).toBe(empty);
     // No responsive rule moves the slot out of row 1.
     expect(cell().className).not.toMatch(/row-start|col-span|max-md:|hidden/);
-    // The pill is exactly Quit's height (the same h-control class), so the row height cannot change.
-    const quit = within(bar()).getByRole("button", { name: "Quit" });
+    // The pill is exactly the row's floor (h-control), so the row height cannot change.
+    const hint = bar().querySelector<HTMLElement>("[data-start-hint]")!;
     for (const p of [noticePill, jobPill]) {
       expect(p.split(" ")).toContain("h-control");
       expect(p).not.toMatch(/\bmin-h-/);
@@ -389,27 +390,28 @@ describe("toast slot in the app bar", () => {
     // pill's @max-3xs disc-only rule reads.
     expect(row().className).toContain("minmax(var(--spacing-control),1fr)");
     expect(cell().className.split(" ")).toContain("@container");
-    expect(quit.className).toMatch(/\bcol-start-6\b/);
+    expect(hint.className).toMatch(/\bcol-start-6\b/);
   });
 
-  // Fails when the toast pill and Quit stop sharing one height class, or stop being centred on the same row
-  // line (their top and bottom edges would no longer match).
-  it("aligns the pill with Quit: same height class, both centred in row 1", async () => {
+  // Fails when the toast pill stops matching row 1's height floor (a toast would grow or shrink the bar now that
+  // no Quit button holds the row at h-control), or stops being centred on the row line.
+  it("aligns the pill with row 1: the row's h-control floor, centred", async () => {
     const { renderApp } = await setup();
     renderApp();
     act(() => useUi.getState().showToast("info", "hello"));
     const row = bar().firstElementChild as HTMLElement;
-    const quit = within(bar()).getByRole("button", { name: "Quit" });
+    const hint = bar().querySelector<HTMLElement>("[data-start-hint]")!;
     const pill = within(slot()).getByRole("status");
     const height = (el: HTMLElement) => el.className.split(" ").filter((c) => /^(min-|max-)?h-/.test(c));
-    expect(height(quit)).toEqual(["h-control"]);
+    expect(row.className.split(" ")).toContain("auto-rows-[minmax(var(--spacing-control),auto)]");
+    expect(height(hint)).toEqual(["h-control"]);
     expect(height(pill)).toEqual(["h-control"]);
-    // One row, centred: Quit and the slot cell are both direct grid items of row 1, with no self-alignment.
+    // One row, centred: the hint and the slot cell are both direct grid items of row 1, with no self-alignment.
     expect(row.className.split(" ")).toContain("items-center");
-    expect(quit.parentElement).toBe(row);
+    expect(hint.parentElement).toBe(row);
     const cell = slot().parentElement!;
     expect(cell.parentElement).toBe(row);
-    for (const el of [quit, cell]) expect(el.className).not.toMatch(/\bself-|\brow-start|\bmt-|\bmb-/);
+    for (const el of [hint, cell]) expect(el.className).not.toMatch(/\bself-|\brow-start|\bmt-|\bmb-/);
     // The cell is exactly the pill's height (no padding around it), so the pill's edges are the cell's.
     expect(cell.className).not.toMatch(/\bp[ytb]?-/);
   });
@@ -530,6 +532,84 @@ describe("controller mode (html[data-pad])", () => {
     act(() => performNav({ type: "close" }));
     expect(document.activeElement).toBe(before);
     expect(useUi.getState().view).toBe("settings");
+  });
+
+  // Fails when the Quit button comes back, or the Start hint shows outside controller mode / loses its glyph.
+  it("has no Quit button; the Start hint shows only in controller mode", async () => {
+    const { renderApp } = await setup();
+    renderApp();
+    await heading("Games");
+    expect(screen.queryByRole("button", { name: "Quit" })).toBeNull();
+    const hint = screen.getByRole("banner", { name: "App" }).querySelector<HTMLElement>("[data-start-hint]")!;
+    expect(hint).toHaveTextContent("StartMenu");
+    expect(hint.querySelector("kbd")).toHaveTextContent("Start");
+    // Hidden by default, shown by the pad: variant (html[data-pad]).
+    expect(hint.className.split(" ")).toEqual(expect.arrayContaining(["hidden", "pad:inline-flex"]));
+  });
+
+  // Fails when Start stops opening the menu, the options change order, focus does not start in it or come
+  // back on close, or Start / B stop closing it.
+  it("Start opens the menu (Deploy, Verify, Purge, Quit); Start and B close it and restore focus", async () => {
+    const { renderApp } = await setup();
+    renderApp();
+    await heading("Games");
+    act(() => setPad(true));
+    await waitFor(() => expect(focusables(screen.getByRole("main")).length).toBeGreaterThan(0));
+    const opener = focusables(screen.getByRole("main"))[0];
+    act(() => opener.focus());
+    act(() => performNav({ type: "menu" }));
+    const dlg = await screen.findByRole("dialog", { name: "Menu" });
+    expect(within(dlg).getAllByRole("button").map((b) => b.textContent)).toEqual(["Deploy", "Verify", "Purge", "Quit"]);
+    expect(document.activeElement).toBe(within(dlg).getByRole("button", { name: "Deploy" }));
+    // D-pad moves within the menu.
+    act(() => performNav({ type: "move", dir: "down" }));
+    expect(document.activeElement).toBe(within(dlg).getByRole("button", { name: "Verify" }));
+    act(() => performNav({ type: "menu" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(opener));
+    act(() => performNav({ type: "menu" }));
+    await screen.findByRole("dialog", { name: "Menu" });
+    act(() => performNav({ type: "close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(opener));
+  });
+
+  // Fails when a menu option stops calling the existing command (or Purge stops going through the backend's
+  // confirmation prompt, i.e. gains a confirm of its own), or the menu stays open over the action.
+  it("menu options run the existing deploy, verify, purge and quit commands", async () => {
+    const { renderApp, t } = await setup({
+      deploy: () => deployReport(),
+      verify: () => ({ intact: 3, issues: [], interrupted: false }),
+      purge: () => null,
+      quit_app: () => undefined,
+    });
+    renderApp();
+    await heading("Games");
+    act(() => setPad(true));
+    const pick = async (name: string) => {
+      act(() => performNav({ type: "menu" }));
+      const dlg = await screen.findByRole("dialog", { name: "Menu" });
+      const b = within(dlg).getByRole("button", { name });
+      await waitFor(() => expect(b).not.toHaveAttribute("aria-disabled"));
+      act(() => b.focus());
+      act(() => performNav({ type: "select" }));
+    };
+    for (const [name, cmd] of [["Deploy", "deploy"], ["Verify", "verify"], ["Purge", "purge"]] as const) {
+      await pick(name);
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      await waitFor(() => expect(t.callsOf(cmd)).toHaveLength(1));
+    }
+    await pick("Quit");
+    await waitFor(() => expect(t.callsOf("quit_app")).toHaveLength(1));
+  });
+
+  // Fails when Start opens the menu outside controller mode (keyboard/mouse keep the window's close button).
+  it("Start does nothing outside controller mode", async () => {
+    const { renderApp } = await setup();
+    renderApp();
+    await heading("Games");
+    act(() => performNav({ type: "menu" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   // Fails when the Mods sub-tabs (controllerFocusable) drop out with the view bar in controller mode.
