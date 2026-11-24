@@ -273,6 +273,15 @@
   #root {
     height: 100%;
   }
+  /*
+   * Scale with the display: every size is rem, so the root font size is the
+   * one zoom. 16px at the 1280x800 built-in screen (the floor), growing with
+   * whichever axis limits the window (docked 1080p -> 21.6px, 4K -> 43px).
+   * Aspect ratio needs no code: the layout is fluid, only the scale is bound.
+   */
+  html {
+    font-size: max(16px, min(1.25vw, 2vh));
+  }
   body {
     @apply bg-ink font-sans text-zinc-200 antialiased;
     font-feature-settings: "ss01", "cv11";
